@@ -54,13 +54,13 @@ public class Searcher {
 
             // QueryParser with fields
             Map<String, Float> fields = new HashMap<>();
-            fields.put("title", 1.0f);
+            fields.put("title", 2.0f);
             fields.put("abstract", 1.0f);
             SimpleQueryParser parser = new SimpleQueryParser(ANALYZER, fields);
 
             for (QueryDoc q : queries) {
                 Query query = parser.parse(QueryParser.escape(q.text));
-                TopDocs topDocs = searcher.search(query, 20);
+                TopDocs topDocs = searcher.search(query, 50);
 
                 List<String> topIds = new ArrayList<>();
                 for (ScoreDoc sd : topDocs.scoreDocs) {

@@ -1,5 +1,7 @@
 package unipd.se;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import unipd.se.model.Paper;
 import unipd.se.model.QueryDoc;
 import org.apache.lucene.store.Directory;
@@ -51,9 +53,18 @@ public class Main {
                 System.out.println();
             }
 
+            // Build configuration info
+            ObjectMapper mapper = new ObjectMapper();
+            ObjectNode config = mapper.createObjectNode();
+            config.put("analyzer", "StandardAnalyzer");
+            config.put("query_parser", "SimpleQueryParser");
+            config.put("top_n", 50);
+            config.put("title_boost", 2.0);
+            config.put("similarity", "BM25");
+            config.putPOJO("fields", new String[]{"title","abstract"});
 
-            // 5. Evaluate results
-            Evaluator.evaluate(results, queries);
+            // Evaluate and save to JSON
+            Evaluator.evaluate(results, queries, config, "results/evaluation_results.json");
 
         } catch (Exception e) {
             System.err.println("Error running IR pipeline: " + e.getMessage());
