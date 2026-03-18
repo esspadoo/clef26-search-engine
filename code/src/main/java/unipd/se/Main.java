@@ -61,8 +61,8 @@ public class Main {
             ObjectMapper mapper = new ObjectMapper();
             ObjectNode config = mapper.createObjectNode();
             config.put("analyzer", "MyCustomAnalyzer");
-            config.put("query_parser", "SimpleQueryParser");
-            config.put("top_n", 50);
+            config.put("query_parser", "SBERT");
+            config.put("top_n", 100);
             config.put("title_boost", 2.0);
             config.put("similarity", "BM25");
             config.putPOJO("fields", new String[]{"title","abstract"});

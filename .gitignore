@@ -71,5 +71,11 @@ tomcat-logs/
 # OSX
 .DS_Store
 
-data/
+# Ignore everything in data folder
+data/*
+
+# But do NOT ignore these specific files
+!/data/collection_data.json
+!/data/expanded_queries.json
+
 index/

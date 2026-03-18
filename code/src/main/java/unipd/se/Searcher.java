@@ -55,13 +55,13 @@ public class Searcher {
 
             // QueryParser with fields
             Map<String, Float> fields = new HashMap<>();
-            fields.put("title", 2.0f);
+            fields.put("title", 3.0f);
             fields.put("abstract", 1.0f);
             SimpleQueryParser parser = new SimpleQueryParser(ANALYZER, fields);
 
             for (QueryDoc q : queries) {
                 Query query = parser.parse(QueryParser.escape(q.text));
-                TopDocs topDocs = searcher.search(query, 50);
+                TopDocs topDocs = searcher.search(query, 100);
 
                 List<String> topIds = new ArrayList<>();
                 for (ScoreDoc sd : topDocs.scoreDocs) {
@@ -80,7 +80,7 @@ public class Searcher {
     public static Map<String, List<String>> searchExpanded(
             Directory dir,
             List<ExpandedQueryDoc> queries
-    ) throws IOException, ParseException {
+    ) throws IOException {
 
         Map<String, List<String>> results = new HashMap<>();
 
@@ -93,13 +93,13 @@ public class Searcher {
 
             // QueryParser with fields
             Map<String, Float> fields = new HashMap<>();
-            fields.put("title", 2.0f);
+            fields.put("title", 3.0f);
             fields.put("abstract", 1.0f);
             SimpleQueryParser parser = new SimpleQueryParser(ANALYZER, fields);
 
             for (ExpandedQueryDoc q : queries) {
                 Query query = parser.parse(QueryParser.escape(q.expanded));
-                TopDocs topDocs = searcher.search(query, 50);
+                TopDocs topDocs = searcher.search(query, 100);
 
                 List<String> topIds = new ArrayList<>();
                 for (ScoreDoc sd : topDocs.scoreDocs) {
