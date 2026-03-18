@@ -4,4 +4,5 @@ public class QueryDoc {
     public String index;
     public String text;
     public String pubkey;
+
 }

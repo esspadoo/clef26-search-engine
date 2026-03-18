@@ -3,6 +3,7 @@ package unipd.se;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.queryparser.simple.SimpleQueryParser;
 import org.apache.lucene.search.similarities.BM25Similarity;
+import unipd.se.model.ExpandedQueryDoc;
 import unipd.se.model.QueryDoc;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.index.*;
@@ -23,8 +24,8 @@ import java.util.*;
  */
 public class Searcher {
 
-    /** Shared analyzer for parsing queries. */
-    private static final StandardAnalyzer ANALYZER = new StandardAnalyzer();
+    /** Shared custom analyzer for parsing queries. */
+    private static final MyEnglishAnalyzer ANALYZER = new MyEnglishAnalyzer();
 
     /**
      * Searches the Lucene index for each query and returns the top results.
@@ -60,6 +61,44 @@ public class Searcher {
 
             for (QueryDoc q : queries) {
                 Query query = parser.parse(QueryParser.escape(q.text));
+                TopDocs topDocs = searcher.search(query, 50);
+
+                List<String> topIds = new ArrayList<>();
+                for (ScoreDoc sd : topDocs.scoreDocs) {
+                    Document doc = searcher.doc(sd.doc);
+                    topIds.add(doc.get("pubkey")); // store retrieved paper pubkeys
+                }
+
+                results.put(q.index, topIds); // <- key is query.index
+            }
+        }
+
+        return results;
+    }
+
+
+    public static Map<String, List<String>> searchExpanded(
+            Directory dir,
+            List<ExpandedQueryDoc> queries
+    ) throws IOException, ParseException {
+
+        Map<String, List<String>> results = new HashMap<>();
+
+        // Ensure the reader is closed properly
+        try (IndexReader reader = DirectoryReader.open(dir)) {
+            IndexSearcher searcher = new IndexSearcher(reader);
+
+            // Use BM25 similarity
+            searcher.setSimilarity(new BM25Similarity());
+
+            // QueryParser with fields
+            Map<String, Float> fields = new HashMap<>();
+            fields.put("title", 2.0f);
+            fields.put("abstract", 1.0f);
+            SimpleQueryParser parser = new SimpleQueryParser(ANALYZER, fields);
+
+            for (ExpandedQueryDoc q : queries) {
+                Query query = parser.parse(QueryParser.escape(q.expanded));
                 TopDocs topDocs = searcher.search(query, 50);
 
                 List<String> topIds = new ArrayList<>();

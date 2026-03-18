@@ -1,0 +1,19 @@
+{
+  "config" : {
+    "analyzer" : "MyCustomAnalyzer",
+    "query_parser" : "SimpleQueryParser",
+    "top_n" : 50,
+    "title_boost" : 2.0,
+    "similarity" : "BM25",
+    "fields" : [ "title", "abstract" ]
+  },
+  "metrics" : {
+    "queries" : 14977,
+    "recall@1" : 0.39367029445149226,
+    "recall@5" : 0.5863657608332777,
+    "recall@10" : 0.6321025572544569,
+    "recall@100" : 0.7387994925552513,
+    "mrr" : 0.4842055676601501,
+    "ndcg@10" : 0.5163782903645688
+  }
+}

@@ -2,6 +2,7 @@ package unipd.se;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import unipd.se.model.ExpandedQueryDoc;
 import unipd.se.model.QueryDoc;
 
 import java.io.File;
@@ -38,6 +39,76 @@ public final class Evaluator {
         double mrr = 0.0, ndcgAt10 = 0.0;
 
         for (QueryDoc q : queries) {
+            List<String> ranked = results.get(q.index);  // key = query index
+            String gold = q.pubkey;                      // relevant paper
+
+            int rank = -1;
+            if (ranked != null) {
+                for (int i = 0; i < ranked.size(); i++) {
+                    if (gold.equals(ranked.get(i))) {
+                        rank = i + 1;
+                        break;
+                    }
+                }
+            }
+
+            if (rank == 1) hitAt1++;
+            if (rank > 0 && rank <= 5) hitAt5++;
+            if (rank > 0 && rank <= 10) {
+                hitAt10++;
+                ndcgAt10 += 1.0 / log2(rank + 1); // simple DCG for single relevant
+            }
+            if (rank > 0 && rank <= 100) hitAt100++;
+            if (rank > 0) mrr += 1.0 / rank;
+        }
+
+        double denom = total == 0 ? 1.0 : total;
+
+        // Print to console
+        System.out.println("Queries: " + total);
+        System.out.printf("Recall@1: %.4f%n", hitAt1 / denom);
+        System.out.printf("Recall@5: %.4f%n", hitAt5 / denom);
+        System.out.printf("Recall@10: %.4f%n", hitAt10 / denom);
+        System.out.printf("Recall@100: %.4f%n", hitAt100 / denom);
+        System.out.printf("MRR: %.4f%n", mrr / denom);
+        System.out.printf("nDCG@10: %.4f%n", ndcgAt10 / denom);
+
+        // Save to JSON file
+        ObjectMapper mapper = new ObjectMapper();
+        ObjectNode root = mapper.createObjectNode();
+
+        // Add configuration
+        root.set("config", config);
+
+        // Add metrics
+        ObjectNode metrics = mapper.createObjectNode();
+        metrics.put("queries", total);
+        metrics.put("recall@1", hitAt1 / denom);
+        metrics.put("recall@5", hitAt5 / denom);
+        metrics.put("recall@10", hitAt10 / denom);
+        metrics.put("recall@100", hitAt100 / denom);
+        metrics.put("mrr", mrr / denom);
+        metrics.put("ndcg@10", ndcgAt10 / denom);
+        root.set("metrics", metrics);
+
+        // Write JSON to file
+        mapper.writerWithDefaultPrettyPrinter().writeValue(new File(outputFilePath), root);
+        System.out.println("Evaluation and results saved to: " + outputFilePath);
+    }
+
+
+    public static void evaluateExpanded(
+            Map<String, List<String>> results,
+            List<ExpandedQueryDoc> queries,
+            ObjectNode config,
+            String outputFilePath
+    ) throws IOException {
+
+        int total = queries.size();
+        int hitAt1 = 0, hitAt5 = 0, hitAt10 = 0, hitAt100 = 0;
+        double mrr = 0.0, ndcgAt10 = 0.0;
+
+        for (ExpandedQueryDoc q : queries) {
             List<String> ranked = results.get(q.index);  // key = query index
             String gold = q.pubkey;                      // relevant paper
 

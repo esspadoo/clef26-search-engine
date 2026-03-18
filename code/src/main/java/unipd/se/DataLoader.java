@@ -1,5 +1,6 @@
 package unipd.se;
 
+import unipd.se.model.ExpandedQueryDoc;
 import unipd.se.model.Paper;
 import unipd.se.model.QueryDoc;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -50,6 +51,21 @@ public class DataLoader {
      */
     public static List<QueryDoc> loadQueries(String path) throws IOException {
         QueryDoc[] queries = MAPPER.readValue(new File(path), QueryDoc[].class);
+        return Arrays.asList(queries);
+    }
+
+    /**
+     * Loads a list of {@link QueryDoc} objects from a JSON file.
+     * <p>
+     * The input file is expected to contain a JSON array where each element
+     * represents a query document.
+     *
+     * @param path the file system path to the JSON file containing queries
+     * @return a list of {@link QueryDoc} objects
+     * @throws IOException if an error occurs while reading or parsing the file
+     */
+    public static List<ExpandedQueryDoc> loadExpandedQueries(String path) throws IOException {
+        ExpandedQueryDoc[] queries = MAPPER.readValue(new File(path), ExpandedQueryDoc[].class);
         return Arrays.asList(queries);
     }
 }

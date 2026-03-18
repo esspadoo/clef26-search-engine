@@ -2,10 +2,12 @@ package unipd.se;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import unipd.se.model.ExpandedQueryDoc;
 import unipd.se.model.Paper;
 import unipd.se.model.QueryDoc;
 import org.apache.lucene.store.Directory;
 
+import java.io.File;
 import java.util.List;
 import java.util.Map;
 
@@ -31,20 +33,22 @@ public class Main {
      *             args[1] = path to queries JSON (default: data/en_dev.json)
      */
     public static void main(String[] args) {
-
+        System.out.println("Starting retrieval");
         String papersPath = args.length > 0 ? args[0] : "code/data/collection_data.json";
-        String queriesPath = args.length > 1 ? args[1] : "code/data/en_train.json";
+        String queriesPath = args.length > 1 ? args[1] : "code/data/expanded_queries.json";
 
         try {
             // 1. Load data
             List<Paper> papers = DataLoader.loadPapers(papersPath);
-            List<QueryDoc> queries = DataLoader.loadQueries(queriesPath);
+            //List<QueryDoc> queries = DataLoader.loadQueries(queriesPath);
+            List<ExpandedQueryDoc> queries = DataLoader.loadExpandedQueries(queriesPath);
 
             // 2. Build index (persistent)
             Directory index = Indexer.buildIndex(papers);
 
             // 3. Search
-            Map<String, List<String>> results = Searcher.search(index, queries);
+            //Map<String, List<String>> results = Searcher.search(index, queries);
+            Map<String, List<String>> results = Searcher.searchExpanded(index, queries);
 
             // 4. Print results
             for (Map.Entry<String, List<String>> entry : results.entrySet()) {
@@ -56,7 +60,7 @@ public class Main {
             // Build configuration info
             ObjectMapper mapper = new ObjectMapper();
             ObjectNode config = mapper.createObjectNode();
-            config.put("analyzer", "StandardAnalyzer");
+            config.put("analyzer", "MyCustomAnalyzer");
             config.put("query_parser", "SimpleQueryParser");
             config.put("top_n", 50);
             config.put("title_boost", 2.0);
@@ -64,7 +68,20 @@ public class Main {
             config.putPOJO("fields", new String[]{"title","abstract"});
 
             // Evaluate and save to JSON
-            Evaluator.evaluate(results, queries, config, "results/evaluation_results.json");
+            String basePath = "results/evaluation_results";
+            String extension = ".json";
+
+            File file = new File(basePath + extension);
+            int counter = 1;
+
+            // Keep incrementing until we find a filename that doesn't exist
+            while (file.exists()) {
+                file = new File(basePath + "_" + counter + extension);
+                counter++;
+            }
+
+            //Evaluator.evaluate(results, queries, config, file.getPath());
+            Evaluator.evaluateExpanded(results, queries, config, file.getPath());
 
         } catch (Exception e) {
             System.err.println("Error running IR pipeline: " + e.getMessage());

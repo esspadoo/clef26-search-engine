@@ -29,8 +29,8 @@ import java.util.List;
  */
 public class Indexer {
 
-    /** Shared analyzer for tokenizing text fields. */
-    private static final StandardAnalyzer ANALYZER = new StandardAnalyzer();
+    /** Shared custom analyzer for tokenizing text fields. */
+    private static final MyEnglishAnalyzer ANALYZER = new MyEnglishAnalyzer();
 
     /**
      * Builds a persistent Lucene index from the given list of {@link Paper} objects.
