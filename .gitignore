@@ -33,7 +33,6 @@
 
 # LaTeX files
 *.aux
-*.out
 *.log
 *.toc
 *.synctex.gz
@@ -71,3 +70,5 @@ tomcat-logs/
 
 # OSX
 .DS_Store
+
+data/
