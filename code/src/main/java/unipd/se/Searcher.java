@@ -2,6 +2,7 @@ package unipd.se;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.queryparser.simple.SimpleQueryParser;
+import org.apache.lucene.search.similarities.BM25Similarity;
 import unipd.se.model.QueryDoc;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.index.*;
@@ -48,6 +49,10 @@ public class Searcher {
         try (IndexReader reader = DirectoryReader.open(dir)) {
             IndexSearcher searcher = new IndexSearcher(reader);
 
+            // Use BM25 similarity
+            searcher.setSimilarity(new BM25Similarity());
+
+            // QueryParser with fields
             Map<String, Float> fields = new HashMap<>();
             fields.put("title", 1.0f);
             fields.put("abstract", 1.0f);
@@ -55,17 +60,15 @@ public class Searcher {
 
             for (QueryDoc q : queries) {
                 Query query = parser.parse(QueryParser.escape(q.text));
-
-                // Retrieve top 10 results
-                TopDocs topDocs = searcher.search(query, 10);
+                TopDocs topDocs = searcher.search(query, 20);
 
                 List<String> topIds = new ArrayList<>();
                 for (ScoreDoc sd : topDocs.scoreDocs) {
                     Document doc = searcher.doc(sd.doc);
-                    topIds.add(doc.get("pubkey")); // match field used in Indexer
+                    topIds.add(doc.get("pubkey")); // store retrieved paper pubkeys
                 }
 
-                results.put(q.pubkey, topIds);
+                results.put(q.index, topIds); // <- key is query.index
             }
         }
 

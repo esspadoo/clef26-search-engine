@@ -51,6 +51,10 @@ public class Main {
                 System.out.println();
             }
 
+
+            // 5. Evaluate results
+            Evaluator.evaluate(results, queries);
+
         } catch (Exception e) {
             System.err.println("Error running IR pipeline: " + e.getMessage());
             e.printStackTrace();
