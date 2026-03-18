@@ -1,6 +1,7 @@
 package unipd.se;
 
 import org.apache.lucene.document.Document;
+import org.apache.lucene.queryparser.simple.SimpleQueryParser;
 import unipd.se.model.QueryDoc;
 import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.index.*;
@@ -47,7 +48,10 @@ public class Searcher {
         try (IndexReader reader = DirectoryReader.open(dir)) {
             IndexSearcher searcher = new IndexSearcher(reader);
 
-            QueryParser parser = new QueryParser("abstract", ANALYZER);
+            Map<String, Float> fields = new HashMap<>();
+            fields.put("title", 1.0f);
+            fields.put("abstract", 1.0f);
+            SimpleQueryParser parser = new SimpleQueryParser(ANALYZER, fields);
 
             for (QueryDoc q : queries) {
                 Query query = parser.parse(QueryParser.escape(q.text));
