@@ -9,10 +9,6 @@ public class QueryDoc implements SearchQuery {
         return index;
     }
 
-    public String getText() {
-        return text;
-    }
-
     public String getPubkey() {
         return pubkey;
     }
