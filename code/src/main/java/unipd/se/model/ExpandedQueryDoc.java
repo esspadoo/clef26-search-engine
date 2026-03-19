@@ -7,4 +7,29 @@ public class ExpandedQueryDoc {
     public String normalized;
     public String expanded;
     public String pubkey;
+
+    public String getIndex() {
+        return index;
+    }
+
+    public String getOriginal() {
+        return original;
+    }
+
+    public String getNormalized() {
+        return normalized;
+    }
+
+    public String getExpanded() {
+        return expanded;
+    }
+
+    public String getPubkey() {
+        return pubkey;
+    }
+
+    @Override
+    public String getSearchText() {
+        return expanded;
+    }
 }
