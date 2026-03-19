@@ -5,7 +5,7 @@ import org.apache.lucene.queryparser.simple.SimpleQueryParser;
 import org.apache.lucene.search.similarities.BM25Similarity;
 import unipd.se.model.ExpandedQueryDoc;
 import unipd.se.model.QueryDoc;
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
+import unipd.se.model.SearchQuery;
 import org.apache.lucene.index.*;
 import org.apache.lucene.queryparser.classic.QueryParser;
 import org.apache.lucene.queryparser.classic.ParseException;
@@ -18,7 +18,7 @@ import java.util.*;
 /**
  * Utility class for performing searches on a Lucene index of papers.
  * <p>
- * Each {@link QueryDoc} is searched against the index, and the top N matching
+ * Each query is searched against the index, and the top N matching
  * papers are returned for each query.
  * </p>
  */
@@ -28,14 +28,11 @@ public class Searcher {
     private static final MyEnglishAnalyzer ANALYZER = new MyEnglishAnalyzer();
 
     /**
-     * Searches the Lucene index for each query and returns the top results.
-     * <p>
-     * Currently, queries are matched against the "abstract" field of each paper.
-     * </p>
+     * Searches the Lucene index for each standard query and returns the top results.
      *
      * @param dir the Lucene {@link Directory} containing the index
      * @param queries the list of {@link QueryDoc} objects to search for
-     * @return a map from query pubkey to a list of top-matching paper pubkeys
+     * @return a map from query index to a list of top-matching paper pubkeys
      * @throws IOException if an I/O error occurs reading the index
      * @throws ParseException if a query cannot be parsed
      */
@@ -43,71 +40,66 @@ public class Searcher {
             Directory dir,
             List<QueryDoc> queries
     ) throws IOException, ParseException {
-
-        Map<String, List<String>> results = new HashMap<>();
-
-        // Ensure the reader is closed properly
-        try (IndexReader reader = DirectoryReader.open(dir)) {
-            IndexSearcher searcher = new IndexSearcher(reader);
-
-            // Use BM25 similarity
-            searcher.setSimilarity(new BM25Similarity());
-
-            // QueryParser with fields
-            Map<String, Float> fields = new HashMap<>();
-            fields.put("title", 2.0f);
-            fields.put("abstract", 1.0f);
-            SimpleQueryParser parser = new SimpleQueryParser(ANALYZER, fields);
-
-            for (QueryDoc q : queries) {
-                Query query = parser.parse(QueryParser.escape(q.text));
-                TopDocs topDocs = searcher.search(query, 100);
-
-                List<String> topIds = new ArrayList<>();
-                for (ScoreDoc sd : topDocs.scoreDocs) {
-                    Document doc = searcher.doc(sd.doc);
-                    topIds.add(doc.get("pubkey")); // store retrieved paper pubkeys
-                }
-
-                results.put(q.index, topIds); // <- key is query.index
-            }
-        }
-
-        return results;
+        return searchInternal(dir, queries, 2.0f);
     }
 
-
+    /**
+     * Searches the Lucene index for each expanded query and returns the top results.
+     *
+     * @param dir the Lucene {@link Directory} containing the index
+     * @param queries the list of {@link ExpandedQueryDoc} objects to search for
+     * @return a map from query index to a list of top-matching paper pubkeys
+     * @throws IOException if an I/O error occurs reading the index
+     * @throws ParseException if a query cannot be parsed
+     */
     public static Map<String, List<String>> searchExpanded(
             Directory dir,
             List<ExpandedQueryDoc> queries
-    ) throws IOException {
+    ) throws IOException, ParseException {
+        return searchInternal(dir, queries, 3.0f);
+    }
+
+    /**
+     * Internal generic search method shared by both standard and expanded queries.
+     *
+     * @param dir the Lucene {@link Directory} containing the index
+     * @param queries the list of queries implementing {@link SearchQuery}
+     * @param titleBoost boost applied to the title field
+     * @param <T> query type implementing {@link SearchQuery}
+     * @return a map from query index to a list of top-matching paper pubkeys
+     * @throws IOException if an I/O error occurs reading the index
+     * @throws ParseException if a query cannot be parsed
+     */
+    private static <T extends SearchQuery> Map<String, List<String>> searchInternal(
+            Directory dir,
+            List<T> queries,
+            float titleBoost
+    ) throws IOException, ParseException {
 
         Map<String, List<String>> results = new HashMap<>();
 
-        // Ensure the reader is closed properly
         try (IndexReader reader = DirectoryReader.open(dir)) {
             IndexSearcher searcher = new IndexSearcher(reader);
 
-            // Use BM25 similarity
             searcher.setSimilarity(new BM25Similarity());
 
-            // QueryParser with fields
             Map<String, Float> fields = new HashMap<>();
-            fields.put("title", 3.0f);
+            fields.put("title", titleBoost);
             fields.put("abstract", 1.0f);
+
             SimpleQueryParser parser = new SimpleQueryParser(ANALYZER, fields);
 
-            for (ExpandedQueryDoc q : queries) {
-                Query query = parser.parse(QueryParser.escape(q.expanded));
+            for (T q : queries) {
+                Query query = parser.parse(QueryParser.escape(q.getSearchText()));
                 TopDocs topDocs = searcher.search(query, 100);
 
                 List<String> topIds = new ArrayList<>();
                 for (ScoreDoc sd : topDocs.scoreDocs) {
                     Document doc = searcher.doc(sd.doc);
-                    topIds.add(doc.get("pubkey")); // store retrieved paper pubkeys
+                    topIds.add(doc.get("pubkey"));
                 }
 
-                results.put(q.index, topIds); // <- key is query.index
+                results.put(q.getIndex(), topIds);
             }
         }
 
