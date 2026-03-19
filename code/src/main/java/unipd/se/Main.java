@@ -40,15 +40,14 @@ public class Main {
         try {
             // 1. Load data
             List<Paper> papers = DataLoader.loadPapers(papersPath);
-            //List<QueryDoc> queries = DataLoader.loadQueries(queriesPath);
-            List<ExpandedQueryDoc> queries = DataLoader.loadExpandedQueries(queriesPath);
+            //List<QueryDoc> queries = DataLoader.loadQueries(queriesPath, QueryDoc[].class);
+            List<ExpandedQueryDoc> queries = DataLoader.loadQueries(queriesPath, ExpandedQueryDoc[].class);
 
             // 2. Build index (persistent)
             Directory index = Indexer.buildIndex(papers);
 
             // 3. Search
-            //Map<String, List<String>> results = Searcher.search(index, queries);
-            Map<String, List<String>> results = Searcher.searchExpanded(index, queries);
+            Map<String, List<String>> results = Searcher.search(index, queries, 1.0f, 100);
 
             // 4. Print results
             for (Map.Entry<String, List<String>> entry : results.entrySet()) {
@@ -63,7 +62,7 @@ public class Main {
             config.put("analyzer", "MyCustomAnalyzer");
             config.put("query_parser", "SBERT");
             config.put("top_n", 100);
-            config.put("title_boost", 2.0);
+            config.put("title_boost", 1.0);
             config.put("similarity", "BM25");
             config.putPOJO("fields", new String[]{"title","abstract"});
 
@@ -80,8 +79,7 @@ public class Main {
                 counter++;
             }
 
-            //Evaluator.evaluate(results, queries, config, file.getPath());
-            Evaluator.evaluateExpanded(results, queries, config, file.getPath());
+            Evaluator.evaluate(results, queries, config, file.getPath());
 
         } catch (Exception e) {
             System.err.println("Error running IR pipeline: " + e.getMessage());

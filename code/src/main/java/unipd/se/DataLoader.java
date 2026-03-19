@@ -1,6 +1,5 @@
 package unipd.se;
 
-import unipd.se.model.ExpandedQueryDoc;
 import unipd.se.model.Paper;
 import unipd.se.model.QueryDoc;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -13,59 +12,40 @@ import java.util.List;
 /**
  * Utility class responsible for loading data from JSON files.
  * <p>
- * This class uses Jackson's {@link ObjectMapper} to deserialize JSON arrays
- * into Java objects representing papers and queries.
+ * Uses Jackson {@link ObjectMapper} to deserialize JSON arrays
+ * into Java objects (papers and queries).
  */
-public class DataLoader {
+public final class DataLoader {
 
-    /**
-     * Shared ObjectMapper instance to avoid repeated instantiation overhead.
-     */
+    /** Shared ObjectMapper instance (thread-safe after configuration). */
     private static final ObjectMapper MAPPER = new ObjectMapper();
+
+    private DataLoader() {}
 
     /**
      * Loads a list of {@link Paper} objects from a JSON file.
-     * <p>
-     * The input file is expected to contain a JSON array where each element
-     * represents a paper.
      *
-     * @param path the file system path to the JSON file containing papers
-     * @return a list of {@link Paper} objects
-     * @throws IOException if an error occurs while reading or parsing the file
+     * @param path path to the JSON file
+     * @return list of papers
+     * @throws IOException if reading/parsing fails
      */
     public static List<Paper> loadPapers(String path) throws IOException {
-        Paper[] papers = MAPPER.readValue(new File(path), Paper[].class);
-        return Arrays.asList(papers);
-    }
-
-
-    /**
-     * Loads a list of {@link QueryDoc} objects from a JSON file.
-     * <p>
-     * The input file is expected to contain a JSON array where each element
-     * represents a query document.
-     *
-     * @param path the file system path to the JSON file containing queries
-     * @return a list of {@link QueryDoc} objects
-     * @throws IOException if an error occurs while reading or parsing the file
-     */
-    public static List<QueryDoc> loadQueries(String path) throws IOException {
-        QueryDoc[] queries = MAPPER.readValue(new File(path), QueryDoc[].class);
-        return Arrays.asList(queries);
+        return Arrays.asList(MAPPER.readValue(new File(path), Paper[].class));
     }
 
     /**
-     * Loads a list of {@link QueryDoc} objects from a JSON file.
+     * Loads a list of queries from a JSON file.
      * <p>
-     * The input file is expected to contain a JSON array where each element
-     * represents a query document.
+     * Works for both {@link QueryDoc} and subclasses (e.g., ExpandedQueryDoc).
      *
-     * @param path the file system path to the JSON file containing queries
-     * @return a list of {@link QueryDoc} objects
-     * @throws IOException if an error occurs while reading or parsing the file
+     * @param path path to the JSON file
+     * @param clazz class type of the query (QueryDoc or subclass)
+     * @param <T> type extending QueryDoc
+     * @return list of queries
+     * @throws IOException if reading/parsing fails
      */
-    public static List<ExpandedQueryDoc> loadExpandedQueries(String path) throws IOException {
-        ExpandedQueryDoc[] queries = MAPPER.readValue(new File(path), ExpandedQueryDoc[].class);
-        return Arrays.asList(queries);
+    public static <T extends QueryDoc> List<T> loadQueries(String path, Class<T[]> clazz)
+            throws IOException {
+        return Arrays.asList(MAPPER.readValue(new File(path), clazz));
     }
 }
