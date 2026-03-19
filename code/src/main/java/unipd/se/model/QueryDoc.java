@@ -1,6 +1,6 @@
 package unipd.se.model;
 
-public class QueryDoc {
+public class QueryDoc implements SearchQuery {
     public String index;
     public String text;
     public String pubkey;

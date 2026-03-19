@@ -1,7 +1,7 @@
 
 package unipd.se.model;
 
-public class ExpandedQueryDoc {
+public class ExpandedQueryDoc implements SearchQuery {
     public String index;
     public String original;
     public String keywords;
