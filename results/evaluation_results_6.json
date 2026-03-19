@@ -1,0 +1,20 @@
+{
+  "config" : {
+    "analyzer" : "MyCustomAnalyzer",
+    "query_parser" : "SBERT",
+    "top_n" : 100,
+    "title_boost" : 2.0,
+    "similarity" : "BM25",
+    "fields" : [ "title", "abstract" ]
+  },
+  "metrics" : {
+    "queries" : 14977,
+    "recall@1" : 0.3763103425252053,
+    "recall@5" : 0.5423649596047273,
+    "recall@10" : 0.5905722107231087,
+    "recall@100" : 0.7539560659678173,
+    "mrr" : 0.45576686639308184,
+    "map" : 0.45576686639308184,
+    "ndcg@10" : 0.4837231818694614
+  }
+}
