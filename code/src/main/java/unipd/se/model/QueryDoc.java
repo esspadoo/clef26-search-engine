@@ -5,10 +5,12 @@ public class QueryDoc implements SearchQuery {
     public String text;
     public String pubkey;
 
+    @Override
     public String getIndex() {
         return index;
     }
 
+    @Override
     public String getPubkey() {
         return pubkey;
     }
