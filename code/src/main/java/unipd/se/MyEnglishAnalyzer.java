@@ -6,7 +6,8 @@ import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.analysis.core.LowerCaseFilter;
 import org.apache.lucene.analysis.core.StopFilter;
-import org.apache.lucene.analysis.en.PorterStemFilter;
+import org.tartarus.snowball.ext.EnglishStemmer; // Snowball stemmer
+import org.apache.lucene.analysis.snowball.SnowballFilter;
 import org.apache.lucene.analysis.en.EnglishPossessiveFilter;
 import org.apache.lucene.analysis.miscellaneous.ASCIIFoldingFilter;
 import org.apache.lucene.analysis.pattern.PatternReplaceFilter;
@@ -22,7 +23,7 @@ import java.util.regex.Pattern;
  * - Removes '#' from hashtags (#anxiety → anxiety)
  * - Lowercases text
  * - Removes stopwords
- * - Applies stemming (Porter stemmer)
+ * - Applies stemming (Snowball stemmer)
  * - Normalizes accents
  */
 public class MyEnglishAnalyzer extends Analyzer {
@@ -55,7 +56,7 @@ public class MyEnglishAnalyzer extends Analyzer {
         stream = new StopFilter(stream, EnglishAnalyzer.ENGLISH_STOP_WORDS_SET);
 
         // Apply stemming
-        stream = new PorterStemFilter(stream);
+        stream = new SnowballFilter(stream, new EnglishStemmer());
 
         return new TokenStreamComponents(tokenizer, stream);
     }

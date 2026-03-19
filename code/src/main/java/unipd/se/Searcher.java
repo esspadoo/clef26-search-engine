@@ -55,7 +55,7 @@ public class Searcher {
 
             // QueryParser with fields
             Map<String, Float> fields = new HashMap<>();
-            fields.put("title", 3.0f);
+            fields.put("title", 2.0f);
             fields.put("abstract", 1.0f);
             SimpleQueryParser parser = new SimpleQueryParser(ANALYZER, fields);
 
