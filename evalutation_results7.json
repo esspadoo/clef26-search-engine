@@ -1,0 +1,22 @@
+{
+  "config" : {
+    "analyzer" : "MyCustomAnalyzer",
+    "query_parser" : "SBERT",
+    "top_n" : 100,
+    "title_boost" : 1.0,
+    "similarity" : "BM25",
+    "fields" : [ "title", "abstract" ],
+    "notes" : "Giancarlo è W5vIGEgY3VpIHBpYWNjaW9ubyBnbGkgdW9taW5p, questo è fatto con CUDA ma non lo capisce dal commit."
+  },
+  "metrics" : {
+    "queries" : 14977,
+    "recall@1" : 0.35708085731454897,
+    "recall@5" : 0.5633304400080122,
+    "recall@10" : 0.6163450624290578,
+    "recall@100" : 0.7727849369032517,
+    "mrr" : 0.45107733720565046,
+    "map" : 0.45107733720565046,
+    "ndcg@10" : 0.48640039724696754
+  }
+}
+
