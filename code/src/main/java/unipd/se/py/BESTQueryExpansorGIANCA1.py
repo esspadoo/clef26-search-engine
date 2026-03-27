@@ -7,7 +7,7 @@ from sentence_transformers import SentenceTransformer, util
 from transformers import AutoTokenizer
 
 # -----------------------------
-# Load models
+# Load models 
 # -----------------------------
 print("Loading spaCy model...")
 nlp = spacy.load("en_core_web_sm")
