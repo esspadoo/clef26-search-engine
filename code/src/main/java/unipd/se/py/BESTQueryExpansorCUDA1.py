@@ -19,6 +19,7 @@ DEVICE            = "cuda" if torch.cuda.is_available() else "cpu"
 CORPUS_BATCH_SIZE = 512
 QUERY_BATCH_SIZE  = 64
 
+# FIX 3: ridotti rispetto alla run3 (15, 20) → meno rumore BM25
 TOP_K_DOCS        = 5    # stesso valore della run1 (migliore recall@1)
 TOP_K_TERMS       = 15   # termini di espansione max
 
@@ -222,7 +223,7 @@ for i, q in enumerate(tqdm(queries, desc="Expanding")):
 # ──────────────────────────────────────────────────────────────
 # Save
 # ──────────────────────────────────────────────────────────────
-output_path = f"{DATA_BASE}/expanded_queries_3.json"
+output_path = f"{DATA_BASE}/expanded_queries_4.json"
 with open(output_path, "w", encoding="utf-8") as f:
     json.dump(expanded_queries, f, indent=2, ensure_ascii=False)
 
