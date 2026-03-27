@@ -1,5 +1,5 @@
 """
-Reranker.py — Cross-Encoder re-ranking dei risultati BM25
+Reranker.py — cross-Encoder re-ranking dei risultati BM25
 
 Legge:
   - data/expanded_queries_4.json   (query originali, per avere il testo originale)
