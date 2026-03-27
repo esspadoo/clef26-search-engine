@@ -1,0 +1,41 @@
+//run fatta con QueryExpansorGIANCA.py e BESTReranker1.py. Quindi con expanded_queries_GIANCA.json
+
+{
+  "config" : {
+    "analyzer" : "MyCustomAnalyzer",
+    "query_parser" : "SBERT",
+    "top_n" : 100,
+    "title_boost" : 1.0,
+    "similarity" : "BM25",
+    "reranker" : "cross-encoder/ms-marco-MiniLM-L-6-v2",
+    "fields" : [ "title", "abstract" ]
+  },
+  "metrics" : {
+    "queries" : 14977,
+    "recall@1" : 0.46257594978967753,
+    "recall@5" : 0.5933097416037925,
+    "recall@10" : 0.6378446951993056,
+    "recall@100" : 0.7643720371235895,
+    "precision@1" : 0.46257594978967753,
+    "precision@5" : 0.11866194832077633,
+    "precision@10" : 0.06378446951994049,
+    "f1@10" : 0.11597176276352653,
+    "mrr" : 0.5245167097510882,
+    "map" : 0.5245167097510882,
+    "ndcg@5" : 0.5334460586932499,
+    "ndcg@10" : 0.547866456052067,
+    "ndcg@100" : 0.5742880944064304,
+    "per_query_stats" : {
+      "mrr" : {
+        "min" : 0.0,
+        "median" : 0.5,
+        "max" : 1.0
+      },
+      "ndcg@10" : {
+        "min" : 0.0,
+        "median" : 0.6309297535714574,
+        "max" : 1.0
+      }
+    }
+  }
+}
