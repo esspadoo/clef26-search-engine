@@ -13,7 +13,7 @@ import java.util.*;
  * Computes:
  *   - Recall@k        (k = 1, 5, 10, 100)
  *   - Precision@k     (k = 1, 5, 10)
- *   - F1@k            (k = 10)
+ *   - F1@k            (k = 1)
  *   - MRR
  *   - MAP
  *   - nDCG@k          (k = 5, 10, 100)
@@ -139,13 +139,13 @@ public final class Evaluator {
         double denom = total == 0 ? 1.0 : total;
 
         // -------------------------------------------------------
-        // F1@10: it evaluates the balance between precision and recall for these top results,
+        // F1@1: it evaluates the balance between precision and recall for these top results,
         // helping to assess the effectiveness of the search algorithm in retrieving relevant documents
         // -------------------------------------------------------
-        double avgRecall10 = hitAt10 / denom;
-        double avgPrec10   = precAt10 / denom;
-        double f1At10 = (avgPrec10 + avgRecall10 > 0)
-                ? 2.0 * avgPrec10 * avgRecall10 / (avgPrec10 + avgRecall10)
+        double avgRecall1 = hitAt1 / denom;
+        double avgPrec1   = precAt1 / denom;
+        double f1At1 = (avgPrec1 + avgRecall1 > 0)
+                ? 2.0 * avgPrec1 * avgRecall1 / (avgPrec1 + avgRecall1)
                 : 0.0;
 
         // -------------------------------------------------------
@@ -171,7 +171,7 @@ public final class Evaluator {
         System.out.printf("P@1:        %.4f%n", precAt1  / denom);
         System.out.printf("P@5:        %.4f%n", precAt5  / denom);
         System.out.printf("P@10:       %.4f%n", precAt10 / denom);
-        System.out.printf("F1@10:      %.4f%n", f1At10);
+        System.out.printf("F1@1:      %.4f%n", f1At1);
         System.out.printf("MRR:        %.4f  (min=%.4f, median=%.4f, max=%.4f)%n",
                 mrr / denom, minMrr, medianMrr, maxMrr);
         System.out.printf("MAP:        %.4f%n", map / denom);
@@ -202,7 +202,7 @@ public final class Evaluator {
         metrics.put("precision@10",   precAt10 / denom);
 
         // F1
-        metrics.put("f1@10", f1At10);
+        metrics.put("f1@1", f1At1);
 
         // Classic
         metrics.put("mrr",  mrr / denom);
