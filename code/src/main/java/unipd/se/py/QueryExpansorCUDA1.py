@@ -1,7 +1,7 @@
 """
 QueryExpansor — COMPATIBILE CON CUDA (NVIDIA GPU) MIGLIORE RISPETTO A "QueryExpansor" SU RECALL ALTE (VEDI "evaluation_resultsCUDA.json")
 """
-
+ 
 import json
 import re
 import unicodedata
