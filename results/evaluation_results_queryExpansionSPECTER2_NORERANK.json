@@ -1,0 +1,39 @@
+{
+  "config" : {
+    "analyzer" : "MyCustomAnalyzer",
+    "query_parser" : "SBERT",
+    "top_n" : 100,
+    "title_boost" : 1.0,
+    "similarity" : "BM25",
+    "reranker" : "none",
+    "fields" : [ "title", "abstract" ]
+  },
+  "metrics" : {
+    "queries" : 14977,
+    "recall@1" : 0.30266408493022634,
+    "recall@5" : 0.5074447486145423,
+    "recall@10" : 0.5654002804299927,
+    "recall@100" : 0.7312545903719035,
+    "precision@1" : 0.30266408493022634,
+    "precision@5" : 0.10148894972292238,
+    "precision@10" : 0.05654002804300754,
+    "f1@1" : 0.30266408493022634,
+    "mrr@5" : 0.38333444615076034,
+    "map" : 0.3974761189426254,
+    "ndcg@5" : 0.4145067113404901,
+    "ndcg@10" : 0.4332849432075656,
+    "ndcg@100" : 0.4672416164771366,
+    "per_query_stats" : {
+      "mrr@5" : {
+        "min" : 0.0,
+        "median" : 0.2,
+        "max" : 1.0
+      },
+      "ndcg@10" : {
+        "min" : 0.0,
+        "median" : 0.38685280723454163,
+        "max" : 1.0
+      }
+    }
+  }
+}

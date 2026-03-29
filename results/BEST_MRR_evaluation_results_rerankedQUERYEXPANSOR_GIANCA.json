@@ -1,5 +1,6 @@
 //run fatta con QueryExpansorGIANCA.py e BESTReranker1.py. Quindi con expanded_queries_GIANCA.json
 
+
 {
   "config" : {
     "analyzer" : "MyCustomAnalyzer",
