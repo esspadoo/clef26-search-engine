@@ -3,7 +3,7 @@ QueryExpansor — BGE-large-en-v1.5 (BAAI/bge-large-en-v1.5)
 Uno dei migliori modelli generici per retrieval (top sul benchmark BEIR).
 Richiede il prefisso "Represent this sentence for searching relevant passages: "
 SOLO sulle query — il corpus non ha prefisso.
-
+ 
 Rispetto a MiniLM: embedding 1024-dim (vs 384), addestrato con hard-negative mining
 su dataset di retrieval → migliore separazione tra documenti rilevanti e non.
 
