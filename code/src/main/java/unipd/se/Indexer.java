@@ -48,16 +48,29 @@ public class Indexer {
 
         IndexWriterConfig config = new IndexWriterConfig(ANALYZER);
         config.setOpenMode(IndexWriterConfig.OpenMode.CREATE);
-        config.setRAMBufferSizeMB(256.0);
+        // RAM buffer aumentato: riduce i flush intermedi su disco durante l'indicizzazione
+        config.setRAMBufferSizeMB(512.0);
+        // Usa tutti i core disponibili per il merge dei segmenti
+        int cores = Runtime.getRuntime().availableProcessors();
+        config.setMergeScheduler(new ConcurrentMergeScheduler());
+        ((ConcurrentMergeScheduler) config.getMergeScheduler()).setMaxMergesAndThreads(cores, Math.max(1, cores / 2));
 
         try (IndexWriter writer = new IndexWriter(dir, config)) {
+            // Aggiungi i documenti in batch per ridurre l'overhead per documento
+            final int BATCH = 500;
+            int i = 0;
             for (Paper p : papers) {
                 Document doc = new Document();
-                doc.add(new StringField("pubkey", p.pubkey, Field.Store.YES));
-                doc.add(new TextField("title", p.title, Field.Store.YES));
-                doc.add(new TextField("abstract", p.abstractText, Field.Store.YES));
-
+                doc.add(new StringField("pubkey",    p.pubkey,       Field.Store.YES));
+                doc.add(new TextField("title",       p.title,        Field.Store.YES));
+                doc.add(new TextField("abstract",    p.abstractText, Field.Store.YES));
                 writer.addDocument(doc);
+
+                // Flush esplicito ogni BATCH documenti: mantiene l'heap sotto controllo
+                // senza aspettare che RAMBuffer si riempia del tutto
+                if (++i % BATCH == 0) {
+                    writer.flush();
+                }
             }
         }
 
