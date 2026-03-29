@@ -5,7 +5,7 @@ import emoji
 from tqdm import tqdm
 from sentence_transformers import SentenceTransformer, util
 from transformers import AutoTokenizer
-
+ 
 # -----------------------------
 # Load models 
 # -----------------------------
