@@ -25,6 +25,8 @@ import os
 import torch
 import torch.multiprocessing as mp
 from tqdm import tqdm
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+
 
 # ──────────────────────────────────────────────────────────────
 # CLI — fuori da __main__ per essere disponibile ai worker spawn
@@ -42,7 +44,7 @@ parser.add_argument("--query_chunk", type=int, default=32,
                     help="Quante query raggruppare in un unico batch GPU (default: 32). "
                          "Con top_k=1000 ogni chunk = ~32000 coppie divise in batch da --batch.")
 
-MODEL_NAME = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+MODEL_NAME = "nvidia/llama-nemotron-rerank-1b-v2"
 
 
 # ──────────────────────────────────────────────────────────────
@@ -129,7 +131,7 @@ def rerank_worker(
     device = "cuda:0"
     print(f"[GPU {gpu_id}] Initializing on {torch.cuda.get_device_name(0)}", flush=True)
 
-    reranker = CrossEncoder(MODEL_NAME, device=device, max_length=512)
+    reranker = CrossEncoder(MODEL_NAME, device=device, max_length=512, trust_remote_code=True)
 
     # Abilita fp16: dimezza la VRAM usata per i tensori di attivazione,
     # permettendo batch più grandi e throughput più alto su Ampere (3090)
@@ -230,7 +232,7 @@ if __name__ == "__main__":
         from sentence_transformers import CrossEncoder
 
         print(f"Loading cross-encoder: {MODEL_NAME} ...")
-        reranker = CrossEncoder(MODEL_NAME, device=DEVICE, max_length=512)
+        reranker = CrossEncoder(MODEL_NAME, device=DEVICE, max_length=512, trust_remote_code=True)
         if DEVICE == "cuda":
             reranker.model.half()
 
