@@ -4,14 +4,17 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.queryparser.simple.SimpleQueryParser;
 import org.apache.lucene.search.similarities.BM25Similarity;
 import unipd.se.model.QueryDoc;
+import unipd.se.model.ExpandedQueryDoc;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.*;
 import org.apache.lucene.store.Directory;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
 /**
  * Utility class for performing searches on a Lucene index of papers.
@@ -74,7 +77,78 @@ public class Searcher {
                             try {
                                 // SimpleQueryParser non è thread-safe: istanza locale per thread
                                 SimpleQueryParser parser = new SimpleQueryParser(ANALYZER, fields);
-                                Query query = parser.parse(text);
+                                Query query;
+
+                                // Parse filters from query text
+                                Map<String, String> filters = new HashMap<>();
+                                Pattern venuePattern = Pattern.compile("\\bvenue:\\s*([^\\s]+)");
+                                Pattern authorPattern = Pattern.compile("\\bauthor:\\s*([^\\s]+(?:\\s+[^\\s]+)*)");
+
+                                if (q instanceof ExpandedQueryDoc) {
+                                    ExpandedQueryDoc eq = (ExpandedQueryDoc) q;
+                                    String original = eq.getOriginal();
+                                    String expanded = eq.getExpanded();
+
+                                    // Parse filters from original
+                                    String origSearch = original;
+                                    Matcher mOrig = venuePattern.matcher(origSearch);
+                                    if (mOrig.find()) {
+                                        filters.put("venue", mOrig.group(1));
+                                        origSearch = origSearch.replaceFirst("\\bvenue:\\s*[^\\s]+", "").trim();
+                                    }
+                                    Matcher m2Orig = authorPattern.matcher(origSearch);
+                                    if (m2Orig.find()) {
+                                        filters.put("authors", m2Orig.group(1));
+                                        origSearch = origSearch.replaceFirst("\\bauthor:\\s*[^\\s]+(?:\\s+[^\\s]+)*", "").trim();
+                                    }
+
+                                    if (original != null && !original.isEmpty() && expanded != null && !expanded.isEmpty()) {
+                                        // Create BooleanQuery with weighted clauses
+                                        BooleanQuery.Builder bq = new BooleanQuery.Builder();
+
+                                        Query origQuery = parser.parse(origSearch);
+                                        origQuery = new BoostQuery(origQuery, 2.0f);
+                                        bq.add(origQuery, BooleanClause.Occur.SHOULD);
+
+                                        Query expQuery = parser.parse(expanded);
+                                        expQuery = new BoostQuery(expQuery, 1.0f);
+                                        bq.add(expQuery, BooleanClause.Occur.SHOULD);
+
+                                        query = bq.build();
+                                    } else if (expanded != null && !expanded.isEmpty()) {
+                                        query = parser.parse(expanded);
+                                    } else if (original != null && !original.isEmpty()) {
+                                        query = parser.parse(origSearch);
+                                    } else {
+                                        query = parser.parse(text);
+                                    }
+                                } else {
+                                    // Regular QueryDoc
+                                    String searchText = text;
+                                    Matcher m = venuePattern.matcher(searchText);
+                                    if (m.find()) {
+                                        filters.put("venue", m.group(1));
+                                        searchText = searchText.replaceFirst("\\bvenue:\\s*[^\\s]+", "").trim();
+                                    }
+                                    Matcher m2 = authorPattern.matcher(searchText);
+                                    if (m2.find()) {
+                                        filters.put("authors", m2.group(1));
+                                        searchText = searchText.replaceFirst("\\bauthor:\\s*[^\\s]+(?:\\s+[^\\s]+)*", "").trim();
+                                    }
+                                    query = parser.parse(searchText);
+                                }
+
+                                // Apply filters if any
+                                if (!filters.isEmpty()) {
+                                    BooleanQuery.Builder bq = new BooleanQuery.Builder();
+                                    bq.add(query, BooleanClause.Occur.MUST);
+                                    for (Map.Entry<String, String> f : filters.entrySet()) {
+                                        TermQuery tq = new TermQuery(new Term(f.getKey(), f.getValue()));
+                                        bq.add(tq, BooleanClause.Occur.MUST);
+                                    }
+                                    query = bq.build();
+                                }
+                                
                                 TopDocs topDocs = searcher.search(query, topK);
 
                                 List<String> topIds = new ArrayList<>(topDocs.scoreDocs.length);
