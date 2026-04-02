@@ -1,3 +1,8 @@
+import argparse
+import json
+from pathlib import Path
+from typing import Any, Iterable
+
 import faiss
 import numpy as np
 import torch
@@ -28,7 +33,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--query-field", default="auto")
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
         "--max-queries",
         type=int,
@@ -46,6 +50,24 @@ def parse_args() -> argparse.Namespace:
 def load_json(path: Path) -> Any:
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
+
+
+def resolve_execution_mode() -> tuple[str, list[str]]:
+    """
+    Automatically select execution mode based on visible CUDA devices:
+    - 0 GPUs -> CPU
+    - 1 GPU  -> single-GPU
+    - 2+ GPUs -> multi-GPU
+    """
+    if not torch.cuda.is_available():
+        return "cpu", []
+
+    gpu_count = torch.cuda.device_count()
+    if gpu_count <= 1:
+        return "cuda", []
+
+    devices = [f"cuda:{gpu_idx}" for gpu_idx in range(gpu_count)]
+    return "multi-gpu", devices
 
 
 def infer_query_prefix(model_name: str, provided_prefix: str | None) -> str:
@@ -185,6 +207,24 @@ def encode_texts(
     return np.asarray(embeddings, dtype=np.float32)
 
 
+def encode_texts_multi_gpu(
+    model: SentenceTransformer,
+    texts: list[str],
+    batch_size: int,
+    label: str,
+    pool: Any,
+) -> np.ndarray:
+    print(f"Encoding {label} ({len(texts)} items) with multi-GPU...")
+    embeddings = model.encode_multi_process(
+        texts,
+        pool=pool,
+        batch_size=batch_size,
+    )
+    normalized = np.asarray(embeddings, dtype=np.float32)
+    faiss.normalize_L2(normalized)
+    return normalized
+
+
 def build_faiss_index(corpus_embeddings: np.ndarray) -> faiss.IndexFlatIP:
     dimension = corpus_embeddings.shape[1]
     index = faiss.IndexFlatIP(dimension)
@@ -233,12 +273,18 @@ def main() -> None:
         raise ValueError("--max-queries must be greater than 0 when provided.")
 
     query_prefix = infer_query_prefix(args.model, args.query_prefix)
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    execution_mode, target_devices = resolve_execution_mode()
+    gpu_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
 
-    print(f"Device: {device}")
-    if device == "cuda":
-        print(f"GPU count: {torch.cuda.device_count()}")
+    print(f"Detected GPUs: {gpu_count}")
+    if execution_mode == "cpu":
+        print("Execution mode: CPU (no CUDA GPU detected)")
+    elif execution_mode == "cuda":
+        print("Execution mode: single-GPU")
         print(f"Primary GPU: {torch.cuda.get_device_name(0)}")
+    else:
+        print(f"Execution mode: multi-GPU ({', '.join(target_devices)})")
+
     print(f"Bi-encoder model: {args.model}")
     if query_prefix:
         print(f"Using query prefix: {query_prefix}")
@@ -251,20 +297,40 @@ def main() -> None:
     )
     corpus_pubkeys, corpus_texts = load_corpus(args.corpus)
 
-    model = SentenceTransformer(args.model, device=device)
-
-    corpus_embeddings = encode_texts(
-        model=model,
-        texts=corpus_texts,
-        batch_size=args.batch_size,
-        label="corpus",
-    )
-    query_embeddings = encode_texts(
-        model=model,
-        texts=query_texts,
-        batch_size=args.batch_size,
-        label="queries",
-    )
+    if execution_mode == "multi-gpu":
+        model = SentenceTransformer(args.model)
+        pool = model.start_multi_process_pool(target_devices=target_devices)
+        try:
+            corpus_embeddings = encode_texts_multi_gpu(
+                model=model,
+                texts=corpus_texts,
+                batch_size=args.batch_size,
+                label="corpus",
+                pool=pool,
+            )
+            query_embeddings = encode_texts_multi_gpu(
+                model=model,
+                texts=query_texts,
+                batch_size=args.batch_size,
+                label="queries",
+                pool=pool,
+            )
+        finally:
+            model.stop_multi_process_pool(pool)
+    else:
+        model = SentenceTransformer(args.model, device=execution_mode)
+        corpus_embeddings = encode_texts(
+            model=model,
+            texts=corpus_texts,
+            batch_size=args.batch_size,
+            label="corpus",
+        )
+        query_embeddings = encode_texts(
+            model=model,
+            texts=query_texts,
+            batch_size=args.batch_size,
+            label="queries",
+        )
 
     print("Building FAISS index...")
     index = build_faiss_index(corpus_embeddings)
