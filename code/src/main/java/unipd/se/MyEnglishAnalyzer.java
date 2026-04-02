@@ -18,13 +18,13 @@ import java.util.regex.Pattern;
 
 /**
  * Custom analyzer for social-post-like queries and scientific documents.
- * <p>
- * Features:
- * - Removes '#' from hashtags (#anxiety → anxiety)
- * - Lowercases text
- * - Removes stopwords
- * - Applies stemming (Snowball stemmer)
- * - Normalizes accents
+ * It normalizes input text by removing hashtag prefixes, trimming tokens,
+ * lowercasing text, removing English stopwords and possessives, normalizing
+ * accented characters, and applying stemming.
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class MyEnglishAnalyzer extends Analyzer {
 

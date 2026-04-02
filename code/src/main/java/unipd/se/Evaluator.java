@@ -24,12 +24,39 @@ import java.util.concurrent.atomic.DoubleAdder;
  * Supports QueryDoc and subclasses (e.g., ExpandedQueryDoc).
  * Le metriche per-query vengono calcolate in parallelo con DoubleAdder thread-safe.
  */
+
+/**
+ * Utility class that evaluates information retrieval results produced by the
+ * search pipeline.
+ * It computes aggregate metrics such as Recall@k, Precision@k, F1@1, MRR@5,
+ * MAP, and nDCG@k, and also derives per-query statistics for selected metrics.
+ * The evaluation supports {@link QueryDoc} objects and subclasses.
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
+ */
 public final class Evaluator {
 
+    /**
+     * Private constructor to prevent instantiation of this utility class.
+     */
     private Evaluator() {}
 
     /**
-     * Evaluate queries (works for both QueryDoc and subclasses).
+     * Evaluates the ranked retrieval results for the given queries and writes
+     * the computed metrics to both the console and a JSON output file.
+     * The evaluation is performed in parallel and supports {@link QueryDoc}
+     * objects as well as subclasses such as expanded queries.
+     *
+     * @param results the retrieval results, mapping each query identifier to
+     *                the ranked list of retrieved document identifiers
+     * @param queries the list of queries to evaluate
+     * @param config the configuration information to include in the JSON output
+     * @param outputFilePath the path of the JSON file where evaluation results
+     *                       will be saved
+     * @throws IOException if the evaluation is interrupted, fails during
+     *                     execution, or the output file cannot be written
      */
     public static void evaluate(
             Map<String, List<String>> results,
@@ -218,7 +245,12 @@ public final class Evaluator {
     // ---------------------------------------------------------------
 
     /**
-     * Precision@k = (# relevant in top-k) / k
+     * Computes Precision@k for a ranked list of retrieved document identifiers.
+     *
+     * @param ranked the ranked list of retrieved document identifiers
+     * @param goldSet the set of relevant document identifiers
+     * @param k the cutoff rank
+     * @return the precision value at rank {@code k}
      */
     private static double precisionAtK(List<String> ranked, Set<String> goldSet, int k) {
         if (ranked.isEmpty() || k == 0) return 0.0;
@@ -231,9 +263,14 @@ public final class Evaluator {
     }
 
     /**
-     * nDCG@k using binary relevance.
+     * Computes nDCG@k using binary relevance.
      *
-     * @param relCount total number of known relevant documents (for IDCG)
+     * @param ranked the ranked list of retrieved document identifiers
+     * @param goldSet the set of relevant document identifiers
+     * @param relCount the total number of relevant documents used to compute
+     *                 the ideal DCG
+     * @param k the cutoff rank
+     * @return the normalized discounted cumulative gain at rank {@code k}
      */
     private static double ndcgAtK(List<String> ranked, Set<String> goldSet, int relCount, int k) {
         int limit = Math.min(k, ranked.size());
@@ -255,7 +292,11 @@ public final class Evaluator {
     }
 
     /**
-     * Median of a list (does not modify the original).
+     * Computes the median value of a list of numbers without modifying the
+     * original list.
+     *
+     * @param values the input values
+     * @return the median of the list, or {@code 0.0} if the list is empty
      */
     private static double median(List<Double> values) {
         if (values.isEmpty()) return 0.0;
@@ -266,6 +307,12 @@ public final class Evaluator {
         return (sorted.get(n / 2 - 1) + sorted.get(n / 2)) / 2.0;
     }
 
+    /**
+     * Computes the base-2 logarithm of a number.
+     *
+     * @param x the input value
+     * @return the base-2 logarithm of {@code x}
+     */
     private static double log2(double x) {
         return Math.log(x) / Math.log(2.0);
     }

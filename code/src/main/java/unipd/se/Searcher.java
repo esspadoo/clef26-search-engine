@@ -35,6 +35,8 @@ public class Searcher {
      * @param titleBoost boost applied to the title field
      * @param topK       number of top documents to retrieve
      * @return map from query index → ranked list of pubkeys
+     *
+     * @throws IOException if the index cannot be opened or if the search fails
      */
     public static Map<String, List<String>> search(
             Directory dir,
