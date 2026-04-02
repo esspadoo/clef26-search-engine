@@ -1,8 +1,8 @@
 """
-Reranker.py — Cross-Encoder re-ranking dei risultati BM25
+CrossEncoderReranker.py — Cross-Encoder re-ranking dei risultati BM25
 
 Legge:
-  - data/expanded_queries_4.json   (query originali, per avere il testo originale)
+  - data/expanded_queries_bge_large.json   (query originali, per avere il testo originale)
   - data/collection_data.json      (corpus, per recuperare titolo+abstract dei candidati)
   - results/bm25_results.json      (output di Main.java: { qid → [pubkey, ...] })
 
@@ -10,9 +10,9 @@ Scrive:
   - results/reranked_results.json  (stesso formato: { qid → [pubkey, ...] })
 
 Uso:
-  python BESTReranker.py
+  python CrossEncoderReranker.py
   # oppure con argomenti:
-  python BESTReranker.py --queries data/expanded_queries_4.json \
+  python CrossEncoderReranker.py --queries data/expanded_queries_bge_large.json \
                      --papers  data/collection_data.json \
                      --bm25    results/bm25_results.json \
                      --output  results/reranked_results.json \
