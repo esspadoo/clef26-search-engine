@@ -20,7 +20,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 
-
 /**
  * Custom analyzer for social-post-like queries and scientific documents.
  * <p>
