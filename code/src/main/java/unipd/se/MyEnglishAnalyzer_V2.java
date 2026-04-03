@@ -8,6 +8,7 @@ import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.analysis.core.LowerCaseFilter;
 import org.apache.lucene.analysis.core.StopFilter;
 import org.apache.lucene.analysis.miscellaneous.ASCIIFoldingFilter;
+import org.apache.lucene.analysis.miscellaneous.WordDelimiterGraphFilter;
 import org.apache.lucene.analysis.pattern.PatternReplaceFilter;
 import org.apache.lucene.analysis.miscellaneous.TrimFilter;
 
@@ -25,10 +26,11 @@ import java.util.List;
  * Custom analyzer for social-post-like queries and scientific documents.
  * <p>
  * Features:
+ * - Splits compound terms (e.g., "SARS-CoV-2" → "SARS", "CoV", "2") while preserving the original
  * - Removes '#' from hashtags (#anxiety → anxiety)
  * - Lowercases text
  * - Removes stopwords
- * - Applies stemming (Snowball stemmer)
+ * - Applies stemming (KStem stemmer)
  * - Normalizes accents
  */
 public class MyEnglishAnalyzer_V2 extends Analyzer {
@@ -66,6 +68,15 @@ public class MyEnglishAnalyzer_V2 extends Analyzer {
 
         // Trim tokens
         stream = new TrimFilter(stream);
+
+        // Split compound terms (e.g., "SARS-CoV-2" → "SARS", "CoV", "2") while preserving the original
+        // This allows searching for "SARS" to find "SARS-CoV-2"
+        stream = new WordDelimiterGraphFilter(stream,
+                WordDelimiterGraphFilter.GENERATE_WORD_PARTS |
+                WordDelimiterGraphFilter.GENERATE_NUMBER_PARTS |
+                WordDelimiterGraphFilter.PRESERVE_ORIGINAL |
+                WordDelimiterGraphFilter.SPLIT_ON_CASE_CHANGE |
+                WordDelimiterGraphFilter.SPLIT_ON_NUMERICS, null);
 
         // Remove '#' from hashtags
         stream = new PatternReplaceFilter(stream, HASHTAG_PATTERN, "", true);
