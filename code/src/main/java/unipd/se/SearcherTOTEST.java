@@ -15,7 +15,6 @@ import java.util.stream.Collectors;
 import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
-
 /**
  * Utility class for performing searches on a Lucene index of papers.
  * <p>
