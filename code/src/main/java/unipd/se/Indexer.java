@@ -6,7 +6,6 @@ import org.apache.lucene.analysis.standard.StandardAnalyzer;
 import org.apache.lucene.document.*;
 import org.apache.lucene.index.*;
 import org.apache.lucene.store.Directory;
-
 import java.io.IOException;
 import java.nio.file.Paths;
 import java.util.List;
@@ -20,8 +19,7 @@ import java.util.List;
  *     <li>{@code pubkey} – unique identifier, stored but not tokenized</li>
  *     <li>{@code title} – paper title, tokenized for full-text search</li>
  *     <li>{@code abstract} – paper abstract, tokenized for full-text search</li>
- *     <li>{@code venue} – publication venue, stored but not tokenized</li>
- *     <li>{@code authors} – list of authors, stored but not tokenized</li>
+ * </ul>
  * <p>
  * The index is stored in the {@code index/} folder under the project root.
  * A shared {@link StandardAnalyzer} is used, and documents are buffered in memory
@@ -31,7 +29,7 @@ import java.util.List;
 public class Indexer {
 
     /** Shared custom analyzer for tokenizing text fields. */
-    private static final MyEnglishAnalyzer ANALYZER = new MyEnglishAnalyzer();
+    private static final MyEnglishAnalyzer_V2 ANALYZER = new MyEnglishAnalyzer_V2();
 
     /**
      * Builds a persistent Lucene index from the given list of {@link Paper} objects.
@@ -66,8 +64,6 @@ public class Indexer {
                 doc.add(new TextField("title",       p.title,        Field.Store.YES));
                 doc.add(new TextField("abstract",    p.abstractText, Field.Store.YES));
                 writer.addDocument(doc);
-                doc.add(new StringField("venue",     p.venue,        Field.Store.YES));
-                doc.add(new StringField("authors",   p.authors,      Field.Store.YES));
 
                 // Flush esplicito ogni BATCH documenti: mantiene l'heap sotto controllo
                 // senza aspettare che RAMBuffer si riempia del tutto
