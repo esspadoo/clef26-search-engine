@@ -22,7 +22,7 @@ import java.util.concurrent.*;
  * Uses BM25 similarity and a weighted multi-field query (title + abstract).
  * </p>
  */
-public class Searcher {
+public class SearcherV2 {
 
     /** Shared custom analyzer for parsing queries. */
     private static final MyEnglishAnalyzer ANALYZER = new MyEnglishAnalyzer();
