@@ -25,7 +25,7 @@ import java.util.concurrent.*;
 public class SearcherV2 {
 
     /** Shared custom analyzer for parsing queries. */
-    private static final MyEnglishAnalyzer ANALYZER = new MyEnglishAnalyzer();
+    private static final MyEnglishAnalyzer_V2 ANALYZER = new MyEnglishAnalyzer_V2();
 
     /**
      * Search the index with a configurable title boost.

@@ -12,6 +12,7 @@ import org.apache.lucene.analysis.pattern.PatternReplaceFilter;
 import org.apache.lucene.analysis.miscellaneous.TrimFilter;
 
 import java.io.IOException;
+import java.nio.file.Paths;
 import java.util.regex.Pattern;
 
 //Added to read custom stoplist instead of the ENGLISH_STOP_WORDS_SET default one
@@ -47,8 +48,17 @@ public class MyEnglishAnalyzer_V2 extends Analyzer {
         //included custom stopwords list
         CharArraySet stopWords = new CharArraySet(16, true);
 
+        /*
         try {
-            List<String> lines = Files.readAllLines(Path.of("/<your_PATH>/seupd2526-retrixLOCALE/code/data/stoplist_en_ranksnl_large.txt"));
+            List<String> lines = Files.readAllLines(Path.of("../../../../../../code/data/stoplist_en_ranksnl_large.txt"));
+            stopWords.addAll(lines);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }*/
+
+        try {
+            Path path = Paths.get("code", "data", "stoplist_en_ranksnl_large.txt");
+            List<String> lines = Files.readAllLines(path);
             stopWords.addAll(lines);
         } catch (IOException e) {
             throw new RuntimeException(e);
