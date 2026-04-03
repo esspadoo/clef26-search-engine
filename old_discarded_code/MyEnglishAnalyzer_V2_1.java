@@ -1,25 +1,26 @@
 package unipd.se;
 
 import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.CharArraySet;
-import org.apache.lucene.analysis.TokenStream;
 import org.apache.lucene.analysis.Tokenizer;
+import org.apache.lucene.analysis.TokenStream;
+import org.apache.lucene.analysis.en.*;
+import org.apache.lucene.analysis.standard.StandardTokenizer;
 import org.apache.lucene.analysis.core.LowerCaseFilter;
 import org.apache.lucene.analysis.core.StopFilter;
-import org.apache.lucene.analysis.en.EnglishPossessiveFilter;
-import org.apache.lucene.analysis.en.KStemFilter;
 import org.apache.lucene.analysis.miscellaneous.ASCIIFoldingFilter;
-import org.apache.lucene.analysis.miscellaneous.TrimFilter;
 import org.apache.lucene.analysis.miscellaneous.WordDelimiterGraphFilter;
 import org.apache.lucene.analysis.pattern.PatternReplaceFilter;
-import org.apache.lucene.analysis.standard.StandardTokenizer;
+import org.apache.lucene.analysis.miscellaneous.TrimFilter;
 
 import java.io.IOException;
+import java.nio.file.Paths;
+import java.util.regex.Pattern;
+
+//Added to read custom stoplist instead of the ENGLISH_STOP_WORDS_SET default one
+import org.apache.lucene.analysis.CharArraySet;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.List;
-import java.util.regex.Pattern;
 
 /**
  * Custom analyzer for social-post-like queries and scientific documents.
@@ -32,7 +33,7 @@ import java.util.regex.Pattern;
  * - Applies stemming (KStem stemmer)
  * - Normalizes accents
  */
-public class MyEnglishAnalyzer_V2 extends Analyzer {
+public class MyEnglishAnalyzer_V2_1 extends Analyzer {
 
     // Remove '#' only at the beginning of tokens
     private static final Pattern HASHTAG_PATTERN = Pattern.compile("^#");
@@ -59,6 +60,15 @@ public class MyEnglishAnalyzer_V2 extends Analyzer {
 
         // Trim tokens
         stream = new TrimFilter(stream);
+
+        // Split compound terms (e.g., "SARS-CoV-2" → "SARS", "CoV", "2") while preserving the original
+        // This allows searching for "SARS" to find "SARS-CoV-2"
+        stream = new WordDelimiterGraphFilter(stream,
+                WordDelimiterGraphFilter.GENERATE_WORD_PARTS |
+                WordDelimiterGraphFilter.GENERATE_NUMBER_PARTS |
+                WordDelimiterGraphFilter.PRESERVE_ORIGINAL |
+                WordDelimiterGraphFilter.SPLIT_ON_CASE_CHANGE |
+                WordDelimiterGraphFilter.SPLIT_ON_NUMERICS, null);
 
         // Remove '#' from hashtags
         stream = new PatternReplaceFilter(stream, HASHTAG_PATTERN, "", true);
