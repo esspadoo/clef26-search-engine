@@ -1,4 +1,4 @@
-package unipd.se;
+package alternative_discarded_code;
 
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.Tokenizer;
