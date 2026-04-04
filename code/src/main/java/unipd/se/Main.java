@@ -97,7 +97,7 @@ public class Main {
                 Directory index = IndexerV1.buildIndex(papers);
 
                 // Parallel search (Searcher internally manages parallelism)
-                results = SearcherV2.search(index, queries, 1.0f, 100);
+                results = SearcherV1.search(index, queries, 1.0f, 100);
 
                 // Save BM25 results in the background while the main thread prepares the configuration
                 new File("results").mkdirs();

@@ -1,9 +1,8 @@
-package alternative_discarded_code;
+package unipd.se;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.queryparser.simple.SimpleQueryParser;
 import org.apache.lucene.search.similarities.BM25Similarity;
-import unipd.se.MyEnglishAnalyzer_V2;
 import unipd.se.model.QueryDoc;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.*;
