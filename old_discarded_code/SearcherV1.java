@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
  * Uses BM25 similarity and a weighted multi-field query (title + abstract).
  * </p>
  */
-public class Searcher {
+public class SearcherV1 {
 
     /** Shared custom analyzer for parsing queries. */
     private static final MyEnglishAnalyzer_V2 ANALYZER = new MyEnglishAnalyzer_V2();
