@@ -5,7 +5,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import unipd.se.model.ExpandedQueryDoc;
 import unipd.se.model.Paper;
-import unipd.se.model.QueryDoc;
 import org.apache.lucene.store.Directory;
 
 import java.io.File;
@@ -95,7 +94,7 @@ public class Main {
 
             } else {
                 // Mode 1: run BM25 and save results
-                Directory index = Indexer.buildIndex(papers);
+                Directory index = IndexerV1.buildIndex(papers);
 
                 // Parallel search (Searcher internally manages parallelism)
                 results = SearcherV2.search(index, queries, 1.0f, 100);

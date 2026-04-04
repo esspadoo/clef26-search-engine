@@ -26,7 +26,7 @@ import java.util.List;
  * to improve indexing performance.
  * </p>
  */
-public class Indexer {
+public class IndexerV1 {
 
     /** Shared custom analyzer for tokenizing text fields. */
     private static final MyEnglishAnalyzer_V2 ANALYZER = new MyEnglishAnalyzer_V2();
