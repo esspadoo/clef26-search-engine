@@ -8,15 +8,16 @@ Meccanismo ufficiale (da HuggingFace nvidia/llama-nemotron-rerank-1b-v2):
   1. Formattare la coppia con il template: "question:{q} \\n \\n passage:{p}"
   2. Tokenizzare come sequenza singola (NON come pair)
   3. Forward pass → model(**batch).logits  shape [B, 1]
-  4. logits.view(-1) → score scalare per coppia (raw logit, non bounded)
-  5. Opzionale: sigmoid per convertire in probabilità [0,1]
+  4. sigmoid(logits.view(-1)) → score in (0, 1), sempre positivo
+     - score alto (~1) = documento rilevante
+     - score basso (~0) = documento irrilevante
+  5. Ranking: sorted(..., reverse=True) — score più alto = posizione migliore
 
 Differenze chiave rispetto a Qwen3-Reranker:
   - AutoModelForSequenceClassification, NON AutoModelForCausalLM
   - Nessun prefix/suffix fisso da pre-tokenizzare
-  - Nessuna logica yes/no su vocabolario: lo score è già nel logit di output
-  - torch_dtype=torch.bfloat16 (non float16: il modello è nativo BF16)
-  - padding_side="left" mantenuto (modello decoder con bidirectional attention)
+  - Score finale via sigmoid: valori in (0,1), sempre positivi, ordine non ambiguo
+  - torch_dtype=torch.bfloat16 (dtype nativo del modello)
   - Richiede transformers >= 4.44
 
 Legge:
@@ -79,7 +80,8 @@ def format_pair(query: str, doc: str) -> str:
 def sanity_check_scores(score_fn) -> bool:
     """
     Verifica che il modello produca score discriminativi.
-    Nemotron restituisce raw logit: rilevante >> irrilevante.
+    Dopo sigmoid: rilevante → vicino a 1, irrilevante → vicino a 0.
+    Soglia: diff > 0.05 è sufficiente per confermare discriminazione.
     """
     test_pairs = [
         ("neural network classification",
@@ -92,8 +94,7 @@ def sanity_check_scores(score_fn) -> bool:
         s0, s1 = float(scores[0]), float(scores[1])
         diff = abs(s0 - s1)
         print(f"\n  [Sanity check] Score rilevante={s0:.4f} | Score irrilevante={s1:.4f} | Δ={diff:.4f}")
-        # Nemotron produce logit grezzi (range ~[-30, +30]): diff > 1.0 è già buon segnale
-        if diff < 1.0:
+        if diff < 0.05:
             print("  WARNING: score quasi identici — controlla il modello/tokenizer!")
             return False
         print("  [Sanity check] OK.")
@@ -146,6 +147,7 @@ def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
 def scores_to_results(meta, scores_flat):
     """
     Ricostruisce qid→[pubkey] dallo score array piatto.
+    Score in (0,1) dopo sigmoid: reverse=True mette i più rilevanti in cima.
     """
     results = {}
     offset  = 0
@@ -155,6 +157,7 @@ def scores_to_results(meta, scores_flat):
             continue
         scores = scores_flat[offset: offset + n_pairs]
         offset += n_pairs
+        # Score alti (~1) = più rilevanti → reverse=True
         ranked = sorted(zip(valid_keys, scores), key=lambda x: x[1], reverse=True)
         results[qid] = [pk for pk, _ in ranked]
     return results
@@ -169,7 +172,7 @@ def load_nemotron_reranker(device: str, max_length: int):
 
     Architettura: cross-encoder (Llama-3.2-1B fine-tuned) con bidirectional
     attention e classification head binaria. Output: logit scalare grezzo per
-    coppia, NON un vettore yes/no su vocabolario.
+    coppia, convertito via sigmoid in score ∈ (0, 1).
 
     NON usare AutoModelForCausalLM (produce output errati su questo modello).
     Richiede transformers >= 4.44.
@@ -200,13 +203,15 @@ def load_nemotron_reranker(device: str, max_length: int):
     def score_pairs(pairs: list) -> list:
         """
         Closure che incapsula modello e tokenizer.
-        Accetta lista di (query, doc) e ritorna lista di float (raw logit).
+        Accetta lista di (query, doc) e ritorna lista di float in (0, 1).
 
-        Logica ufficiale Nemotron:
+        Logica:
           texts = [format_pair(q, d) for q, d in pairs]
           tokenizer(texts, ...) → batch_dict (sequenza singola, NON pair)
           model(**batch_dict).logits → shape [B, 1]
-          logits.view(-1) → [B] score grezzo
+          sigmoid(logits.view(-1)) → score in (0,1) per ogni coppia
+            - ~1.0 = molto rilevante
+            - ~0.0 = irrilevante
         """
         texts = [format_pair(q, d) for q, d in pairs]
 
@@ -220,8 +225,8 @@ def load_nemotron_reranker(device: str, max_length: int):
         batch_dict = {k: v.to(model.device) for k, v in batch_dict.items()}
 
         with torch.inference_mode():
-            logits = model(**batch_dict).logits  # [B, 1]
-            scores = logits.view(-1).cpu().tolist()
+            logits = model(**batch_dict).logits          # [B, 1]
+            scores = torch.sigmoid(logits.view(-1)).cpu().tolist()
 
         return scores if isinstance(scores, list) else [scores]
 
@@ -256,10 +261,11 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
             if current_batch <= 1:
                 print(
                     f"  WARNING: OOM anche con batch=1 su {len(batch)} coppie. "
-                    f"Score=0 come fallback (ordine BM25 mantenuto).",
+                    f"Score=0.5 come fallback (ordine BM25 mantenuto).",
                     flush=True,
                 )
-                all_scores.extend([0.0] * len(batch))
+                # 0.5 = valore neutro dopo sigmoid, non perturba l'ordine relativo
+                all_scores.extend([0.5] * len(batch))
                 i += current_batch
                 current_batch = batch_size
             else:
@@ -465,7 +471,7 @@ if __name__ == "__main__":
         for p in processes:
             p.join()
 
-        # Ripristina ordine originale
+        # Ripristina ordine originale delle query
         reranked_results = {
             qid: reranked_results[qid]
             for qid in bm25_results
