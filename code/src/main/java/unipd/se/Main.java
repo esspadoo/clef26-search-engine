@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 
-/**
+/*
  * Entry point for the Information Retrieval pipeline.
  *
  * Modalità 1 — BM25 only (default):
@@ -56,7 +56,7 @@ public class Main {
      *             args[2] = optional path to a JSON file containing
      *             re-ranked results
      */
-    public static void main(String[] args) {
+    static void main(String[] args) {
         int cores = Runtime.getRuntime().availableProcessors();
         System.out.println("Starting retrieval [cores=" + cores + "]");
 
@@ -86,7 +86,7 @@ public class Main {
                 System.out.println("Loading re-ranked results from: " + rerankedPath);
                 results = mapper.readValue(
                         new File(rerankedPath),
-                        new TypeReference<Map<String, List<String>>>() {}
+                        new TypeReference<>() {}
                 );
                 System.out.println("Loaded results for " + results.size() + " queries.");
 
