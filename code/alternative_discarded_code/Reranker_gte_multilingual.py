@@ -4,24 +4,18 @@ Reranker_gte_multilingual.py — GTE-Multilingual-Reranker-Base re-ranking dei r
 Alibaba-NLP/gte-multilingual-reranker-base è un cross-encoder encoder-only
 (AutoModelForSequenceClassification) con supporto per 70+ lingue.
 
-Meccanismo (da HuggingFace Alibaba-NLP/gte-multilingual-reranker-base):
+Il modello usa un'implementazione custom (trust_remote_code=True, da Alibaba-NLP/new-impl)
+con alcune differenze rispetto all'API HuggingFace standard:
+  - dtype=  invece di torch_dtype=  (torch_dtype è deprecato per questo modello)
+  - return_dict=  invece di use_return_dict=  (idem)
+
+Meccanismo:
   1. Tokenizzare la coppia come pair: tokenizer([[query, doc], ...], ...)
-  2. Forward pass → model(**inputs).logits  shape [B, 1]
+  2. Forward pass → model(**inputs, return_dict=True).logits  shape [B, 1]
   3. sigmoid(logits.view(-1).float()) → score in (0, 1), sempre positivo
      - score alto (~1) = documento rilevante
      - score basso (~0) = documento irrilevante
   4. Ranking: sorted(..., reverse=True)
-
-Differenze rispetto a gte-reranker-modernbert-base:
-  - trust_remote_code=True richiesto (architettura custom)
-  - .float() prima di sigmoid: il modello usa fp16 internamente ma i logit
-    vanno convertiti in fp32 per precisione numerica nella sigmoid
-    (pattern da docs ufficiali: logits.view(-1, ).float())
-
-Differenze rispetto a Nemotron:
-  - Architettura encoder-only, NON decoder
-  - Input come pair al tokenizer — nessun template manuale
-  - padding_side default ("right")
 
 Legge:
   - data/expanded_queries_*.json   (query, campo "original")
@@ -55,7 +49,7 @@ parser.add_argument("--top_k",       type=int, default=100,
                     help="Candidati BM25 da passare al re-ranker (default: 100)")
 parser.add_argument("--batch",       type=int, default=64,
                     help="Coppie per forward pass GPU (default: 64). "
-                         "GTE-multilingual-base fp16 è molto leggero. "
+                         "GTE-multilingual-base è molto leggero. "
                          "Su L40S puoi alzare fino a 128 con max_length=512.")
 parser.add_argument("--query_chunk", type=int, default=8,
                     help="Query per chunk (default: 8).")
@@ -99,13 +93,6 @@ def sanity_check_scores(score_fn) -> bool:
 # Helpers CPU
 # ──────────────────────────────────────────────────────────────
 def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
-    """
-    Costruisce le coppie (query_text, doc_text) per un chunk di query.
-    Ritorna:
-      all_pairs : lista piatta di (str, str)
-      meta      : [(qid, valid_keys, n_pairs, fallback_candidates), ...]
-      missing   : n° doc non trovati nel corpus
-    """
     all_pairs = []
     meta      = []
     missing   = 0
@@ -136,10 +123,6 @@ def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
 
 
 def scores_to_results(meta, scores_flat):
-    """
-    Ricostruisce qid→[pubkey] dallo score array piatto.
-    Score in (0,1) dopo sigmoid: reverse=True mette i più rilevanti in cima.
-    """
     results = {}
     offset  = 0
     for qid, valid_keys, n_pairs, fallback_candidates in meta:
@@ -160,24 +143,35 @@ def load_gte_multilingual_reranker(device: str, max_length: int):
     """
     Carica Alibaba-NLP/gte-multilingual-reranker-base.
 
-    Architettura encoder-only con classification head custom.
-    trust_remote_code=True richiesto per il modeling code custom di GTE.
-    Input: pair [query, doc] passato direttamente al tokenizer.
-    Output: logit fp16 → .float() → sigmoid → score in (0, 1).
+    Il modello usa codice custom da Alibaba-NLP/new-impl, con due differenze
+    rispetto all'API HuggingFace standard che causano warning se ignorate:
 
-    Il cast a fp32 prima della sigmoid è necessario: i logit fp16 hanno
-    range limitato e la sigmoid su fp16 satura facilmente agli estremi.
+      1. dtype=torch.float16  (NON torch_dtype=): il modello custom
+         ridefinisce __init__ e usa 'dtype' come keyword argument diretto.
+
+      2. return_dict=True nel forward pass (NON use_return_dict=): stessa
+         ragione — il forward custom accetta 'return_dict', non 'use_return_dict'.
+
+    Ignorare questi dettagli non blocca l'esecuzione ma può causare il modello
+    a girare in fp32 anziché fp16, e output non strutturati (.logits inaccessibile).
+
+    .float() prima di sigmoid: i logit fp16 hanno range limitato, il cast a fp32
+    evita saturazione agli estremi (0.0 o 1.0 esatto) su coppie molto rilevanti
+    o molto irrilevanti.
     """
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
     print(f"  Loading tokenizer: {MODEL_NAME}", flush=True)
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+    tokenizer = AutoTokenizer.from_pretrained(
+        MODEL_NAME,
+        trust_remote_code=True,
+    )
 
     print(f"  Loading model: {MODEL_NAME} → {device}", flush=True)
     model = AutoModelForSequenceClassification.from_pretrained(
         MODEL_NAME,
         trust_remote_code=True,
-        torch_dtype=torch.float16,
+        dtype=torch.float16,       # 'dtype', NON 'torch_dtype' — API custom del modello
         device_map=device,
     )
     model.eval()
@@ -187,9 +181,9 @@ def load_gte_multilingual_reranker(device: str, max_length: int):
         Closure che incapsula modello e tokenizer.
         Accetta lista di (query, doc) e ritorna lista di float in (0, 1).
 
-        Il tokenizer GTE accetta direttamente la lista di pair [[q, d], ...].
-        .float() prima di sigmoid: pattern da docs ufficiali GTE per evitare
-        saturazione numerica con logit in fp16.
+        return_dict=True nel forward: necessario per accedere a output.logits
+        senza warning sul codice custom del modello.
+        .float() prima di sigmoid: cast fp16→fp32 per precisione numerica.
         """
         pair_list = [[q, d] for q, d in pairs]
 
@@ -203,9 +197,9 @@ def load_gte_multilingual_reranker(device: str, max_length: int):
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
         with torch.inference_mode():
-            logits = model(**inputs).logits          # [B, 1], fp16
-            # .float(): cast a fp32 prima della sigmoid — evita saturazione
-            scores = torch.sigmoid(logits.view(-1).float()).cpu().tolist()
+            # return_dict=True: API custom del modello, NON use_return_dict
+            output = model(**inputs, return_dict=True)
+            scores = torch.sigmoid(output.logits.view(-1).float()).cpu().tolist()
 
         return scores if isinstance(scores, list) else [scores]
 
@@ -216,10 +210,6 @@ def load_gte_multilingual_reranker(device: str, max_length: int):
 # Inferenza con gestione OOM
 # ──────────────────────────────────────────────────────────────
 def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
-    """
-    Itera le coppie a batch, chiama score_fn e aggrega i risultati.
-    Gestisce OOM dimezzando il batch e ripristinandolo al chunk successivo.
-    """
     all_scores    = []
     current_batch = batch_size
     i             = 0
