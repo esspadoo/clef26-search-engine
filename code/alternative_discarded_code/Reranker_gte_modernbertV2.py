@@ -1,5 +1,19 @@
 """
-Reranker_gte_modernbert.py — GTE-Reranker-ModernBERT-Base re-ranking dei risultati BM25
+RISPETTO A V1
+1. model = AutoModelForSequenceClassification.from_pretrained(
+    MODEL_NAME,
+    torch_dtype=torch.float16, ----> LEVATO E LASCIATO IL DEFAULT FP32
+    device_map=device,
+)
+
+2. Sigmoid:
+scores = torch.sigmoid(logits.view(-1)) ---> SOSTITUITO CON ---> scores = logits.view(-1).cpu().tolist()
+
+3.max_length=512 -----> MESSA A 1024
+
+
+
+Reranker_gte_modernbertV2.py — GTE-Reranker-ModernBERT-Base re-ranking dei risultati BM25
 =========================================================================================
 Alibaba-NLP/gte-reranker-modernbert-base è un cross-encoder encoder-only basato su
 ModernBERT (AutoModelForSequenceClassification).
@@ -45,7 +59,10 @@ from tqdm import tqdm
 parser = argparse.ArgumentParser()
 parser.add_argument("--queries",     default="../../../../../../data/expanded_queries_bge_large.json")
 parser.add_argument("--papers",      default="../../../../../../data/collection_data.json")
-parser.add_argument("--bm25",        default="../../../../../../../results/bm25_results.json")
+
+parser.add_argument("--bm25",        default="../../../../../../data/bi_encoder_results_513.json")
+
+#parser.add_argument("--bm25",        default="../../../../../../../results/bm25_results.json")
 parser.add_argument("--output",      default="../../../../../../../results/reranked_results_gte_modernbert.json")
 parser.add_argument("--top_k",       type=int, default=100,
                     help="Candidati BM25 da passare al re-ranker (default: 100)")
@@ -55,7 +72,7 @@ parser.add_argument("--batch",       type=int, default=64,
                          "Su L40S puoi alzare fino a 128 con max_length=512.")
 parser.add_argument("--query_chunk", type=int, default=8,
                     help="Query per chunk (default: 8).")
-parser.add_argument("--max_length",  type=int, default=512,
+parser.add_argument("--max_length",  type=int, default=1024,
                     help="Lunghezza massima token per coppia (default: 512). "
                          "Il modello supporta contesti lunghi ma 512 è sufficiente "
                          "per titolo+abstract.")
@@ -172,7 +189,6 @@ def load_gte_modernbert_reranker(device: str, max_length: int):
     print(f"  Loading model: {MODEL_NAME} → {device}", flush=True)
     model = AutoModelForSequenceClassification.from_pretrained(
         MODEL_NAME,
-        torch_dtype=torch.float16,
         device_map=device,
     )
     model.eval()
@@ -200,7 +216,8 @@ def load_gte_modernbert_reranker(device: str, max_length: int):
 
         with torch.inference_mode():
             logits = model(**inputs).logits          # [B, 1]
-            scores = torch.sigmoid(logits.view(-1)).cpu().tolist()
+            # scores = torch.sigmoid(logits.view(-1)).cpu().tolist()
+            scores = logits.view(-1).cpu().tolist()
 
         return scores if isinstance(scores, list) else [scores]
 
