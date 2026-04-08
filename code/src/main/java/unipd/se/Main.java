@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 
-/**
+/*
  * Entry point for the Information Retrieval pipeline.
  *
  * Modalità 1 — BM25 only (default):
@@ -56,7 +56,7 @@ public class Main {
      *             args[2] = optional path to a JSON file containing
      *             re-ranked results
      */
-    public static void main(String[] args) {
+    static void main(String[] args) {
         int cores = Runtime.getRuntime().availableProcessors();
         System.out.println("Starting retrieval [cores=" + cores + "]");
 
@@ -68,15 +68,13 @@ public class Main {
 
         ObjectMapper mapper = new ObjectMapper();
 
-        try {
+        try (ExecutorService ioPool = Executors.newFixedThreadPool(2)) {
             // 1. Load data in parallel
             // Papers and queries are deserialized simultaneously using two I/O threads
-            ExecutorService ioPool = Executors.newFixedThreadPool(2);
             Future<List<Paper>> papersFuture =
                     ioPool.submit(() -> DataLoader.loadPapers(papersPath));
             Future<List<ExpandedQueryDoc>> queriesFuture =
                     ioPool.submit(() -> DataLoader.loadQueries(queriesPath, ExpandedQueryDoc[].class));
-            ioPool.shutdown();
 
             List<Paper> papers             = papersFuture.get();
             List<ExpandedQueryDoc> queries = queriesFuture.get();
@@ -88,7 +86,7 @@ public class Main {
                 System.out.println("Loading re-ranked results from: " + rerankedPath);
                 results = mapper.readValue(
                         new File(rerankedPath),
-                        new TypeReference<Map<String, List<String>>>() {}
+                        new TypeReference<>() {}
                 );
                 System.out.println("Loaded results for " + results.size() + " queries.");
 
@@ -100,7 +98,10 @@ public class Main {
                 results = SearcherV2.search(index, queries, 1.0f, 100);
 
                 // Save BM25 results in the background while the main thread prepares the configuration
-                new File("results").mkdirs();
+                if (!new File("results").mkdirs()) {
+                    System.out.println("Failed to load results from: " + papers);
+                    return;
+                }
                 File bm25File = new File("results/bm25_results.json");
                 CompletableFuture<Void> saveFuture = CompletableFuture.runAsync(() -> {
                     try {
@@ -115,13 +116,13 @@ public class Main {
 
                 // Build the configuration while the file is being written in the background
                 ObjectNode config = mapper.createObjectNode();
-                config.put("analyzer",     "MyCustomAnalyzer");
+                config.put("analyzer", "MyCustomAnalyzer");
                 config.put("query_parser", "SBERT");
-                config.put("top_n",        100);
-                config.put("title_boost",  1.0);
-                config.put("similarity",   "BM25");
-                config.put("reranker",     "none");
-                config.putPOJO("fields",   new String[]{"title", "abstract"});
+                config.put("top_n", 100);
+                config.put("title_boost", 1.0);
+                config.put("similarity", "BM25");
+                config.put("reranker", "none");
+                config.putPOJO("fields", new String[]{"title", "abstract"});
 
                 // Ensure that the file has been written before proceeding
                 saveFuture.join();

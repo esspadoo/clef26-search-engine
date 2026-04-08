@@ -60,12 +60,12 @@ public class SearcherV2 {
 
             // Usa un ForkJoinPool con tanti thread quanti i core logici disponibili
             int cores = Runtime.getRuntime().availableProcessors();
-            ForkJoinPool pool = new ForkJoinPool(cores);
 
-            try {
+            try (ForkJoinPool pool = new ForkJoinPool(cores)) {
                 // Ogni query viene elaborata indipendentemente in parallelo
                 // SimpleQueryParser viene creato per ogni thread (non è thread-safe)
-                Map<String, List<String>> results = pool.submit(() ->
+
+                return pool.submit(() ->
                     queries.parallelStream().collect(Collectors.toMap(
                         q -> q.index,
                         q -> {
@@ -83,8 +83,7 @@ public class SearcherV2 {
                                 Pattern venuePattern = Pattern.compile("\\bvenue:\\s*([^\\s]+)");
                                 Pattern authorPattern = Pattern.compile("\\bauthor:\\s*([^\\s]+(?:\\s+[^\\s]+)*)");
 
-                                if (q instanceof ExpandedQueryDoc) {
-                                    ExpandedQueryDoc eq = (ExpandedQueryDoc) q;
+                                if (q instanceof ExpandedQueryDoc eq) {
                                     String original = eq.getOriginal();
                                     String expanded = eq.getExpanded();
 
@@ -147,7 +146,7 @@ public class SearcherV2 {
                                     }
                                     query = bq.build();
                                 }
-                                
+
                                 TopDocs topDocs = searcher.search(query, topK);
 
                                 List<String> topIds = new ArrayList<>(topDocs.scoreDocs.length);
@@ -161,20 +160,16 @@ public class SearcherV2 {
                                 return Collections.<String>emptyList();
                             }
                         },
-                        (a, b) -> a,
+                        (a, _) -> a,
                         LinkedHashMap::new   // mantieni ordine di inserimento
                     ))
                 ).get();
-
-                return results;
 
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw new IOException("Search interrupted", e);
             } catch (ExecutionException e) {
                 throw new IOException("Search execution failed", e.getCause());
-            } finally {
-                pool.shutdown();
             }
         }
     }

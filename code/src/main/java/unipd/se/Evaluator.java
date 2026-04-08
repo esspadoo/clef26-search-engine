@@ -10,7 +10,7 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.DoubleAdder;
 
-/**
+/*
  * Evaluator for IR results.
  * Computes:
  *   - Recall@k        (k = 1, 5, 10, 100)
@@ -82,8 +82,7 @@ public final class Evaluator {
 
         // Calcolo parallelo per-query
         int cores = Runtime.getRuntime().availableProcessors();
-        ForkJoinPool pool = new ForkJoinPool(cores);
-        try {
+        try (ForkJoinPool pool = new ForkJoinPool(cores)) {
             pool.submit(() ->
                 // Parallel con indice esplicito tramite IntStream
                 java.util.stream.IntStream.range(0, total).parallel().forEach(idx -> {
@@ -144,8 +143,6 @@ public final class Evaluator {
             throw new IOException("Evaluation interrupted", e);
         } catch (ExecutionException e) {
             throw new IOException("Evaluation failed", e.getCause());
-        } finally {
-            pool.shutdown();
         }
 
         // Converti array in liste per calcolo statistiche
