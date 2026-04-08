@@ -160,7 +160,7 @@ public class SearcherV2 {
                                 return Collections.<String>emptyList();
                             }
                         },
-                        (a, _) -> a,
+                        (a, b) -> a,
                         LinkedHashMap::new   // mantieni ordine di inserimento
                     ))
                 ).get();

@@ -40,5 +40,20 @@
 
     <build>
         <sourceDirectory>code/src/main/java</sourceDirectory>
+        <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>25</source>
+                    <target>25</target>
+                    <release>25</release>
+                    <compileSourceRoots>
+                        <compileSourceRoot>code/src/main/java</compileSourceRoot>
+                    </compileSourceRoots>
+                </configuration>
+            </plugin>
+        </plugins>
     </build>
 </project>
