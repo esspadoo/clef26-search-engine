@@ -8,6 +8,8 @@ import unipd.se.model.Paper;
 import org.apache.lucene.store.Directory;
 
 import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -98,10 +100,8 @@ public class Main {
                 results = SearcherV2.search(index, queries, 1.0f, 100);
 
                 // Save BM25 results in the background while the main thread prepares the configuration
-                if (!new File("results").mkdirs()) {
-                    System.out.println("Failed to load results from: " + papers);
-                    return;
-                }
+                Files.createDirectories(Paths.get("results"));
+
                 File bm25File = new File("results/bm25_results.json");
                 CompletableFuture<Void> saveFuture = CompletableFuture.runAsync(() -> {
                     try {
