@@ -29,7 +29,7 @@ import java.util.List;
 public class IndexerV1 {
 
     /** Shared custom analyzer for tokenizing text fields. */
-    private static final MyEnglishAnalyzer_V2 ANALYZER = new MyEnglishAnalyzer_V2();
+    private static final MyEnglishAnalyzer_TEX ANALYZER = new MyEnglishAnalyzer_TEX();
 
     /**
      * Builds a persistent Lucene index from the given list of {@link Paper} objects.
