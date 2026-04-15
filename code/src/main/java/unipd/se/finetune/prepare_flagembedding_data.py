@@ -5,6 +5,8 @@ from collections import Counter
 from pathlib import Path
 from typing import Any
 
+from back_translation import build_back_translation_map
+
 
 SCRIPT_PATH = Path(__file__).resolve()
 CODE_ROOT = SCRIPT_PATH.parents[6]
@@ -13,7 +15,6 @@ REPO_ROOT = SCRIPT_PATH.parents[7]
 DEFAULT_QUERIES = CODE_ROOT / "data" / "expanded_queries_bge_large.json"
 DEFAULT_CORPUS = CODE_ROOT / "data" / "collection_data.json"
 DEFAULT_OUTPUT_DIR = CODE_ROOT / "data" / "finetune"
-
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
@@ -39,6 +40,60 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=15,
         help="Fallback random negatives used to build a valid base training file.",
+    )
+    parser.add_argument(
+        "--augment-back-translation",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Add back-translated query variants to the training split only.",
+    )
+    parser.add_argument(
+        "--back-translation-source-lang",
+        default="en",
+        help="Source language for the training queries used during back translation.",
+    )
+    parser.add_argument(
+        "--back-translation-pivot-langs",
+        nargs="+",
+        default=("es",),
+        help="Intermediate languages used for back translation.",
+    )
+    parser.add_argument(
+        "--back-translation-model-template",
+        default="Helsinki-NLP/opus-mt-{src}-{tgt}",
+        help=(
+            "Hugging Face model template used for translation. "
+            "It must support {src} and {tgt} placeholders."
+        ),
+    )
+    parser.add_argument(
+        "--back-translation-batch-size",
+        type=int,
+        default=8,
+        help="Batch size used during back-translation generation.",
+    )
+    parser.add_argument(
+        "--back-translation-max-input-length",
+        type=int,
+        default=192,
+        help="Tokenizer max_length used by the translation models.",
+    )
+    parser.add_argument(
+        "--back-translation-num-beams",
+        type=int,
+        default=4,
+        help="Beam size used when generating back-translated variants.",
+    )
+    parser.add_argument(
+        "--back-translation-device",
+        default="auto",
+        help="Torch device for translation models, for example auto, cpu, cuda, or cuda:0.",
+    )
+    parser.add_argument(
+        "--back-translation-cache",
+        type=Path,
+        default=None,
+        help="Optional JSON cache for translation results. Defaults under the output directory.",
     )
     return parser.parse_args()
 
@@ -242,6 +297,39 @@ def sample_random_negatives(
     return rng.sample(candidates, count)
 
 
+def append_train_row(
+    *,
+    internal_rows: list[dict[str, Any]],
+    export_rows: list[dict[str, Any]],
+    qid: str,
+    variant: str,
+    gold_pubkey: str,
+    query_text: str,
+    positive_text: str,
+    negative_pubkeys: list[str],
+    negative_texts: list[str],
+) -> None:
+    internal_rows.append(
+        {
+            "qid": qid,
+            "variant": variant,
+            "gold_pubkey": gold_pubkey,
+            "query": query_text,
+            "pos": [positive_text],
+            "neg": negative_texts,
+            "pos_pubkeys": [gold_pubkey],
+            "neg_pubkeys": negative_pubkeys,
+        }
+    )
+    export_rows.append(
+        {
+            "query": query_text,
+            "pos": [positive_text],
+            "neg": negative_texts,
+        }
+    )
+
+
 def build_train_rows(
     train_queries: list[dict[str, Any]],
     doc_text_by_pubkey: dict[str, str],
@@ -249,6 +337,7 @@ def build_train_rows(
     train_query_variants: list[str],
     random_negatives_per_example: int,
     seed: int,
+    back_translation_map: dict[str, list[dict[str, str]]] | None = None,
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], Counter]:
     rng = random.Random(seed)
     internal_rows: list[dict[str, Any]] = []
@@ -274,25 +363,37 @@ def build_train_rows(
                 count=random_negatives_per_example,
             )
             negative_texts = [doc_text_by_pubkey[docid] for docid in negative_pubkeys]
+            append_train_row(
+                internal_rows=internal_rows,
+                export_rows=export_rows,
+                qid=query["index"],
+                variant=variant,
+                gold_pubkey=gold_pubkey,
+                query_text=query_text,
+                positive_text=positive_text,
+                negative_pubkeys=negative_pubkeys,
+                negative_texts=negative_texts,
+            )
 
-            internal_row = {
-                "qid": query["index"],
-                "variant": variant,
-                "gold_pubkey": gold_pubkey,
-                "query": query_text,
-                "pos": [positive_text],
-                "neg": negative_texts,
-                "pos_pubkeys": [gold_pubkey],
-                "neg_pubkeys": negative_pubkeys,
-            }
-            export_row = {
-                "query": query_text,
-                "pos": [positive_text],
-                "neg": negative_texts,
-            }
+            for augmented_variant in (back_translation_map or {}).get(query_text, []):
+                augmented_text = normalize_text(augmented_variant.get("text", ""))
+                if not augmented_text or augmented_text in seen_variant_texts:
+                    continue
 
-            internal_rows.append(internal_row)
-            export_rows.append(export_row)
+                seen_variant_texts.add(augmented_text)
+                augmented_variant_name = f"{variant}_bt_{augmented_variant['pivot_lang']}"
+                variant_counter[augmented_variant_name] += 1
+                append_train_row(
+                    internal_rows=internal_rows,
+                    export_rows=export_rows,
+                    qid=query["index"],
+                    variant=augmented_variant_name,
+                    gold_pubkey=gold_pubkey,
+                    query_text=augmented_text,
+                    positive_text=positive_text,
+                    negative_pubkeys=negative_pubkeys,
+                    negative_texts=negative_texts,
+                )
 
     return internal_rows, export_rows, variant_counter
 
@@ -302,6 +403,12 @@ def main() -> None:
     validate_ratios(args.train_ratio, args.dev_ratio)
     if args.random_negatives_per_example <= 0:
         raise ValueError("--random-negatives-per-example must be greater than 0.")
+    if args.back_translation_batch_size <= 0:
+        raise ValueError("--back-translation-batch-size must be greater than 0.")
+    if args.back_translation_max_input_length <= 0:
+        raise ValueError("--back-translation-max-input-length must be greater than 0.")
+    if args.back_translation_num_beams <= 0:
+        raise ValueError("--back-translation-num-beams must be greater than 0.")
 
     query_variants = [variant.strip() for variant in args.train_query_variants if variant.strip()]
     if not query_variants:
@@ -316,6 +423,41 @@ def main() -> None:
         seed=args.seed,
     )
 
+    back_translation_cache = args.back_translation_cache
+    back_translation_map: dict[str, list[dict[str, str]]] | None = None
+    normalized_pivot_langs = [
+        pivot_lang.strip() for pivot_lang in args.back_translation_pivot_langs if pivot_lang.strip()
+    ]
+    if args.augment_back_translation:
+        if not normalized_pivot_langs:
+            raise ValueError(
+                "At least one --back-translation-pivot-langs value is required when "
+                "--augment-back-translation is enabled."
+            )
+        if back_translation_cache is None:
+            back_translation_cache = (
+                args.output_dir / "augmentation" / "back_translation_cache.json"
+            )
+
+        unique_train_texts = []
+        for query in splits["train"]:
+            for variant in query_variants:
+                text = pick_query_variant(query, variant)
+                if text:
+                    unique_train_texts.append(text)
+
+        back_translation_map = build_back_translation_map(
+            unique_train_texts,
+            pivot_langs=normalized_pivot_langs,
+            source_lang=args.back_translation_source_lang.strip(),
+            model_template=args.back_translation_model_template,
+            batch_size=args.back_translation_batch_size,
+            device_name=args.back_translation_device,
+            max_input_length=args.back_translation_max_input_length,
+            num_beams=args.back_translation_num_beams,
+            cache_path=back_translation_cache,
+        )
+
     all_docids = [document["id"] for document in documents]
     internal_rows, export_rows, variant_counter = build_train_rows(
         train_queries=splits["train"],
@@ -324,6 +466,7 @@ def main() -> None:
         train_query_variants=query_variants,
         random_negatives_per_example=args.random_negatives_per_example,
         seed=args.seed,
+        back_translation_map=back_translation_map,
     )
 
     repo_dir = args.output_dir / "repo"
@@ -360,6 +503,23 @@ def main() -> None:
         "train_examples_by_variant": dict(variant_counter),
         "random_negatives_per_example": args.random_negatives_per_example,
         "seed": args.seed,
+        "augmentation": {
+            "back_translation": {
+                "enabled": args.augment_back_translation,
+                "source_lang": args.back_translation_source_lang.strip(),
+                "pivot_langs": normalized_pivot_langs,
+                "model_template": args.back_translation_model_template,
+                "batch_size": args.back_translation_batch_size,
+                "max_input_length": args.back_translation_max_input_length,
+                "num_beams": args.back_translation_num_beams,
+                "device": args.back_translation_device,
+                "cache_path": str(back_translation_cache) if back_translation_cache else None,
+                "unique_source_texts": len(back_translation_map or {}),
+                "generated_augmented_texts": sum(
+                    len(variants) for variants in (back_translation_map or {}).values()
+                ),
+            }
+        },
         "paths": {
             "repo_train_queries": str(repo_dir / "train_queries.json"),
             "repo_dev_queries": str(repo_dir / "dev_queries.json"),
@@ -382,6 +542,15 @@ def main() -> None:
         "Training examples: "
         f"{len(export_rows)} from variants {', '.join(query_variants)}"
     )
+    if args.augment_back_translation:
+        print(
+            "Back-translation augmented texts: "
+            f"{sum(len(variants) for variants in (back_translation_map or {}).values())}"
+        )
+        print(
+            "Training example variants (including augmentation): "
+            + ", ".join(sorted(variant_counter.keys()))
+        )
 
 
 if __name__ == "__main__":

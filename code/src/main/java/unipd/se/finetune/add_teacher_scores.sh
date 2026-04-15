@@ -44,4 +44,4 @@ if [[ -n "$DEVICES" ]]; then
 fi
 
 printf 'Running command:\n%s\n' "${cmd[*]}"
-"${cmd[@]}"
+PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" "${cmd[@]}"
