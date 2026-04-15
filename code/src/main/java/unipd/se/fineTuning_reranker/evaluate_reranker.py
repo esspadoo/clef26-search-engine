@@ -1,310 +1,280 @@
 """
-evaluate_reranker.py — Valuta un checkpoint fine-tuned in modalità inference reale
-====================================================================================
-Carica il checkpoint LoRA fine-tuned, esegue il re-ranking sul test set
-(o su qualsiasi BM25 run) con lo STESSO meccanismo yes/no di CausalReranker.py,
-e scrive l'output in formato compatibile con Evaluator.java.
+evaluate_reranker.py
 
-Questo script è pensato per:
-  1. Confrontare il checkpoint fine-tuned vs zero-shot sullo stesso test set
-  2. Produrre il file JSON da passare al Java evaluator per le metriche finali
-  3. Debug rapido: con --max_queries 200 puoi testare in pochi minuti
+Valuta il reranker fine-tuned su un dev/test set.
+Calcola: MRR@5, MRR@10, NDCG@10, MAP, Precision@1
+
+Può essere usato sia per:
+  1. Valutare checkpoint durante il training
+  2. Comparare il modello fine-tuned vs il baseline (es. GTE-ModernBERT o Nemotron)
 
 Uso:
-  # Valuta il best checkpoint sul test set
-  python evaluate_reranker.py \\
-    --model models/ft_qwen3_reranker_0.6B_r8/best \\
-    --queries data/expanded_queries_bge_large.json \\
-    --papers  data/collection_data.json \\
-    --bm25    results/bm25_results.json \\
-    --test_split data/finetune_reranker/test.jsonl \\
-    --output results/reranked_finetuned_test.json
+  python evaluate_reranker.py \
+    --checkpoint ./checkpoints/modernbert-reranker/best_checkpoint \
+    --dev_file   training_data/dev_pairs.jsonl
 
-  # Confronto zero-shot (stesso script, modello base)
-  python evaluate_reranker.py \\
-    --model Qwen/Qwen3-Reranker-0.6B \\
-    --test_split data/finetune_reranker/test.jsonl \\
-    --output results/reranked_zeroshot_test.json
-
-  # Rerank su tutte le query (per submission finale con 4B fine-tuned)
-  python evaluate_reranker.py \\
-    --model models/ft_qwen3_reranker_4B_r16/best \\
-    --output results/reranked_finetuned_4B_final.json
+  # Oppure su un intero run BM25:
+  python evaluate_reranker.py \
+    --checkpoint ./checkpoints/modernbert-reranker/best_checkpoint \
+    --corpus     corpus.tsv \
+    --queries    queries.tsv \
+    --qrels      qrels.txt \
+    --bm25_run   bm25_run.txt \
+    --rerank_depth 100
 """
 
 import json
-import os
+import math
+import logging
 import argparse
+from pathlib import Path
+from collections import defaultdict
+
 import torch
+from torch.utils.data import DataLoader, Dataset
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from peft import PeftModel, PeftConfig
 from tqdm import tqdm
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+log = logging.getLogger(__name__)
 
 
-# ─────────────────────────────────────────────────────────────
-# CLI
-# ─────────────────────────────────────────────────────────────
-parser = argparse.ArgumentParser()
-parser.add_argument("--model",       required=True,
-                    help="Path al checkpoint fine-tuned (es. models/ft_.../best) "
-                         "oppure modello base HuggingFace (es. Qwen/Qwen3-Reranker-0.6B)")
-parser.add_argument("--base_model",  default=None,
-                    help="Modello base per LoRA adapter. "
-                         "Se --model è un path locale con adapter_config.json, "
-                         "viene rilevato automaticamente. "
-                         "Altrimenti specifica es. Qwen/Qwen3-Reranker-0.6B")
-parser.add_argument("--queries",     default="../../../../../../data/expanded_queries_bge_large.json")
-parser.add_argument("--papers",      default="../../../../../../data/collection_data.json")
-parser.add_argument("--bm25",        default="../../../../../../../results/bm25_results.json")
-parser.add_argument("--test_split",  default=None,
-                    help="Se specificato, valuta SOLO sulle query del test set. "
-                         "Passa data/finetune_reranker/test.jsonl per un confronto fair.")
-parser.add_argument("--output",      required=True,
-                    help="Path output JSON (formato: {qid -> [pubkey, ...]})")
-parser.add_argument("--top_k",       type=int, default=100)
-parser.add_argument("--batch",       type=int, default=16)
-parser.add_argument("--max_length",  type=int, default=512)
-parser.add_argument("--max_queries", type=int, default=None,
-                    help="Limita il numero di query (debug rapido)")
-args = parser.parse_args()
-
-# ─────────────────────────────────────────────────────────────
-# TASK_INSTRUCTION — IDENTICA a CausalReranker.py e finetune
-# ─────────────────────────────────────────────────────────────
-TASK_INSTRUCTION = (
-    "Given a short user query (like a tweet) and a formal academic paper, "
-    "judge how relevant the paper is to the query."
-    "Return a higher score for relevant papers, and a lower score for irrelevant papers."
-)
-PREFIX = (
-    "<|im_start|>system\n"
-    "Judge whether the Document meets the requirements based on the Query and "
-    "the Instruct provided. Return an higher score for relevant papers and a lower score for irrelevant papers."
-    "<|im_end|>\n<|im_start|>user\n"
-)
-SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
-
-def format_pair(query: str, doc: str) -> str:
-    return (
-        f"<Instruct>: {TASK_INSTRUCTION}\n"
-        f"<Query>: {query}\n"
-        f"<Document>: {doc}"
-    )
-
-
-# ─────────────────────────────────────────────────────────────
-# Carica modello (auto-detection LoRA vs base)
-# ─────────────────────────────────────────────────────────────
-def load_model(model_path: str, base_model: str, device: str):
+def load_peft_model(checkpoint_path: str, device):
     """
-    Carica automaticamente:
-    - Se model_path è una directory con adapter_config.json → LoRA checkpoint
-    - Altrimenti → modello base HuggingFace (zero-shot)
+    Carica un modello fine-tuned con PEFT/LoRA.
+    Gestisce sia checkpoint PEFT che modelli merged.
     """
-    adapter_config_path = os.path.join(model_path, "adapter_config.json")
-    is_lora = os.path.isfile(adapter_config_path)
+    checkpoint_path = Path(checkpoint_path)
 
-    if is_lora:
-        # Leggi il base model dall'adapter_config se non specificato
-        if base_model is None:
-            with open(adapter_config_path) as f:
-                cfg = json.load(f)
-            base_model = cfg.get("base_model_name_or_path", None)
-            if base_model is None:
-                raise ValueError(
-                    "base_model non trovato in adapter_config.json. "
-                    "Specifica --base_model manualmente."
-                )
-        print(f"  Modello LoRA rilevato.")
-        print(f"  Base model: {base_model}")
-        print(f"  Adapter:    {model_path}")
-
-        tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-
-        base = AutoModelForCausalLM.from_pretrained(
-            base_model,
-            torch_dtype=torch.float16,
-            device_map=device,
+    # Controlla se è un checkpoint PEFT (ha adapter_config.json)
+    if (checkpoint_path / "adapter_config.json").exists():
+        log.info(f"Caricamento modello PEFT da {checkpoint_path}")
+        peft_config  = PeftConfig.from_pretrained(str(checkpoint_path))
+        base_model   = AutoModelForSequenceClassification.from_pretrained(
+            peft_config.base_model_name_or_path,
+            num_labels=1,
+            torch_dtype=torch.bfloat16,
+            ignore_mismatched_sizes=True,
         )
-        model = PeftModel.from_pretrained(base, model_path)
-        model = model.merge_and_unload()  # fonde LoRA per inference più veloce
+        model = PeftModel.from_pretrained(base_model, str(checkpoint_path))
+        tokenizer = AutoTokenizer.from_pretrained(str(checkpoint_path))
     else:
-        print(f"  Modello base (zero-shot): {model_path}")
-        tokenizer = AutoTokenizer.from_pretrained(model_path, padding_side="left")
-        if tokenizer.pad_token is None:
-            tokenizer.pad_token = tokenizer.eos_token
-
-        model = AutoModelForCausalLM.from_pretrained(
-            model_path,
-            torch_dtype=torch.float16,
-            device_map=device,
+        log.info(f"Caricamento modello merged da {checkpoint_path}")
+        model     = AutoModelForSequenceClassification.from_pretrained(
+            str(checkpoint_path), num_labels=1, torch_dtype=torch.bfloat16
         )
+        tokenizer = AutoTokenizer.from_pretrained(str(checkpoint_path))
 
+    model = model.to(device)
     model.eval()
     return model, tokenizer
 
 
-# ─────────────────────────────────────────────────────────────
-# Scoring (identico a CausalReranker.py)
-# ─────────────────────────────────────────────────────────────
-def make_score_fn(model, tokenizer, prefix_ids, suffix_ids, max_length,
-                  token_true_id, token_false_id):
-    content_max = max_length - len(prefix_ids) - len(suffix_ids)
+class PairDataset(Dataset):
+    def __init__(self, pairs: list[tuple[str, str, str, int]]):
+        """pairs: [(qid, doc_id, text, relevance)]"""
+        self.pairs = pairs
 
-    def score_pairs(pairs):
-        formatted = [format_pair(q, d) for q, d in pairs]
-        inputs = tokenizer(
-            formatted,
-            padding=False,
-            truncation=True,
-            max_length=content_max,
-            add_special_tokens=False,
-            return_attention_mask=False,
+    def __len__(self):
+        return len(self.pairs)
+
+    def __getitem__(self, idx):
+        return self.pairs[idx]
+
+
+def score_pairs(
+        model,
+        tokenizer,
+        query: str,
+        docs: list[str],
+        max_length: int = 512,
+        batch_size: int = 32,
+        device=None,
+) -> list[float]:
+    """Calcola score per una query e lista di documenti."""
+    scores = []
+
+    for i in range(0, len(docs), batch_size):
+        batch_docs = docs[i : i + batch_size]
+        enc = tokenizer(
+            [query] * len(batch_docs),
+            batch_docs,
+            max_length=max_length,
+            truncation="only_second",
+            padding=True,
+            return_tensors="pt",
+            )
+        enc = {k: v.to(device) for k, v in enc.items()}
+
+        with torch.no_grad(), torch.autocast("cuda", dtype=torch.bfloat16):
+            out = model(**enc)
+
+        batch_scores = out.logits.squeeze(-1).float().cpu().tolist()
+        if isinstance(batch_scores, float):
+            batch_scores = [batch_scores]
+        scores.extend(batch_scores)
+
+    return scores
+
+
+def compute_metrics(
+        qid_to_results: dict[str, list[tuple[float, int]]],
+        cutoffs: list[int] = [5, 10],
+) -> dict:
+    """
+    qid_to_results: {qid: [(score, relevance), ...]} già ordinati per score desc
+    """
+    mrr_scores   = {k: [] for k in cutoffs}
+    ndcg_scores  = {k: [] for k in cutoffs}
+    ap_scores    = []
+    p1_scores    = []
+
+    for qid, results in qid_to_results.items():
+        # MRR@k
+        for k in cutoffs:
+            mrr = 0.0
+            for rank, (score, rel) in enumerate(results[:k], start=1):
+                if rel >= 1:
+                    mrr = 1.0 / rank
+                    break
+            mrr_scores[k].append(mrr)
+
+        # NDCG@k
+        for k in cutoffs:
+            dcg  = sum(
+                (2 ** rel - 1) / math.log2(rank + 1)
+                for rank, (score, rel) in enumerate(results[:k], start=1)
+            )
+            ideal = sorted([rel for _, rel in results], reverse=True)[:k]
+            idcg = sum(
+                (2 ** rel - 1) / math.log2(rank + 1)
+                for rank, rel in enumerate(ideal, start=1)
+            )
+            ndcg_scores[k].append(dcg / idcg if idcg > 0 else 0.0)
+
+        # AP
+        n_rel = 0
+        ap    = 0.0
+        for rank, (score, rel) in enumerate(results, start=1):
+            if rel >= 1:
+                n_rel += 1
+                ap    += n_rel / rank
+        total_rel = sum(1 for _, rel in results if rel >= 1)
+        ap_scores.append(ap / total_rel if total_rel > 0 else 0.0)
+
+        # P@1
+        p1_scores.append(1.0 if results and results[0][1] >= 1 else 0.0)
+
+    metrics = {}
+    for k in cutoffs:
+        metrics[f"MRR@{k}"]   = sum(mrr_scores[k])  / len(mrr_scores[k])
+        metrics[f"NDCG@{k}"]  = sum(ndcg_scores[k]) / len(ndcg_scores[k])
+    metrics["MAP"]  = sum(ap_scores)  / len(ap_scores)
+    metrics["P@1"]  = sum(p1_scores)  / len(p1_scores)
+    metrics["n_queries"] = len(qid_to_results)
+
+    return metrics
+
+
+def evaluate_on_run(
+        model, tokenizer, device,
+        corpus_path, queries_path, qrels_path, bm25_run_path,
+        rerank_depth: int = 100, max_length: int = 512, batch_size: int = 32,
+):
+    """Valuta su un BM25 run completo."""
+    from prepare_training_data import load_corpus, load_queries, load_qrels, load_run, clean_tweet
+
+    corpus  = load_corpus(corpus_path)
+    queries = load_queries(queries_path)
+    qrels   = load_qrels(qrels_path)
+    bm25    = load_run(bm25_run_path, top_k=rerank_depth)
+
+    qid_to_results = {}
+
+    for qid, query_text in tqdm(queries.items(), desc="Valutazione"):
+        if qid not in bm25:
+            continue
+
+        retrieved = bm25[qid][:rerank_depth]
+        docs      = [clean_tweet(corpus.get(d, "")) for d in retrieved]
+        query     = clean_tweet(query_text)
+
+        scores = score_pairs(model, tokenizer, query, docs,
+                             max_length=max_length, batch_size=batch_size, device=device)
+
+        doc_rels = qrels.get(qid, {})
+        ranked   = sorted(
+            [(s, doc_rels.get(did, 0)) for s, did in zip(scores, retrieved)],
+            key=lambda x: x[0], reverse=True
         )
-        for i, ids in enumerate(inputs["input_ids"]):
-            inputs["input_ids"][i] = prefix_ids + ids + suffix_ids
-        inputs = tokenizer.pad(inputs, padding=True, return_tensors="pt",
-                               max_length=max_length)
-        for k in inputs:
-            inputs[k] = inputs[k].to(model.device)
+        qid_to_results[qid] = ranked
 
-        with torch.no_grad():
-            logits = model(**inputs).logits
-
-        last = logits[:, -1, :]
-        stacked = torch.stack([last[:, token_false_id], last[:, token_true_id]], dim=1)
-        log_probs = torch.nn.functional.log_softmax(stacked, dim=1)
-        return log_probs[:, 1].exp().tolist()
-
-    return score_pairs
+    return compute_metrics(qid_to_results)
 
 
-def predict_scores_safe(score_fn, pairs, batch_size):
-    """Identico a CausalReranker.py: gestione OOM con dimezzamento batch."""
-    all_scores    = []
-    current_batch = batch_size
-    i = 0
-    while i < len(pairs):
-        batch = pairs[i: i + current_batch]
-        try:
-            all_scores.extend(score_fn(batch))
-            i += current_batch
-            current_batch = batch_size
-        except (torch.OutOfMemoryError, RuntimeError) as e:
-            if "out of memory" not in str(e).lower():
-                raise
-            torch.cuda.empty_cache()
-            if current_batch <= 1:
-                all_scores.extend([0.0] * len(batch))
-                i += current_batch
-                current_batch = batch_size
-            else:
-                current_batch = max(1, current_batch // 2)
-    return all_scores
+def evaluate_on_pairs(model, tokenizer, device, dev_file: str,
+                      max_length: int = 512, batch_size: int = 32):
+    """Valuta su dev_pairs.jsonl."""
+    qid_to_results = defaultdict(list)
+
+    with open(dev_file, encoding="utf-8") as f:
+        examples = [json.loads(l) for l in f]
+
+    for i, ex in enumerate(tqdm(examples, desc="Valutazione")):
+        qid   = ex.get("qid", str(i))
+        query = ex["query"]
+        docs  = [ex["positive"]] + ex["negatives"]
+        rels  = [1] + [0] * len(ex["negatives"])
+
+        scores = score_pairs(model, tokenizer, query, docs,
+                             max_length=max_length, batch_size=batch_size, device=device)
+
+        ranked = sorted(zip(scores, rels), key=lambda x: x[0], reverse=True)
+        qid_to_results[qid].extend(ranked)
+
+    return compute_metrics(dict(qid_to_results))
 
 
-# ─────────────────────────────────────────────────────────────
-# Main
-# ─────────────────────────────────────────────────────────────
 def main():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
-    print(f"\nDevice: {device}")
+    parser = argparse.ArgumentParser(description="Valuta reranker fine-tuned")
+    parser.add_argument("--checkpoint",  required=True)
+    parser.add_argument("--dev_file",    default=None, help="dev_pairs.jsonl")
+    parser.add_argument("--corpus",      default=None)
+    parser.add_argument("--queries",     default=None)
+    parser.add_argument("--qrels",       default=None)
+    parser.add_argument("--bm25_run",    default=None)
+    parser.add_argument("--rerank_depth", type=int, default=100)
+    parser.add_argument("--max_length",  type=int, default=512)
+    parser.add_argument("--batch_size",  type=int, default=32)
+    args = parser.parse_args()
 
-    # ── Carica dati ──────────────────────────────────────────
-    print("Loading data...")
-    with open(args.queries, "r", encoding="utf-8") as f:
-        queries_raw = json.load(f)
-    with open(args.papers, "r", encoding="utf-8") as f:
-        papers_raw = json.load(f)
-    with open(args.bm25, "r", encoding="utf-8") as f:
-        bm25_results = json.load(f)
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model, tokenizer = load_peft_model(args.checkpoint, device)
 
-    paper_texts = {
-        str(p["pubkey"]): (p.get("title","") + ". " + p.get("abstract","")).strip()
-        for p in papers_raw
-    }
-    query_texts = {
-        str(q["index"]): q.get("original", q.get("text", ""))
-        for q in queries_raw
-    }
+    if args.dev_file:
+        log.info("Valutazione su dev_pairs.jsonl")
+        metrics = evaluate_on_pairs(model, tokenizer, device,
+                                    args.dev_file, args.max_length, args.batch_size)
+    elif args.bm25_run:
+        log.info("Valutazione su BM25 run")
+        metrics = evaluate_on_run(
+            model, tokenizer, device,
+            args.corpus, args.queries, args.qrels, args.bm25_run,
+            args.rerank_depth, args.max_length, args.batch_size,
+        )
+    else:
+        parser.error("Specifica --dev_file oppure --bm25_run")
 
-    # Filtra per test split se specificato
-    if args.test_split:
-        print(f"Filtering to test split: {args.test_split}")
-        test_qids = set()
-        with open(args.test_split) as f:
-            for line in f:
-                ex = json.loads(line)
-                test_qids.add(str(ex["qid"]))
-        bm25_results = {qid: v for qid, v in bm25_results.items() if qid in test_qids}
-        print(f"  Query nel test split: {len(bm25_results)}")
-
-    # Limita per debug
-    if args.max_queries:
-        items = list(bm25_results.items())[:args.max_queries]
-        bm25_results = dict(items)
-        print(f"  Limitato a {args.max_queries} query (debug mode)")
-
-    # ── Carica modello ────────────────────────────────────────
-    print(f"\nLoading model: {args.model}")
-    model, tokenizer = load_model(args.model, args.base_model, device)
-
-    token_true_id  = tokenizer.convert_tokens_to_ids("yes")
-    token_false_id = tokenizer.convert_tokens_to_ids("no")
-    prefix_ids = tokenizer.encode(PREFIX, add_special_tokens=False)
-    suffix_ids = tokenizer.encode(SUFFIX, add_special_tokens=False)
-
-    score_fn = make_score_fn(
-        model, tokenizer, prefix_ids, suffix_ids, args.max_length,
-        token_true_id, token_false_id
-    )
-
-    # ── Sanity check ──────────────────────────────────────────
-    test_pairs = [
-        ("neural network classification",
-         "A deep learning model for image classification using CNNs"),
-        ("neural network classification",
-         "Ancient Roman history and the emperors of the first century BC"),
-    ]
-    scores = score_fn(test_pairs)
-    print(f"\nSanity check → relevant={scores[0]:.4f} | irrelevant={scores[1]:.4f} | "
-          f"Δ={abs(scores[0]-scores[1]):.4f}")
-    if abs(scores[0] - scores[1]) < 0.05:
-        print("WARNING: Δ molto piccolo. Controlla il modello.")
-
-    # ── Re-ranking ────────────────────────────────────────────
-    print(f"\nRe-ranking {len(bm25_results)} query (top_k={args.top_k})...")
-    reranked = {}
-
-    for qid, candidates in tqdm(bm25_results.items()):
-        qt = query_texts.get(str(qid), "")
-        if not qt:
-            reranked[qid] = candidates
-            continue
-
-        valid = [(pk, paper_texts[str(pk)])
-                 for pk in candidates[:args.top_k] if str(pk) in paper_texts]
-        if not valid:
-            reranked[qid] = candidates
-            continue
-
-        pairs = [(qt, doc) for _, doc in valid]
-        pubkeys = [pk for pk, _ in valid]
-
-        scores = predict_scores_safe(score_fn, pairs, args.batch)
-        ranked = sorted(zip(pubkeys, scores), key=lambda x: -x[1])
-        reranked[qid] = [pk for pk, _ in ranked]
-
-    # ── Salva output ──────────────────────────────────────────
-    os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
-    with open(args.output, "w", encoding="utf-8") as f:
-        json.dump(reranked, f, indent=2, ensure_ascii=False)
-
-    print(f"\nOutput salvato → {args.output}")
-    print(f"Coverage: {len(reranked)}/{len(bm25_results)} query rerankate")
-    print("\nOra esegui il Java evaluator puntando a questo file.")
+    print("\n" + "="*50)
+    print("RISULTATI VALUTAZIONE")
+    print("="*50)
+    for k, v in metrics.items():
+        if isinstance(v, float):
+            print(f"  {k:15s}: {v:.4f}")
+        else:
+            print(f"  {k:15s}: {v}")
+    print("="*50)
 
 
 if __name__ == "__main__":
