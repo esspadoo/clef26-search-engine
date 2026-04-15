@@ -49,4 +49,4 @@ if [[ "$USE_GPU_FOR_SEARCHING" == "True" ]]; then
 fi
 
 printf 'Running command:\n%s\n' "${cmd[*]}"
-"${cmd[@]}"
+PYTHONPATH="$SCRIPT_DIR${PYTHONPATH:+:$PYTHONPATH}" "${cmd[@]}"

@@ -24,7 +24,6 @@ REPO_ROOT = SCRIPT_PATH.parents[7]
 DEFAULT_QUERIES = CODE_ROOT / "data" / "finetune" / "repo" / "test_queries.json"
 DEFAULT_CORPUS = CODE_ROOT / "data" / "collection_data.json"
 DEFAULT_OUTPUT = REPO_ROOT / "results" / "finetune_dense_results.json"
-DEFAULT_METRICS_OUTPUT = REPO_ROOT / "results" / "finetune_dense_metrics.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -34,7 +33,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--queries", type=Path, default=DEFAULT_QUERIES)
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--metrics-output", type=Path, default=DEFAULT_METRICS_OUTPUT)
+    parser.add_argument(
+        "--metrics-output",
+        type=Path,
+        default=None,
+        help="Optional path for the metrics JSON. If omitted, metrics are only printed to stdout.",
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
     parser.add_argument("--query-field", default="original")
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
@@ -60,23 +64,34 @@ def get_installed_version(package_name: str) -> str | None:
 def patch_transformers_flash_attn_compat() -> None:
     try:
         import transformers.utils as transformers_utils
+        import transformers.utils.import_utils as transformers_import_utils
     except ImportError:
         return
 
     if hasattr(transformers_utils, "is_flash_attn_greater_or_equal_2_10"):
+        pass
+    else:
+        legacy_checker = getattr(transformers_utils, "is_flash_attn_greater_or_equal", None)
+        if legacy_checker is not None:
+
+            def _is_flash_attn_greater_or_equal_2_10() -> bool:
+                try:
+                    return bool(legacy_checker("2.1.0"))
+                except Exception:
+                    return False
+
+            transformers_utils.is_flash_attn_greater_or_equal_2_10 = _is_flash_attn_greater_or_equal_2_10
+
+    if hasattr(transformers_import_utils, "is_torch_fx_available"):
         return
 
-    legacy_checker = getattr(transformers_utils, "is_flash_attn_greater_or_equal", None)
-    if legacy_checker is None:
-        return
-
-    def _is_flash_attn_greater_or_equal_2_10() -> bool:
+    def _is_torch_fx_available() -> bool:
         try:
-            return bool(legacy_checker("2.1.0"))
+            return bool(transformers_import_utils.is_torch_available())
         except Exception:
             return False
 
-    transformers_utils.is_flash_attn_greater_or_equal_2_10 = _is_flash_attn_greater_or_equal_2_10
+    transformers_import_utils.is_torch_fx_available = _is_torch_fx_available
 
 
 def build_bge_m3_model(model_name: str) -> Any:
@@ -499,10 +514,11 @@ def main() -> None:
         "batch_size": args.batch_size,
     }
     save_json(args.output, results)
-    save_json(args.metrics_output, {"config": config, "metrics": metrics})
 
     print(f"Saved retrieval results to {args.output}")
-    print(f"Saved metrics to {args.metrics_output}")
+    if args.metrics_output is not None:
+        save_json(args.metrics_output, {"config": config, "metrics": metrics})
+        print(f"Saved metrics to {args.metrics_output}")
     print(f"Recall@1:   {metrics['recall@1']:.4f}")
     print(f"Recall@5:   {metrics['recall@5']:.4f}")
     print(f"Recall@10:  {metrics['recall@10']:.4f}")
