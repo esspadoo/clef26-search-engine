@@ -1,29 +1,10 @@
-import pickle
+import pandas as pd
 import json
 
-def make_json_serializable(obj):
-    if isinstance(obj, dict):
-        return {str(k): make_json_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [make_json_serializable(i) for i in obj]
-    elif isinstance(obj, tuple):
-        return [make_json_serializable(i) for i in obj]
-    elif isinstance(obj, set):
-        return list(obj)
-    elif isinstance(obj, bytes):
-        return obj.decode("utf-8", errors="ignore")
-    else:
-        return obj
+# Carica il pickle
+df = pd.read_pickle("/home/fabio/WorkInProgress/SearchEngines/Homework_SE/seupd2526-retrix/code/src/main/java/unipd/se/fineTuning_reranker/data/subtask4b_collection_data.pkl")
 
-input_file = "input.pkl"
-output_file = "output.json"
+# Salva come JSON
+df.to_json('file.json', orient='records', indent=4)
 
-with open(input_file, "rb") as f:
-    data = pickle.load(f)
 
-data = make_json_serializable(data)
-
-with open(output_file, "w", encoding="utf-8") as f:
-    json.dump(data, f, ensure_ascii=False, indent=2)
-
-print("Conversione completata!")
