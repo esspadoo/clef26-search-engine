@@ -240,9 +240,3 @@ python3 code/src/main/java/unipd/se/py/BiEncoderBGE_m3_hybrid.py \
 - Second training pass:
   hard negatives plus teacher scores
 
-## Cluster Notes
-
-- Prefer at least 1 GPU for training. More GPUs help through `torchrun`.
-- If VRAM is tight, lower `PER_DEVICE_BATCH_SIZE` and keep gradient
-  checkpointing enabled.
-- If training on multiple GPUs, keep `NEGATIVES_CROSS_DEVICE=True`.
