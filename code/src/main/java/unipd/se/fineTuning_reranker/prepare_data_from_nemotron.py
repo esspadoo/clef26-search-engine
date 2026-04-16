@@ -81,8 +81,7 @@ def clean_tweet(text: str) -> str:
     text = re.sub(r"http\S+|www\S+", "", text)
     text = re.sub(r"@\w+", "@user", text)
     text = re.sub(r"#(\w+)", r"\1", text)
-    text = emoji.replace_emoji(text, replace='')  # Rimuovi emoji
-
+    text = emoji.replace_emoji(text, replace='')
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
