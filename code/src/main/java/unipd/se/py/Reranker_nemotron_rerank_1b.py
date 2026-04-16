@@ -1,5 +1,5 @@
 """
-LASTReranker_Nemotron_1b.py — Llama-Nemotron-Rerank-1B re-ranking dei risultati BM25
+Reranker_Nemotron_1b.py — Llama-Nemotron-Rerank-1B re-ranking dei risultati BM25
 ======================================================================================
 nvidia/llama-nemotron-rerank-1b-v2 è un cross-encoder (AutoModelForSequenceClassification)
 fine-tuned con bidirectional attention su Llama-3.2-1B.
@@ -48,16 +48,16 @@ from tqdm import tqdm
 parser = argparse.ArgumentParser()
 parser.add_argument("--queries",     default="../../../../../../data/expanded_queries_bge_large.json")
 parser.add_argument("--papers",      default="../../../../../../data/collection_data.json")
-parser.add_argument("--bm25",        default="../../../../../../../results/bi_encoder_results_513.json")
-parser.add_argument("--output",      default="../../../../../../../results/reranked_results_nemotron_tk200.json")
-parser.add_argument("--top_k",       type=int, default=200,
-                    help="Candidati BM25 da passare al re-ranker (default: 500)")
-parser.add_argument("--batch",       type=int, default=64,
-                    help="Coppie per forward pass GPU (default: 64). "
+parser.add_argument("--bm25",        default="../../../../../../../results/bm25_results.json")
+parser.add_argument("--output",      default="../../../../../../../results/reranked_results_nemotron.json")
+parser.add_argument("--top_k",       type=int, default=100,
+                    help="Candidati BM25 da passare al re-ranker (default: 100)")
+parser.add_argument("--batch",       type=int, default=32,
+                    help="Coppie per forward pass GPU (default: 32). "
                          "Nemotron-1B BF16 ≈ 2.5 GB VRAM. "
                          "Su RTX 3090 24GB con max_length=512 puoi alzare fino a 64.")
-parser.add_argument("--query_chunk", type=int, default=16,
-                    help="Query per chunk (default: 16).")
+parser.add_argument("--query_chunk", type=int, default=8,
+                    help="Query per chunk (default: 8).")
 parser.add_argument("--max_length",  type=int, default=512,
                     help="Lunghezza massima token per coppia (default: 512). "
                          "Il modello supporta 8192 ma 512 è sufficiente per titolo+abstract.")
@@ -164,9 +164,9 @@ def scores_to_results(meta, scores_flat):
 
 
 def build_query_tasks(
-    query_items: list,
-    max_queries_per_task: int,
-    num_gpus: int,
+        query_items: list,
+        max_queries_per_task: int,
+        num_gpus: int,
 ) -> tuple[list[list], int]:
     """
     Spezza il lavoro in task più fini del path single-GPU.
