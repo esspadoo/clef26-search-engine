@@ -3,7 +3,7 @@ package unipd.se;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import unipd.se.model.ExpandedQueryDoc;
+import unipd.se.model.ExpandedQueryDoc_TEX;
 import unipd.se.model.Paper;
 import org.apache.lucene.store.Directory;
 
@@ -63,7 +63,7 @@ public class Main {
         System.out.println("Starting retrieval [cores=" + cores + "]");
 
         String papersPath  = args.length > 0 && !args[0].equals("_") ? args[0] : "code/data/collection_data.json";
-        String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/expanded_queries_bge_large.json";
+        String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/expanded_queries_bge_TEX.json";
 
         // If rerankedResultPath is provided, skip BM25 and directly evaluate re-ranked results
         String rerankedPath = args.length > 2 ? args[2] : null;
@@ -75,11 +75,11 @@ public class Main {
             // Papers and queries are deserialized simultaneously using two I/O threads
             Future<List<Paper>> papersFuture =
                     ioPool.submit(() -> DataLoader.loadPapers(papersPath));
-            Future<List<ExpandedQueryDoc>> queriesFuture =
-                    ioPool.submit(() -> DataLoader.loadQueries(queriesPath, ExpandedQueryDoc[].class));
+            Future<List<ExpandedQueryDoc_TEX>> queriesFuture =
+                    ioPool.submit(() -> DataLoader.loadQueries(queriesPath, ExpandedQueryDoc_TEX[].class));
 
             List<Paper> papers             = papersFuture.get();
-            List<ExpandedQueryDoc> queries = queriesFuture.get();
+            List<ExpandedQueryDoc_TEX> queries = queriesFuture.get();
 
             Map<String, List<String>> results;
 
@@ -97,7 +97,7 @@ public class Main {
                 Directory index = IndexerV1.buildIndex(papers);
 
                 // Parallel search (Searcher internally manages parallelism)
-                results = SearcherV2.search(index, queries, 1.0f, 100);
+                results = SearcherV3.search(index, queries, 1.0f, 100);
 
                 // Save BM25 results in the background while the main thread prepares the configuration
                 Files.createDirectories(Paths.get("results"));

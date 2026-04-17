@@ -16,23 +16,43 @@ import java.io.IOException;
 import java.util.*;
 import java.util.concurrent.*;
 
-public class Searcher_TEX {
-
+/**
+ * Utility class for performing searches on a Lucene index of papers.
+ * <p>
+ * Supports both QueryDoc and subclasses (e.g., ExpandedQueryDoc).
+ * Uses BM25 similarity and a weighted multi-field query (title + abstract).
+ * </p>
+ */
+public class SearcherV3 {
+    /** Shared custom analyzer for parsing queries. */
     private static final MyEnglishAnalyzer_TEX ANALYZER = new MyEnglishAnalyzer_TEX();
-    private static final Pattern VENUE_PATTERN = Pattern.compile("\\bvenue:\\s*([^\\s]+)");
-    private static final Pattern AUTHOR_PATTERN = Pattern.compile("\\bauthor:\\s*([^\\s]+(?:\\s+[^\\s]+)*)");
+    private static final Pattern VENUE_PATTERN = Pattern.compile("\\bvenue:\\s*(\\S+)");
+    private static final Pattern AUTHOR_PATTERN = Pattern.compile("\\bauthor:\\s*(\\S+(?:\\s+\\S+)*)");
 
+    /** Weights used for the expansion of the queries */
     private static final float ORIGINAL_TEXT_BOOST = 13.8f;
     private static final float EXPANDED_TEXT_BOOST = 19.8f;
     private static final float EXPANSION_TERMS_BOOST = 4.2f;
 
+    /**
+     * Search the index with a configurable title boost.
+     * Le query vengono elaborate in parallelo su un ForkJoinPool dedicato.
+     * IndexSearcher è thread-safe per letture concorrenti (Lucene garantisce questo).
+     *
+     * @param dir        the Lucene index directory
+     * @param queries    list of queries (QueryDoc or subclasses)
+     * @param titleBoost boost applied to the title field
+     * @param topK       number of top documents to retrieve
+     * @return map from query index → ranked list of pubkeys
+     *
+     * @throws IOException if the index cannot be opened or if the search fails
+     */
     public static Map<String, List<String>> search(
             Directory dir,
             List<? extends QueryDoc> queries,
             float titleBoost,
             int topK
     ) throws IOException {
-
         Map<String, Float> fields = new HashMap<>();
         fields.put("title", titleBoost);
         fields.put("abstract", 1.0f);
@@ -48,7 +68,7 @@ public class Searcher_TEX {
                         queries.parallelStream().collect(Collectors.toMap(
                                 q -> q.index,
                                 q -> searchSingle(q, searcher, fields, topK),
-                                (a, b) -> a,
+                                (a, _) -> a,
                                 LinkedHashMap::new
                         ))
                 ).get();
@@ -59,6 +79,16 @@ public class Searcher_TEX {
         }
     }
 
+    /**
+     * Utility method for searching a single query
+     *
+     * @param q the query to search for
+     * @param searcher the searcher
+     * @param fields the fields weight
+     * @param topK max hits
+     *
+     * @return the list of retrieved documents (pubkey)
+     */
     private static List<String> searchSingle(
             QueryDoc q,
             IndexSearcher searcher,
@@ -98,6 +128,12 @@ public class Searcher_TEX {
 
     /**
      * Build a BooleanQuery where the original text and the expansion have different weights.
+     *
+     * @param eq the expanded query doc
+     * @param parser the parser used
+     * @param filters the filters used
+     *
+     * @return the built Query
      */
     private static Query buildWeightedExpandedQuery(
             ExpandedQueryDoc_TEX eq,
@@ -151,7 +187,7 @@ public class Searcher_TEX {
         Matcher authorM = AUTHOR_PATTERN.matcher(text);
         if (authorM.find()) {
             filters.put("authors", authorM.group(1));
-            text = text.replaceFirst("\\bauthor:\\s*([^\\s]+(?:\\s+[^\\s]+)*)", "").trim();
+            text = text.replaceFirst("\\bauthor:\\s*(\\S+(?:\\s+\\S+)*)", "").trim();
         }
         return text;
     }
