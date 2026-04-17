@@ -63,8 +63,8 @@ def run_pipeline(input_file, output_file, stopwords_file):
         filtered_similar = [
             {"term": s[0], "score": round(s[1], 3)}
             for s in similar
-            if s[0] not in stopwords
-        ][:5] # Limitiamo ai top 5 dopo il filtraggio
+            if s[0] not in stopwords and s[1] > 0.6
+        ]
 
         if filtered_similar:
             expansion_dict[word] = filtered_similar
@@ -77,6 +77,6 @@ if __name__ == "__main__":
     # Aggiorna i percorsi secondo la tua struttura
     DATA_PATH = '../../../../../../data/collection_data.json'
     STOPLIST_PATH = '../../../../../../data/stoplist_en_TEX.txt'
-    OUTPUT_FILE = 'word2vec_expansion_no_stopwords.json'
+    OUTPUT_FILE = 'word2vec_expansion.json'
 
     run_pipeline(DATA_PATH, OUTPUT_FILE, STOPLIST_PATH)
