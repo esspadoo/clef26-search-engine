@@ -5,49 +5,47 @@ import nltk
 from tqdm import tqdm
 from nltk.tokenize import RegexpTokenizer
 from nltk.corpus import stopwords
-from nltk.stem import PorterStemmer
 
-# Scarica le risorse se necessario
+# Risorse NLTK minime
 nltk.download('punkt', quiet=True)
 
-class MyEnglishAnalyzerNLTK:
+class SimpleQueryAnalyzer:
     def __init__(self, stopwords_file):
+        # Pattern di pulizia (URL, @mentions, # symbol)
         self.url_pattern = re.compile(r"https?://\S+\s?")
         self.mention_pattern = re.compile(r"@\w+\s?")
         self.hashtag_symbol = re.compile(r"#")
-        self.stemmer = PorterStemmer()
 
+        # Caricamento stopword personalizzate
         try:
             with open(stopwords_file, 'r', encoding='utf-8') as f:
                 self.stop_words = set(line.strip().lower() for line in f if line.strip())
         except FileNotFoundError:
             self.stop_words = set(stopwords.words('english'))
 
+        # Tokenizer: alfanumerici e trattini
         self.tokenizer = RegexpTokenizer(r"[a-z0-9\-]+")
 
     def analyze(self, text):
         if not text:
             return []
 
-        # Pre-processing
+        # 1. Pulizia stringa
         text = self.url_pattern.sub("", text)
         text = self.mention_pattern.sub("", text)
         text = self.hashtag_symbol.sub("", text)
 
+        # 2. Lowercase e Tokenizzazione
         text = text.lower()
         tokens = self.tokenizer.tokenize(text)
 
-        cleaned_tokens = []
-        for token in tokens:
-            if token not in self.stop_words:
-                stemmed = self.stemmer.stem(token)
-                cleaned_tokens.append(stemmed)
+        # 3. Solo rimozione Stopwords (NIENTE stemming)
+        return [t for t in tokens if t not in self.stop_words]
 
-        return cleaned_tokens
+def run_expansion_pipeline(input_path, model_path, output_path, stop_path, threshold, max_terms):
+    analyzer = SimpleQueryAnalyzer(stop_path)
 
-def run_expansion_pipeline(input_path, model_path, output_path, stop_path, threshold=0.85, max_terms=3):
-    analyzer = MyEnglishAnalyzerNLTK(stop_path)
-
+    print("Caricamento risorse...")
     with open(model_path, 'r', encoding='utf-8') as f:
         expansion_lookup = json.load(f)
 
@@ -56,38 +54,39 @@ def run_expansion_pipeline(input_path, model_path, output_path, stop_path, thres
 
     final_results = []
 
-    for q in tqdm(queries, desc="Analisi ed Espansione"):
+    for q in tqdm(queries, desc="Processing"):
         original_text = q.get('original', '')
 
-        # 1. Analisi (Stemming + Stopwords)
-        analyzed_tokens = analyzer.analyze(original_text)
+        # Token originali puliti (no stopword)
+        original_tokens = analyzer.analyze(original_text)
 
-        # 2. Reperimento termini di espansione
-        # Usiamo un set per contenere TUTTO (Originali + Espansi) senza duplicati
-        combined_terms = set(analyzed_tokens)
+        # Set per unire originali + espansioni
+        combined_terms = set(original_tokens)
 
-        for token in analyzed_tokens:
+        # Aggiunta termini dal Word2Vec
+        for token in original_tokens:
             if token in expansion_lookup:
                 similars = [item['term'] for item in expansion_lookup[token][:max_terms]
                             if item['score'] >= threshold]
                 combined_terms.update(similars)
 
-        # 3. Costruzione dell'oggetto JSON
+        # Costruzione JSON
         output_obj = {
             "index": q.get("index"),
             "original": original_text,
             "expanded": q.get("expanded", ""),
-            "sparse": " ".join(list(combined_terms)), # Include sia originali che espansi
+            "sparse": " ".join(list(combined_terms)),
             "pubkey": q.get("pubkey")
         }
 
         final_results.append(output_obj)
 
+    print(f"Salvataggio in {output_path}...")
     with open(output_path, 'w', encoding='utf-8') as f:
         json.dump(final_results, f, indent=2)
 
 if __name__ == "__main__":
-    # Parametri da riga di comando o default basati su analisi SOTA
+    # Parametri da riga di comando (Threshold e Max Terms)
     THRESHOLD = float(sys.argv[1]) if len(sys.argv) > 1 else 0.8
     MAX_TERMS = int(sys.argv[2]) if len(sys.argv) > 2 else 7
 

@@ -26,7 +26,7 @@ public class ExpandedQueryDoc_TEX extends QueryDoc {
     /**
      * Extra terms used to improve retrieval
      */
-    public String exp_terms;
+    public String sparse;
 
 
     public String keywords;
@@ -54,17 +54,7 @@ public class ExpandedQueryDoc_TEX extends QueryDoc {
      *
      * @return the expansion terms
      */
-    public String getExpTerms() {
-        return exp_terms;
-    }
-
-    /**
-     * Returns the text that must be used by the search engine.
-     *
-     * @return the expanded query text used for retrieval
-     */
-    @Override
-    public String getSearchText() {
-        return original + " " + exp_terms;
+    public String getSparse() {
+        return sparse;
     }
 }
