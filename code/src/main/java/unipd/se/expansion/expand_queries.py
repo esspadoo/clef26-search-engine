@@ -1,5 +1,7 @@
 import json
 import re
+import sys
+
 from tqdm import tqdm
 
 def load_stopwords(filepath):
@@ -19,7 +21,7 @@ def clean_query_text(text):
     text = re.sub(r'[^a-z0-9\-]', ' ', text)
     return text.split()
 
-def expand_queries(queries_file, expansion_model_file, output_file, stopwords_file):
+def expand_queries(queries_file, expansion_model_file, output_file, stopwords_file, threshold = .7, max_terms = 20):
     # 1. Caricamento risorse
     stopwords = load_stopwords(stopwords_file)
     print(f"Caricate {len(stopwords)} stopwords.")
@@ -36,7 +38,7 @@ def expand_queries(queries_file, expansion_model_file, output_file, stopwords_fi
 
     # 2. Processo di espansione
     for query in tqdm(queries, desc="Expanding Queries"):
-        original_text = query.get('text', '')
+        original_text = query.get('original', '')
         tokens = clean_query_text(original_text)
 
         expansion_terms = set()
@@ -47,14 +49,13 @@ def expand_queries(queries_file, expansion_model_file, output_file, stopwords_fi
                 continue
 
             if token in expansion_lookup:
-                similars = expansion_lookup[token]
+                similars = expansion_lookup[token][:max_terms]
                 for item in similars:
-                    # Filtro di sicurezza: non aggiungiamo stopwords come termini di espansione
-                    if item['term'] not in stopwords:
+                    if item['score'] >= threshold:
                         expansion_terms.add(item['term'])
 
         # Aggiungiamo il campo expansion
-        query['expansion'] = " ".join(list(expansion_terms))
+        query['exp_terms'] = " ".join(list(expansion_terms))
         expanded_queries.append(query)
 
     print(f"Salvataggio query espanse in {output_file}...")
@@ -62,10 +63,13 @@ def expand_queries(queries_file, expansion_model_file, output_file, stopwords_fi
         json.dump(expanded_queries, f, indent=2)
 
 if __name__ == "__main__":
+    THRESHOLD = float(sys.argv[1]) if len(sys.argv) > 1 else .8
+    MAX_TERMS = int(sys.argv[2]) if len(sys.argv) > 2 else 7
+
     # Percorsi file
-    QUERIES_IN = '../../../../../../data/en_train.json'
-    MODEL_IN = 'word2vec_expansion_no_stopwords.json'
-    QUERIES_OUT = '../../../../../../data/expanded_queries_TEX_no_stopwords.json'
+    QUERIES_IN = '../../../../../../data/expanded_queries_bge_large.json'
+    MODEL_IN = 'word2vec_expansion.json'
+    QUERIES_OUT = '../../../../../../data/expanded_queries_bge_TEX.json'
     STOPLIST_PATH = '../../../../../../data/stoplist_en_TEX.txt'
 
-    expand_queries(QUERIES_IN, MODEL_IN, QUERIES_OUT, STOPLIST_PATH)
+    expand_queries(QUERIES_IN, MODEL_IN, QUERIES_OUT, STOPLIST_PATH, THRESHOLD, MAX_TERMS)
