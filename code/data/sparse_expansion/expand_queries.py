@@ -92,10 +92,10 @@ if __name__ == "__main__":
     MAX_TERMS = int(sys.argv[2]) if len(sys.argv) > 2 else 7
 
     run_expansion_pipeline(
-        input_path='../../../../../../data/expanded_queries_bge_large.json',
-        model_path='word2vec_expansion.json',
-        output_path='../../../../../../data/expanded_queries_en.json',
-        stop_path='../../../../../../data/stoplist_en_TEX.txt',
+        input_path='../expanded_queries_bge_large.json',
+        model_path='../../src/main/java/unipd/se/expansion/word2vec_expansion.json',
+        output_path='../expanded_queries_en.json',
+        stop_path='../stoplist_en_TEX.txt',
         threshold=THRESHOLD,
         max_terms=MAX_TERMS
     )

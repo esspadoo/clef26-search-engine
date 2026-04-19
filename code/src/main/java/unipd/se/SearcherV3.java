@@ -3,7 +3,7 @@ package unipd.se;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.queryparser.simple.SimpleQueryParser;
 import org.apache.lucene.search.similarities.BM25Similarity;
-import unipd.se.model.ExpandedQueryDoc_TEX;
+import unipd.se.model.ExpandedQueryDoc;
 import unipd.se.model.QueryDoc;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.*;
@@ -30,9 +30,9 @@ public class SearcherV3 {
     private static final Pattern AUTHOR_PATTERN = Pattern.compile("\\bauthor:\\s*(\\S+(?:\\s+\\S+)*)");
 
     /** Weights used for the expansion of the queries */
-    private static final float ORIGINAL_TEXT_BOOST = 13.8f;
-    private static final float EXPANDED_TEXT_BOOST = 19.8f;
-    private static final float SPARSE_BOOST = 4.2f;
+    private static final float ORIGINAL_TEXT_BOOST = 0.3f;
+    private static final float EXPANDED_TEXT_BOOST = 12.6f;
+    private static final float SPARSE_BOOST = 20f;
 
     /**
      * Search the index with a configurable title boost.
@@ -135,7 +135,7 @@ public class SearcherV3 {
             Map<String, String> filters = new HashMap<>();
             Query finalQuery;
 
-            if (q instanceof ExpandedQueryDoc_TEX eq) {
+            if (q instanceof ExpandedQueryDoc eq) {
                 // Costruisce la query pesata (Originale vs Espansione)
                 finalQuery = buildWeightedExpandedQuery(eq, parser, filters, w1, w2, w3);
             } else {
@@ -174,7 +174,7 @@ public class SearcherV3 {
      * @return the built Query
      */
     private static Query buildWeightedExpandedQuery(
-            ExpandedQueryDoc_TEX eq,
+            ExpandedQueryDoc eq,
             SimpleQueryParser parser,
             Map<String, String> filters,
             float w1,
@@ -183,7 +183,7 @@ public class SearcherV3 {
     ) {
         String original = eq.getOriginal();
         String expanded = eq.getExpanded();
-        String expansion = eq.getSparse();
+        String sparse = eq.getSparse();
 
         BooleanQuery.Builder mainBuilder = new BooleanQuery.Builder();
 
@@ -202,10 +202,10 @@ public class SearcherV3 {
         }
 
         // 2. Parte Espansione (SHOULD con basso Boost)
-        if (expansion != null && !expansion.isBlank()) {
-            Query expansionQuery = parser.parse(expansion);
+        if (sparse != null && !sparse.isBlank()) {
+            Query sparseQuery = parser.parse(sparse);
             // Boost 1.0: L'espansione aiuta solo se l'originale non è sufficiente
-            mainBuilder.add(new BoostQuery(expansionQuery, w3), BooleanClause.Occur.SHOULD);
+            mainBuilder.add(new BoostQuery(sparseQuery, w3), BooleanClause.Occur.SHOULD);
         }
 
         BooleanQuery bq = mainBuilder.build();

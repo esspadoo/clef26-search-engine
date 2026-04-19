@@ -87,8 +87,8 @@ def run_expansion_pipeline(input_path, model_path, output_path, stop_path, thres
 
 if __name__ == "__main__":
     # Parametri da riga di comando (Threshold e Max Terms)
-    THRESHOLD = float(sys.argv[1]) if len(sys.argv) > 1 else 0.8
-    MAX_TERMS = int(sys.argv[2]) if len(sys.argv) > 2 else 7
+    THRESHOLD = float(sys.argv[1]) if len(sys.argv) > 1 else 0.9
+    MAX_TERMS = int(sys.argv[2]) if len(sys.argv) > 2 else 10
 
     run_expansion_pipeline(
         input_path='../../../../../../data/expanded_queries_bge_large.json',
