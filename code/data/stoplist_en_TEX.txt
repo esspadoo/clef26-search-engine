@@ -1,7 +1,6 @@
 abstract
 introduction
 conclusion
-results
 discussion
 method
 study
@@ -9,13 +8,8 @@ paper
 author
 table
 figure
-et
 al
-using
 based
-significant
-p
-value
 data
 analysis
 'll
