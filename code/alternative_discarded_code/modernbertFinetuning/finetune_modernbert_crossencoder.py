@@ -199,7 +199,7 @@ def main():
         eval_steps=args.eval_steps,
         save_strategy="steps",
         save_steps=args.save_steps,
-        save_total_limit=1,
+        save_total_limit=0,
         logging_strategy="steps",
         save_only_model=True,
         logging_steps=100,
