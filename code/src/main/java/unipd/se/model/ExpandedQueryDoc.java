@@ -5,7 +5,8 @@ package unipd.se.model;
  * the query expansion phase.
  * <p>
  * This class extends {@link QueryDoc} by storing the original query text,
- * extracted keywords, and the expanded query text used for retrieval.
+ * plus three retrieval-oriented variants optimized for sparse, dense
+ * embedding, and ColBERT-style late interaction search.
  * </p>
  *
  * @author RETRIX
@@ -24,7 +25,27 @@ public class ExpandedQueryDoc extends QueryDoc {
      */
     public String keywords;
     /**
-     * Expanded version of the query used to improve retrieval.
+     * Sparse-optimized query representation.
+     */
+    public String sparse;
+
+    /**
+     * Dense-embedding-optimized query representation.
+     */
+    public String embedding;
+
+    /**
+     * ColBERT / late-interaction optimized query representation.
+     */
+    public String colbert;
+
+    /**
+     * Language code associated with the query record, when available.
+     */
+    public String language;
+
+    /**
+     * Backward-compatible alias for the sparse representation.
      */
     public String expanded;
 
@@ -43,7 +64,55 @@ public class ExpandedQueryDoc extends QueryDoc {
      * @return the expanded query text
      */
     public String getExpanded() {
-        return expanded;
+        if (expanded != null && !expanded.isEmpty()) {
+            return expanded;
+        }
+        return sparse;
+    }
+
+    /**
+     * Returns the sparse-optimized query text.
+     *
+     * @return the sparse query text
+     */
+    public String getSparse() {
+        if (sparse != null && !sparse.isEmpty()) {
+            return sparse;
+        }
+        return getExpanded();
+    }
+
+    /**
+     * Returns the dense-embedding-optimized query text.
+     *
+     * @return the dense query text
+     */
+    public String getEmbedding() {
+        if (embedding != null && !embedding.isEmpty()) {
+            return embedding;
+        }
+        return getSparse();
+    }
+
+    /**
+     * Returns the ColBERT-optimized query text.
+     *
+     * @return the ColBERT query text
+     */
+    public String getColbert() {
+        if (colbert != null && !colbert.isEmpty()) {
+            return colbert;
+        }
+        return getEmbedding();
+    }
+
+    /**
+     * Returns the language code if present.
+     *
+     * @return the language code, or null if unavailable
+     */
+    public String getLanguage() {
+        return language;
     }
 
     /**
@@ -57,6 +126,6 @@ public class ExpandedQueryDoc extends QueryDoc {
      */
     @Override
     public String getSearchText() {
-        return expanded;
+        return getSparse();
     }
 }

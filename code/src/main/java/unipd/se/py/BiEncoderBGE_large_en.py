@@ -83,7 +83,7 @@ def pick_query_text(item: dict[str, Any], query_field: str) -> str:
         value = item.get(query_field, "")
         return value.strip() if isinstance(value, str) else ""
 
-    for field_name in ("expanded", "original", "text", "query"):
+    for field_name in ("embedding", "sparse", "colbert", "expanded", "original", "text", "query"):
         value = item.get(field_name, "")
         if isinstance(value, str) and value.strip():
             return value.strip()
