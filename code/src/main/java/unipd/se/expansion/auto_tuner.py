@@ -5,15 +5,12 @@ import csv
 import os
 
 # --- CONFIGURAZIONE PERCORSI ---
-# Poiché lo script è in src/main/java/unipd/se/expansion/, 
-# dobbiamo salire di 5 livelli per arrivare alla radice del progetto.
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../../../../.."))
 TARGET_CLASSES = os.path.join(PROJECT_ROOT, "target", "classes")
 LIB_DIR = os.path.join(PROJECT_ROOT, "lib", "*")
-OUTPUT_LOG = os.path.join(PROJECT_ROOT, "results", "tuning_results.csv")
+OUTPUT_LOG = os.path.join(os.path.dirname(__file__), "tuning_results.csv")
 
-# Script di espansione (nella stessa cartella di questo script)
-PYTHON_EXPAND_SCRIPT = os.path.join(os.path.dirname(__file__), "expand_queries.py")
+PYTHON_EXPAND_SCRIPT = os.path.join(os.path.dirname(__file__), "sparse_query_expander.py")
 
 JAVA_MAIN_CLASS = "unipd.se.Main"
 NUM_TENTATIVI = 200
@@ -23,27 +20,22 @@ def run_trial(threshold, max_terms, w1, w2, w3):
     print(f"\n[TEST] Thr: {threshold} | Max: {max_terms} | Weights: [{w1}, {w2}, {w3}]")
 
     try:
-        # 1. Fase Python: Espansione Query
         subprocess.run(["python", PYTHON_EXPAND_SCRIPT, str(threshold), str(max_terms)], check=True)
 
-        # 2. Fase Java: Costruzione Classpath
-        # Usiamo i percorsi assoluti calcolati sopra per evitare errori di "Class Not Found"
         classpath = f"{TARGET_CLASSES}{SEP}{LIB_DIR}"
 
-        # Comando Java
         cmd = (
             f'java -cp "{classpath}" {JAVA_MAIN_CLASS} '
             f'_ _ _ {w1} {w2} {w3}'
         )
 
-        # Esecuzione dalla ROOT del progetto per coerenza con i percorsi dei dati nel tuo Main
         result = subprocess.run(
             cmd,
             capture_output=True,
             text=True,
             encoding='utf-8',
             shell=True,
-            cwd=PROJECT_ROOT # Forza l'esecuzione dalla radice del progetto
+            cwd=PROJECT_ROOT
         )
 
         if result.returncode != 0:
@@ -51,7 +43,6 @@ def run_trial(threshold, max_terms, w1, w2, w3):
             print(f"  [STDERR]: {result.stderr.strip()}")
             return 0.0
 
-        # 3. Estrazione Recall@100
         match = re.search(r"Recall@100:\s+([0-9]+[.,][0-9]+)", result.stdout)
 
         if match:
@@ -69,11 +60,22 @@ def run_trial(threshold, max_terms, w1, w2, w3):
 def main():
     best_score = -1
     best_params = {}
+    seen_configs = set() # Per tenere traccia dei trial unici
 
-    # Assicurati che la cartella results esista
     os.makedirs(os.path.dirname(OUTPUT_LOG), exist_ok=True)
 
     file_exists = os.path.isfile(OUTPUT_LOG)
+
+    # Carica trial passati se il file esiste per evitare duplicati tra diverse esecuzioni
+    if file_exists:
+        with open(OUTPUT_LOG, "r", encoding='utf-8') as f:
+            reader = csv.reader(f)
+            next(reader, None) # Salta header
+            for row in reader:
+                if len(row) >= 5:
+                    # Salva come tupla (thr, max, w1, w2, w3) convertiti correttamente
+                    seen_configs.add((float(row[0]), int(row[1]), float(row[2]), float(row[3]), float(row[4])))
+
     with open(OUTPUT_LOG, "a", newline='') as f:
         writer = csv.writer(f)
         if not file_exists:
@@ -82,11 +84,20 @@ def main():
     for i in range(NUM_TENTATIVI):
         print(f"\n--- Trial {i+1}/{NUM_TENTATIVI} ---")
 
-        t = round(random.uniform(0.85, 1), 3)
-        m = random.randint(0, 5)
-        w1 = round(random.uniform(12, 18), 3)
-        w2 = round(random.uniform(15, 25), 3)
-        w3 = round(random.uniform(0, 5), 3)
+        # Loop per generare parametri unici
+        while True:
+            t = round(random.uniform(0.6, 1), 2)
+            m = random.randint(1, 10)
+            w1 = round(random.uniform(0, 20), 2)
+            w2 = round(random.uniform(0, 20), 2)
+            w3 = round(random.uniform(0, 20), 2)
+
+            config = (t, m, w1, w2, w3)
+            if config not in seen_configs:
+                seen_configs.add(config)
+                break
+            else:
+                print("  [INFO] Configurazione già testata, rigenerazione...")
 
         score = run_trial(t, m, w1, w2, w3)
 
