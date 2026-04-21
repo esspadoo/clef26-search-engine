@@ -251,7 +251,7 @@ def load_nemotron_reranker(device: str, max_length: int):
 
         with torch.inference_mode():
             logits = model(**batch_dict).logits  # [B, 1]
-            scores = logits.view(-1).cpu().tolist()
+            scores = torch.sigmoid(logits.view(-1)).cpu().tolist()
 
         return scores if isinstance(scores, list) else [scores]
 
