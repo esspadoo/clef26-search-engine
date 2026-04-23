@@ -3,7 +3,7 @@ package unipd.se;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.queryparser.simple.SimpleQueryParser;
 import org.apache.lucene.search.similarities.BM25Similarity;
-import unipd.se.model.ExpandedQueryDoc_TEX;
+import unipd.se.model.ExpandedQueryDoc;
 import unipd.se.model.QueryDoc;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.*;
@@ -30,9 +30,9 @@ public class SearcherV3 {
     private static final Pattern AUTHOR_PATTERN = Pattern.compile("\\bauthor:\\s*(\\S+(?:\\s+\\S+)*)");
 
     /** Weights used for the expansion of the queries */
-    private static final float ORIGINAL_TEXT_BOOST = 13.8f;
-    private static final float EXPANDED_TEXT_BOOST = 19.8f;
-    private static final float EXPANSION_TERMS_BOOST = 4.2f;
+    private static final float ORIGINAL_TEXT_BOOST = 0.3f;
+    private static final float EXPANDED_TEXT_BOOST = 12.6f;
+    private static final float SPARSE_BOOST = 20f;
 
     /**
      * Search the index with a configurable title boost.
@@ -53,6 +53,35 @@ public class SearcherV3 {
             float titleBoost,
             int topK
     ) throws IOException {
+        return search(dir, queries, titleBoost, topK, ORIGINAL_TEXT_BOOST, EXPANDED_TEXT_BOOST, SPARSE_BOOST);
+    }
+
+    /**
+     * Search the index with a configurable title boost and weights for different query representations.
+     * Le query vengono elaborate in parallelo su un ForkJoinPool dedicato.
+     * IndexSearcher è thread-safe per letture concorrenti (Lucene garantisce questo).
+     *
+     * @param dir        the Lucene index directory
+     * @param queries    list of queries (QueryDoc or subclasses)
+     * @param titleBoost boost applied to the title field
+     * @param topK       number of top documents to retrieve
+     * @param w1         weight of the original text
+     * @param w2         weight of the expanded text
+     * @param w3         weight of the sparse representation
+     *
+     * @return map from query index → ranked list of pubkeys
+     *
+     * @throws IOException if the index cannot be opened or if the search fails
+     */
+    public static Map<String, List<String>> search(
+            Directory dir,
+            List<? extends QueryDoc> queries,
+            float titleBoost,
+            int topK,
+            float w1,
+            float w2,
+            float w3
+    ) throws IOException {
         Map<String, Float> fields = new HashMap<>();
         fields.put("title", titleBoost);
         fields.put("abstract", 1.0f);
@@ -67,7 +96,7 @@ public class SearcherV3 {
                 return pool.submit(() ->
                         queries.parallelStream().collect(Collectors.toMap(
                                 q -> q.index,
-                                q -> searchSingle(q, searcher, fields, topK),
+                                q -> searchSingle(q, searcher, fields, topK, w1, w2, w3),
                                 (a, _) -> a,
                                 LinkedHashMap::new
                         ))
@@ -86,6 +115,9 @@ public class SearcherV3 {
      * @param searcher the searcher
      * @param fields the fields weight
      * @param topK max hits
+     * @param w1         weight of the original text
+     * @param w2         weight of the expanded text
+     * @param w3         weight of the sparse representation
      *
      * @return the list of retrieved documents (pubkey)
      */
@@ -93,16 +125,19 @@ public class SearcherV3 {
             QueryDoc q,
             IndexSearcher searcher,
             Map<String, Float> fields,
-            int topK
+            int topK,
+            float w1,
+            float w2,
+            float w3
     ) {
         try {
             SimpleQueryParser parser = new SimpleQueryParser(ANALYZER, fields);
             Map<String, String> filters = new HashMap<>();
             Query finalQuery;
 
-            if (q instanceof ExpandedQueryDoc_TEX eq) {
+            if (q instanceof ExpandedQueryDoc eq) {
                 // Costruisce la query pesata (Originale vs Espansione)
-                finalQuery = buildWeightedExpandedQuery(eq, parser, filters);
+                finalQuery = buildWeightedExpandedQuery(eq, parser, filters, w1, w2, w3);
             } else {
                 String text = q.getSearchText();
                 if (text == null || text.isBlank()) return Collections.emptyList();
@@ -132,17 +167,23 @@ public class SearcherV3 {
      * @param eq the expanded query doc
      * @param parser the parser used
      * @param filters the filters used
+     * @param w1        weight of the original text
+     * @param w2        weight of the expanded text
+     * @param w3        weight of the sparse representation
      *
      * @return the built Query
      */
     private static Query buildWeightedExpandedQuery(
-            ExpandedQueryDoc_TEX eq,
+            ExpandedQueryDoc eq,
             SimpleQueryParser parser,
-            Map<String, String> filters
+            Map<String, String> filters,
+            float w1,
+            float w2,
+            float w3
     ) {
         String original = eq.getOriginal();
         String expanded = eq.getExpanded();
-        String expansion = eq.getExpTerms();
+        String sparse = eq.getSparse();
 
         BooleanQuery.Builder mainBuilder = new BooleanQuery.Builder();
 
@@ -151,20 +192,20 @@ public class SearcherV3 {
             String cleanOriginal = extractFilters(original, filters);
             Query originalQuery = parser.parse(cleanOriginal);
             // Boost 5.0: Le parole dell'utente sono il segnale principale
-            mainBuilder.add(new BoostQuery(originalQuery, ORIGINAL_TEXT_BOOST), BooleanClause.Occur.SHOULD);
+            mainBuilder.add(new BoostQuery(originalQuery, w1), BooleanClause.Occur.SHOULD);
         }
 
         if (expanded != null && !expanded.isBlank()) {
             String cleanExpanded = extractFilters(expanded, filters);
             Query expandedQuery = parser.parse(cleanExpanded);
-            mainBuilder.add(new BoostQuery(expandedQuery, EXPANDED_TEXT_BOOST), BooleanClause.Occur.SHOULD);
+            mainBuilder.add(new BoostQuery(expandedQuery, w2), BooleanClause.Occur.SHOULD);
         }
 
         // 2. Parte Espansione (SHOULD con basso Boost)
-        if (expansion != null && !expansion.isBlank()) {
-            Query expansionQuery = parser.parse(expansion);
+        if (sparse != null && !sparse.isBlank()) {
+            Query sparseQuery = parser.parse(sparse);
             // Boost 1.0: L'espansione aiuta solo se l'originale non è sufficiente
-            mainBuilder.add(new BoostQuery(expansionQuery, EXPANSION_TERMS_BOOST), BooleanClause.Occur.SHOULD);
+            mainBuilder.add(new BoostQuery(sparseQuery, w3), BooleanClause.Occur.SHOULD);
         }
 
         BooleanQuery bq = mainBuilder.build();
