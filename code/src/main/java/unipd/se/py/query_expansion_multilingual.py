@@ -18,7 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from collections import Counter, defaultdict
+from collections import Counter, OrderedDict, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
@@ -47,6 +47,8 @@ DEFAULT_MAX_LENGTH = 1024
 DEFAULT_TOP_K = 5
 DEFAULT_CANDIDATE_MULTIPLIER = 5
 DEFAULT_COLBERT_SCORE_BATCH_SIZE = 256
+DEFAULT_COLBERT_CORPUS_CACHE_SIZE = 0
+DEFAULT_COLBERT_CORPUS_ENCODE_BATCH_SIZE = 8
 
 TOKEN_RE = re.compile(r"[A-Za-zÀ-ÿ0-9]+(?:['\-][A-Za-zÀ-ÿ0-9]+)*")
 
@@ -142,6 +144,21 @@ def parse_args() -> argparse.Namespace:
         "--colbert-score-batch-size",
         type=int,
         default=DEFAULT_COLBERT_SCORE_BATCH_SIZE,
+    )
+    parser.add_argument(
+        "--colbert-corpus-cache-size",
+        type=int,
+        default=DEFAULT_COLBERT_CORPUS_CACHE_SIZE,
+        help=(
+            "Maximum number of corpus ColBERT vectors kept in RAM for reuse. "
+            "Set to 0 to disable caching (lowest memory, slower runtime)."
+        ),
+    )
+    parser.add_argument(
+        "--colbert-corpus-encode-batch-size",
+        type=int,
+        default=DEFAULT_COLBERT_CORPUS_ENCODE_BATCH_SIZE,
+        help="Batch size used when encoding on-demand corpus ColBERT candidates.",
     )
     parser.add_argument(
         "--max-queries",
@@ -427,6 +444,7 @@ def encode_bge_m3(
 
 
 def compute_colbert_scores_batched(
+    *,
     query_colbert: np.ndarray,
     candidate_colbert: list[np.ndarray],
     batch_size: int,
@@ -436,50 +454,105 @@ def compute_colbert_scores_batched(
     if not candidate_colbert:
         return np.empty((0,), dtype=np.float32)
 
-    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    q_reps = torch.as_tensor(query_colbert, dtype=torch.float32, device=device)
-    if q_reps.ndim != 2 or q_reps.shape[0] == 0:
-        return np.zeros(len(candidate_colbert), dtype=np.float32)
+    def _score_on_device(device: torch.device, current_batch_size: int) -> np.ndarray:
+        q_reps = torch.as_tensor(query_colbert, dtype=torch.float32, device=device)
+        if q_reps.ndim != 2 or q_reps.shape[0] == 0:
+            return np.zeros(len(candidate_colbert), dtype=np.float32)
 
-    score_chunks: list[np.ndarray] = []
-    for start in range(0, len(candidate_colbert), batch_size):
-        batch = candidate_colbert[start : start + batch_size]
-        batch_scores = np.zeros(len(batch), dtype=np.float32)
-        non_empty_indices: list[int] = []
-        non_empty_docs: list[np.ndarray] = []
+        score_chunks: list[np.ndarray] = []
+        for start in range(0, len(candidate_colbert), current_batch_size):
+            batch = candidate_colbert[start : start + current_batch_size]
+            batch_scores = np.zeros(len(batch), dtype=np.float32)
+            non_empty_indices: list[int] = []
+            non_empty_docs: list[np.ndarray] = []
 
-        for local_idx, doc_colbert in enumerate(batch):
-            if isinstance(doc_colbert, np.ndarray) and doc_colbert.ndim == 2 and doc_colbert.shape[0] > 0:
-                non_empty_indices.append(local_idx)
-                non_empty_docs.append(doc_colbert)
+            for local_idx, doc_colbert in enumerate(batch):
+                if isinstance(doc_colbert, np.ndarray) and doc_colbert.ndim == 2 and doc_colbert.shape[0] > 0:
+                    non_empty_indices.append(local_idx)
+                    non_empty_docs.append(doc_colbert)
 
-        if not non_empty_docs:
+            if not non_empty_docs:
+                score_chunks.append(batch_scores)
+                continue
+
+            max_doc_tokens = max(doc.shape[0] for doc in non_empty_docs)
+            embedding_dim = q_reps.shape[1]
+            doc_tensor = torch.zeros((len(non_empty_docs), max_doc_tokens, embedding_dim), dtype=torch.float32, device=device)
+            doc_mask = torch.zeros((len(non_empty_docs), max_doc_tokens), dtype=torch.bool, device=device)
+
+            for tensor_row, doc_colbert in enumerate(non_empty_docs):
+                doc_reps = torch.as_tensor(doc_colbert, dtype=torch.float32, device=device)
+                doc_length = doc_reps.shape[0]
+                doc_tensor[tensor_row, :doc_length] = doc_reps
+                doc_mask[tensor_row, :doc_length] = True
+
+            token_scores = torch.einsum("qd,bkd->bqk", q_reps, doc_tensor)
+            token_scores = token_scores.masked_fill(~doc_mask.unsqueeze(1), float("-inf"))
+            max_scores = token_scores.max(dim=-1).values
+            reduced_scores = max_scores.sum(dim=-1) / q_reps.shape[0]
+            reduced_scores_np = reduced_scores.detach().cpu().numpy().astype(np.float32, copy=False)
+
+            for output_idx, score in zip(non_empty_indices, reduced_scores_np):
+                batch_scores[output_idx] = float(score)
+
             score_chunks.append(batch_scores)
-            continue
 
-        max_doc_tokens = max(doc.shape[0] for doc in non_empty_docs)
-        embedding_dim = q_reps.shape[1]
-        doc_tensor = torch.zeros((len(non_empty_docs), max_doc_tokens, embedding_dim), dtype=torch.float32, device=device)
-        doc_mask = torch.zeros((len(non_empty_docs), max_doc_tokens), dtype=torch.bool, device=device)
+        return np.concatenate(score_chunks, axis=0)
 
-        for tensor_row, doc_colbert in enumerate(non_empty_docs):
-            doc_reps = torch.as_tensor(doc_colbert, dtype=torch.float32, device=device)
-            doc_length = doc_reps.shape[0]
-            doc_tensor[tensor_row, :doc_length] = doc_reps
-            doc_mask[tensor_row, :doc_length] = True
+    use_cuda = torch.cuda.is_available()
+    device = torch.device("cuda:0" if use_cuda else "cpu")
+    current_batch_size = batch_size
 
-        token_scores = torch.einsum("qd,bkd->bqk", q_reps, doc_tensor)
-        token_scores = token_scores.masked_fill(~doc_mask.unsqueeze(1), float("-inf"))
-        max_scores = token_scores.max(dim=-1).values
-        reduced_scores = max_scores.sum(dim=-1) / q_reps.shape[0]
-        reduced_scores_np = reduced_scores.detach().cpu().numpy().astype(np.float32, copy=False)
+    while True:
+        try:
+            return _score_on_device(device=device, current_batch_size=current_batch_size)
+        except Exception as error:
+            is_cuda_oom = use_cuda and "out of memory" in str(error).lower()
+            if not is_cuda_oom:
+                raise
 
-        for output_idx, score in zip(non_empty_indices, reduced_scores_np):
-            batch_scores[output_idx] = float(score)
+            if current_batch_size > 1:
+                next_batch_size = max(1, current_batch_size // 2)
+                print(
+                    f"CUDA OOM while ColBERT scoring with batch_size={current_batch_size}. "
+                    f"Retrying with batch_size={next_batch_size}."
+                )
+                current_batch_size = next_batch_size
+                torch.cuda.empty_cache()
+                continue
 
-        score_chunks.append(batch_scores)
+            if device.type == "cuda":
+                print("CUDA OOM while ColBERT scoring at batch_size=1. Falling back to CPU scoring.")
+                device = torch.device("cpu")
+                torch.cuda.empty_cache()
+                continue
 
-    return np.concatenate(score_chunks, axis=0)
+            raise
+
+
+def encode_colbert_vectors(
+    *,
+    model: Any,
+    texts: list[str],
+    batch_size: int,
+    max_length: int,
+    label: str,
+) -> list[np.ndarray]:
+    if not texts:
+        return []
+
+    output = encode_bge_m3(
+        model=model,
+        texts=texts,
+        batch_size=batch_size,
+        label=label,
+        max_length=max_length,
+        return_dense=False,
+        return_sparse=False,
+        return_colbert_vecs=True,
+    )
+    encoded = output["colbert_vecs"]
+    return [np.asarray(v, dtype=np.float32) for v in encoded]
 
 
 def build_faiss_index(corpus_embeddings: np.ndarray) -> faiss.IndexFlatIP:
@@ -544,17 +617,22 @@ def build_query_variants_for_language(
     corpus_records: list[dict[str, Any]],
     dense_index: faiss.IndexFlatIP,
     corpus_sparse_cache: list[dict[str, float]],
-    corpus_colbert_cache: list[np.ndarray],
     batch_size: int,
     max_length: int,
     top_k: int,
     candidate_multiplier: int,
     colbert_score_batch_size: int,
+    colbert_corpus_cache_size: int,
+    colbert_corpus_encode_batch_size: int,
 ) -> list[dict[str, Any]]:
     if top_k <= 0:
         raise ValueError("--top-k must be greater than 0.")
     if candidate_multiplier <= 0:
         raise ValueError("--candidate-multiplier must be greater than 0.")
+    if colbert_corpus_cache_size < 0:
+        raise ValueError("--colbert-corpus-cache-size must be greater than or equal to 0.")
+    if colbert_corpus_encode_batch_size <= 0:
+        raise ValueError("--colbert-corpus-encode-batch-size must be greater than 0.")
 
     stopwords_by_language: dict[str, set[str]] = defaultdict(set)
     for source in source_queries:
@@ -579,6 +657,7 @@ def build_query_variants_for_language(
     _, dense_indices = dense_index.search(query_dense, dense_candidate_k)
 
     merged_rows: dict[tuple[str, str], dict[str, Any]] = {}
+    colbert_cache: OrderedDict[int, np.ndarray] = OrderedDict()
 
     for row, source in enumerate(source_queries):
         stopwords = stopwords_by_language[source.language]
@@ -593,7 +672,55 @@ def build_query_variants_for_language(
         dense_ranked = [int(idx) for idx in dense_indices[row][:top_k] if 0 <= int(idx) < len(corpus_pubkeys)]
 
         colbert_candidate_indices = [int(idx) for idx in dense_indices[row][:dense_candidate_k] if 0 <= int(idx) < len(corpus_pubkeys)]
-        colbert_candidates = [corpus_colbert_cache[idx] for idx in colbert_candidate_indices]
+        if colbert_corpus_cache_size > 0:
+            missing_indices = [idx for idx in colbert_candidate_indices if idx not in colbert_cache]
+            if missing_indices:
+                missing_texts = [corpus_records[idx]["text"] for idx in missing_indices]
+                missing_vectors = encode_colbert_vectors(
+                    model=model,
+                    texts=missing_texts,
+                    batch_size=colbert_corpus_encode_batch_size,
+                    max_length=max_length,
+                    label="colbert-corpus-candidates",
+                )
+                for idx, vector in zip(missing_indices, missing_vectors):
+                    colbert_cache[idx] = vector
+                    colbert_cache.move_to_end(idx)
+                    while len(colbert_cache) > colbert_corpus_cache_size:
+                        colbert_cache.popitem(last=False)
+
+            colbert_candidates: list[np.ndarray] = []
+            for idx in colbert_candidate_indices:
+                vector = colbert_cache.get(idx)
+                if vector is None:
+                    continue
+                colbert_cache.move_to_end(idx)
+                colbert_candidates.append(vector)
+
+            # Keep score alignment with candidate indices even if transient vectors were evicted.
+            if len(colbert_candidates) != len(colbert_candidate_indices):
+                refreshed_vectors = encode_colbert_vectors(
+                    model=model,
+                    texts=[corpus_records[idx]["text"] for idx in colbert_candidate_indices],
+                    batch_size=colbert_corpus_encode_batch_size,
+                    max_length=max_length,
+                    label="colbert-corpus-candidates-refresh",
+                )
+                colbert_candidates = refreshed_vectors
+                for idx, vector in zip(colbert_candidate_indices, refreshed_vectors):
+                    colbert_cache[idx] = vector
+                    colbert_cache.move_to_end(idx)
+                    while len(colbert_cache) > colbert_corpus_cache_size:
+                        colbert_cache.popitem(last=False)
+        else:
+            colbert_candidates = encode_colbert_vectors(
+                model=model,
+                texts=[corpus_records[idx]["text"] for idx in colbert_candidate_indices],
+                batch_size=colbert_corpus_encode_batch_size,
+                max_length=max_length,
+                label="colbert-corpus-candidates",
+            )
+
         colbert_scores = compute_colbert_scores_batched(
             query_colbert=query_colbert[row],
             candidate_colbert=colbert_candidates,
@@ -682,6 +809,10 @@ def main() -> None:
         raise ValueError("--candidate-multiplier must be greater than 0.")
     if args.colbert_score_batch_size <= 0:
         raise ValueError("--colbert-score-batch-size must be greater than 0.")
+    if args.colbert_corpus_cache_size < 0:
+        raise ValueError("--colbert-corpus-cache-size must be greater than or equal to 0.")
+    if args.colbert_corpus_encode_batch_size <= 0:
+        raise ValueError("--colbert-corpus-encode-batch-size must be greater than 0.")
 
     if args.inputs:
         input_paths = args.inputs
@@ -703,11 +834,10 @@ def main() -> None:
         max_length=args.max_length,
         return_dense=True,
         return_sparse=True,
-        return_colbert_vecs=True,
+        return_colbert_vecs=False,
     )
     corpus_embeddings = np.asarray(corpus_output["dense_vecs"], dtype=np.float32)
     corpus_sparse_cache = corpus_output["lexical_weights"]
-    corpus_colbert_cache = corpus_output["colbert_vecs"]
     dense_index = build_faiss_index(corpus_embeddings)
 
     query_sources = load_query_sources(input_paths, args.max_queries)
@@ -719,12 +849,13 @@ def main() -> None:
         corpus_records=corpus_records,
         dense_index=dense_index,
         corpus_sparse_cache=corpus_sparse_cache,
-        corpus_colbert_cache=corpus_colbert_cache,
         batch_size=args.batch_size,
         max_length=args.max_length,
         top_k=args.top_k,
         candidate_multiplier=args.candidate_multiplier,
         colbert_score_batch_size=args.colbert_score_batch_size,
+        colbert_corpus_cache_size=args.colbert_corpus_cache_size,
+        colbert_corpus_encode_batch_size=args.colbert_corpus_encode_batch_size,
     )
 
     write_json(args.output, merged_rows)
