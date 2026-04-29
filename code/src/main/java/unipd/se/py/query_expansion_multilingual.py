@@ -9,8 +9,9 @@ JSON array. The canonical output contains:
     - embedding: dense embedding-oriented expansion
     - colbert: late-interaction / ColBERT-oriented expansion
 
-For backward compatibility the script also writes `expanded` as an alias of
-`sparse`, so legacy consumers keep working while the new fields are adopted.
+For backward compatibility each output record also contains `expanded` as an
+alias of `sparse`, so legacy consumers keep working while the new fields are
+adopted.
 """
 
 from __future__ import annotations
@@ -23,9 +24,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-import faiss
 import numpy as np
-import torch
+
+try:
+    import faiss
+except ImportError:  # pragma: no cover - handled at runtime
+    faiss = None
+
+try:
+    import torch
+except ImportError:  # pragma: no cover - handled at runtime
+    torch = None
 
 try:
     from FlagEmbedding import BGEM3FlagModel
@@ -40,7 +49,6 @@ REPO_ROOT = SCRIPT_PATH.parents[7]
 DEFAULT_INPUT_GLOB = "*_train.json"
 DEFAULT_CORPUS = CODE_ROOT / "data" / "collection_data.json"
 DEFAULT_OUTPUT = CODE_ROOT / "data" / "expanded_queries_multilingual_merged.json"
-DEFAULT_COMPAT_OUTPUT = CODE_ROOT / "data" / "expanded_queries_bge_large.json"
 DEFAULT_MODEL_NAME = "BAAI/bge-m3"
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_MAX_LENGTH = 1024
@@ -134,7 +142,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--compat-output", type=Path, default=DEFAULT_COMPAT_OUTPUT)
+    parser.add_argument(
+        "--compat-output",
+        type=Path,
+        default=None,
+        help=(
+            "Optional second output path for legacy consumers. By default the "
+            "script writes only --output."
+        ),
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--max-length", type=int, default=DEFAULT_MAX_LENGTH)
@@ -165,6 +181,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Optional debug limit; if set, only the first N queries per input file are processed.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and summarize input query files without loading retrieval models or writing output.",
     )
     return parser.parse_args()
 
@@ -358,14 +379,52 @@ def load_query_sources(paths: list[Path], max_queries: int | None) -> list[Query
     return sources
 
 
+def discover_input_paths(output_paths: Iterable[Path | None]) -> list[Path]:
+    excluded_names = {path.name for path in output_paths if path is not None}
+    return [
+        path
+        for path in sorted(CODE_ROOT.joinpath("data").glob(DEFAULT_INPUT_GLOB))
+        if path.name not in excluded_names
+    ]
+
+
+def summarize_query_sources(sources: list[QuerySource]) -> None:
+    by_language: Counter[str] = Counter(source.language for source in sources)
+    unique_keys = {(source.index, source.pubkey) for source in sources}
+    print(
+        "Query source summary: "
+        f"{len(sources)} input records, {len(unique_keys)} merged records, "
+        f"languages={dict(sorted(by_language.items()))}"
+    )
+
+
+def require_torch() -> Any:
+    if torch is None:
+        raise ImportError(
+            "PyTorch is required for multilingual query expansion. "
+            "Install it in this environment before running without --dry-run."
+        )
+    return torch
+
+
+def require_faiss() -> Any:
+    if faiss is None:
+        raise ImportError(
+            "faiss is required for multilingual query expansion. "
+            "Install faiss-cpu or faiss-gpu in this environment before running without --dry-run."
+        )
+    return faiss
+
+
 def build_bge_m3_model(model_name: str) -> Any:
+    torch_module = require_torch()
     if BGEM3FlagModel is None:
         raise ImportError(
             "FlagEmbedding is required for multilingual query expansion. "
             "Install it with: pip install -U FlagEmbedding"
         )
 
-    use_fp16 = torch.cuda.is_available()
+    use_fp16 = torch_module.cuda.is_available()
     try:
         return BGEM3FlagModel(model_name, use_fp16=use_fp16)
     except TypeError:
@@ -382,6 +441,8 @@ def encode_bge_m3(
     return_sparse: bool,
     return_colbert_vecs: bool,
 ) -> dict[str, Any]:
+    torch_module = require_torch()
+    faiss_module = require_faiss()
     if batch_size <= 0:
         raise ValueError("--batch-size must be greater than 0.")
     if max_length <= 0:
@@ -416,7 +477,7 @@ def encode_bge_m3(
                 )
                 if return_dense:
                     dense = np.asarray(chunk_output["dense_vecs"], dtype=np.float32)
-                    faiss.normalize_L2(dense)
+                    faiss_module.normalize_L2(dense)
                     dense_chunks.append(dense)
                 if return_sparse:
                     sparse_chunks.extend(chunk_output["lexical_weights"])
@@ -432,14 +493,18 @@ def encode_bge_m3(
                 output["colbert_vecs"] = colbert_chunks
             return output
         except Exception as error:
-            if not (torch.cuda.is_available() and "out of memory" in str(error).lower() and current_batch_size > 1):
+            if not (
+                torch_module.cuda.is_available()
+                and "out of memory" in str(error).lower()
+                and current_batch_size > 1
+            ):
                 raise
             next_batch_size = max(1, current_batch_size // 2)
             print(
                 f"CUDA OOM while encoding {label} with batch_size={current_batch_size}. "
                 f"Retrying with batch_size={next_batch_size}."
             )
-            torch.cuda.empty_cache()
+            torch_module.cuda.empty_cache()
             current_batch_size = next_batch_size
 
 
@@ -449,6 +514,7 @@ def compute_colbert_scores_batched(
     candidate_colbert: list[np.ndarray],
     batch_size: int,
 ) -> np.ndarray:
+    torch_module = require_torch()
     if batch_size <= 0:
         raise ValueError("--colbert-score-batch-size must be greater than 0.")
     if not candidate_colbert:
@@ -499,8 +565,8 @@ def compute_colbert_scores_batched(
 
         return np.concatenate(score_chunks, axis=0)
 
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda:0" if use_cuda else "cpu")
+    use_cuda = torch_module.cuda.is_available()
+    device = torch_module.device("cuda:0" if use_cuda else "cpu")
     current_batch_size = batch_size
 
     while True:
@@ -518,13 +584,13 @@ def compute_colbert_scores_batched(
                     f"Retrying with batch_size={next_batch_size}."
                 )
                 current_batch_size = next_batch_size
-                torch.cuda.empty_cache()
+                torch_module.cuda.empty_cache()
                 continue
 
             if device.type == "cuda":
                 print("CUDA OOM while ColBERT scoring at batch_size=1. Falling back to CPU scoring.")
-                device = torch.device("cpu")
-                torch.cuda.empty_cache()
+                device = torch_module.device("cpu")
+                torch_module.cuda.empty_cache()
                 continue
 
             raise
@@ -556,8 +622,9 @@ def encode_colbert_vectors(
 
 
 def build_faiss_index(corpus_embeddings: np.ndarray) -> faiss.IndexFlatIP:
+    faiss_module = require_faiss()
     dimension = corpus_embeddings.shape[1]
-    index = faiss.IndexFlatIP(dimension)
+    index = faiss_module.IndexFlatIP(dimension)
     index.add(corpus_embeddings)
     return index
 
@@ -817,11 +884,23 @@ def main() -> None:
     if args.inputs:
         input_paths = args.inputs
     else:
-        input_paths = sorted(CODE_ROOT.joinpath("data").glob(DEFAULT_INPUT_GLOB))
-        input_paths = [path for path in input_paths if path.name not in {args.output.name, args.compat_output.name}]
+        input_paths = discover_input_paths((args.output, args.compat_output))
 
     if not input_paths:
         raise ValueError("No input query files were found.")
+
+    print("Input query files:")
+    for input_path in input_paths:
+        print(f"  - {input_path}")
+
+    query_sources = load_query_sources(input_paths, args.max_queries)
+    summarize_query_sources(query_sources)
+
+    if args.dry_run:
+        print(f"Dry run complete. Output would be written to {args.output}")
+        if args.compat_output is not None and args.compat_output != args.output:
+            print(f"Optional compatibility output would be written to {args.compat_output}")
+        return
 
     corpus_pubkeys, corpus_texts, corpus_records = load_corpus(args.corpus)
     model = build_bge_m3_model(args.model)
@@ -840,8 +919,6 @@ def main() -> None:
     corpus_sparse_cache = corpus_output["lexical_weights"]
     dense_index = build_faiss_index(corpus_embeddings)
 
-    query_sources = load_query_sources(input_paths, args.max_queries)
-
     merged_rows = build_query_variants_for_language(
         source_queries=query_sources,
         model=model,
@@ -859,14 +936,13 @@ def main() -> None:
     )
 
     write_json(args.output, merged_rows)
-    if args.compat_output != args.output:
+    if args.compat_output is not None and args.compat_output != args.output:
         write_json(args.compat_output, merged_rows)
 
     print(f"Saved {len(merged_rows)} merged query records to {args.output}")
-    if args.compat_output != args.output:
+    if args.compat_output is not None and args.compat_output != args.output:
         print(f"Saved compatibility copy to {args.compat_output}")
 
 
 if __name__ == "__main__":
     main()
-
