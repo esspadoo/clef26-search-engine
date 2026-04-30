@@ -41,6 +41,7 @@ DEFAULT_INPUT_GLOB = "*_train.json"
 DEFAULT_CORPUS = CODE_ROOT / "data" / "collection_data.json"
 DEFAULT_OUTPUT = CODE_ROOT / "data" / "expanded_queries_multilingual_merged.json"
 DEFAULT_MODEL_NAME = "meta-llama/Llama-3.2-1B"
+GPT_OSS_MODEL_PREFIX = "openai/gpt-oss"
 DEFAULT_BATCH_SIZE = 8
 DEFAULT_MAX_LENGTH = 1024
 DEFAULT_TOP_K = 10
@@ -53,6 +54,7 @@ DEFAULT_LOG_EVERY_QUERIES = 1000
 DEFAULT_MAX_NEW_TOKENS = 512
 DEFAULT_LLM_RETRIES = 3
 DEFAULT_TEMPERATURE = 0.0
+DEFAULT_REASONING_EFFORT = "low"
 MIN_OOM_BATCH_SIZE = 1
 MIN_OOM_MAX_LENGTH = 128
 MIN_OOM_CANDIDATE_COUNT = 1
@@ -204,7 +206,14 @@ def parse_args() -> argparse.Namespace:
             "script writes only --output."
         ),
     )
-    parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
+    parser.add_argument(
+        "--model",
+        default=DEFAULT_MODEL_NAME,
+        help=(
+            "Hugging Face causal LLM used for expansion. Supported paths include "
+            "`meta-llama/Llama-3.2-1B` and `openai/gpt-oss-20b`."
+        ),
+    )
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -229,6 +238,12 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=DEFAULT_TEMPERATURE,
         help="LLM sampling temperature. Use 0 for deterministic greedy decoding.",
+    )
+    parser.add_argument(
+        "--reasoning-effort",
+        choices=("low", "medium", "high"),
+        default=DEFAULT_REASONING_EFFORT,
+        help="Reasoning effort hint used by gpt-oss chat-template prompts.",
     )
     parser.add_argument(
         "--top-k",
@@ -586,10 +601,48 @@ def clear_cuda_cache(torch_module: Any) -> None:
 def require_transformers() -> tuple[Any, Any]:
     if AutoTokenizer is None or AutoModelForCausalLM is None:
         raise ImportError(
-            "transformers is required for Llama query expansion. "
+            "transformers is required for LLM query expansion. "
             "Install it with: pip install -U transformers"
         )
     return AutoTokenizer, AutoModelForCausalLM
+
+
+def is_gpt_oss_model(model_name: str) -> bool:
+    return model_name.lower().startswith(GPT_OSS_MODEL_PREFIX)
+
+
+def get_accelerate_input_device(model: Any, torch_module: Any) -> Any:
+    device_map = getattr(model, "hf_device_map", None)
+    if isinstance(device_map, dict):
+        for mapped_device in device_map.values():
+            if isinstance(mapped_device, int):
+                return torch_module.device(f"cuda:{mapped_device}")
+            if isinstance(mapped_device, str) and mapped_device not in {"cpu", "disk", "meta"}:
+                return torch_module.device(mapped_device)
+
+    model_device = getattr(model, "device", None)
+    if model_device is not None:
+        return model_device
+    return torch_module.device("cuda:0" if torch_module.cuda.is_available() else "cpu")
+
+
+def build_model_load_kwargs(model_name: str, torch_module: Any) -> dict[str, Any]:
+    if is_gpt_oss_model(model_name):
+        return {
+            "torch_dtype": "auto",
+            "device_map": "auto",
+        }
+
+    if torch_module.cuda.is_available():
+        supports_bf16 = getattr(torch_module.cuda, "is_bf16_supported", lambda: False)
+        dtype = (
+            torch_module.bfloat16
+            if supports_bf16()
+            else torch_module.float16
+        )
+    else:
+        dtype = torch_module.float32
+    return {"torch_dtype": dtype}
 
 
 def build_llm_model(model_name: str) -> tuple[Any, Any, Any]:
@@ -602,15 +655,7 @@ def build_llm_model(model_name: str) -> tuple[Any, Any, Any]:
             tokenizer.pad_token = tokenizer.eos_token
         tokenizer.padding_side = "left"
 
-        if torch_module.cuda.is_available():
-            supports_bf16 = getattr(torch_module.cuda, "is_bf16_supported", lambda: False)
-            dtype = (
-                torch_module.bfloat16
-                if supports_bf16()
-                else torch_module.float16
-            )
-        else:
-            dtype = torch_module.float32
+        load_kwargs = build_model_load_kwargs(model_name, torch_module)
         with warnings.catch_warnings():
             warnings.filterwarnings(
                 "ignore",
@@ -618,18 +663,28 @@ def build_llm_model(model_name: str) -> tuple[Any, Any, Any]:
                 category=UserWarning,
                 module=r"transformers\.generation\.configuration_utils",
             )
-            model = model_cls.from_pretrained(model_name, torch_dtype=dtype)
+            model = model_cls.from_pretrained(model_name, **load_kwargs)
         sanitize_generation_config(model)
-        device = torch_module.device("cuda:0" if torch_module.cuda.is_available() else "cpu")
-        model.to(device)
+        if is_gpt_oss_model(model_name):
+            device = get_accelerate_input_device(model, torch_module)
+        else:
+            device = torch_module.device("cuda:0" if torch_module.cuda.is_available() else "cpu")
+            model.to(device)
         model.eval()
         return tokenizer, model, device
     except Exception as error:
+        gpt_oss_note = (
+            " For openai/gpt-oss-20b, install recent transformers, accelerate, torch, "
+            "triton, and kernels packages; the script uses the model chat template."
+            if is_gpt_oss_model(model_name)
+            else ""
+        )
         raise RuntimeError(
             f"Could not load LLM model `{model_name}`. "
             "For meta-llama/Llama-3.2-1B, make sure you accepted the model terms "
             "on Hugging Face and authenticated this environment with HF_TOKEN or "
             "`huggingface-cli login`."
+            f"{gpt_oss_note}"
         ) from error
 
 
@@ -666,7 +721,7 @@ Return only one valid JSON object with exactly these string fields:
 }}
 
 Rules:
-- Do not include markdown, code fences, commentary, arrays, or nested objects.
+- Do not include markdown, code fences, emoji, commentary, arrays, or nested objects.
 - All five values must be strings.
 - Do not hallucinate facts.
 - Do not translate unless translation is already present in the query.
@@ -681,6 +736,43 @@ Language hint: {lang_json}
 Original query: {query_json}{error_instruction}
 
 JSON:"""
+
+
+def build_model_prompt(
+    *,
+    tokenizer: Any,
+    model_name: str,
+    query: str,
+    lang: str,
+    previous_error: str | None,
+    reasoning_effort: str,
+) -> str:
+    prompt = build_llm_prompt(query, lang, previous_error)
+    if not is_gpt_oss_model(model_name):
+        return prompt
+
+    if not hasattr(tokenizer, "apply_chat_template"):
+        raise RuntimeError(
+            "`openai/gpt-oss-*` models require a tokenizer chat template. "
+            "Install a recent transformers version."
+        )
+
+    messages = [
+        {
+            "role": "system",
+            "content": (
+                f"Reasoning: {reasoning_effort}\n"
+                "You are a strict JSON-only retrieval query expansion generator. "
+                "Return the final answer only as valid JSON."
+            ),
+        },
+        {"role": "user", "content": prompt},
+    ]
+    return tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
 
 
 def extract_balanced_json_object(text: str) -> str | None:
@@ -885,12 +977,14 @@ def generate_llm_expansions_batch(
     tokenizer: Any,
     model: Any,
     device: Any,
+    model_name: str,
     queries: list[str],
     languages: list[str],
     max_length: int,
     max_new_tokens: int,
     temperature: float,
     retries: int,
+    reasoning_effort: str,
 ) -> list[dict[str, str]]:
     if len(queries) != len(languages):
         raise ValueError("queries and languages must have the same length.")
@@ -904,10 +998,13 @@ def generate_llm_expansions_batch(
 
     for _ in range(attempts):
         prompts = [
-            build_llm_prompt(
-                queries[index],
-                languages[index],
+            build_model_prompt(
+                tokenizer=tokenizer,
+                model_name=model_name,
+                query=queries[index],
+                lang=languages[index],
                 previous_error=last_errors.get(index),
+                reasoning_effort=reasoning_effort,
             )
             for index in pending_indices
         ]
@@ -1250,11 +1347,13 @@ def build_query_variant_rows(
     tokenizer: Any,
     model: Any,
     device: Any,
+    model_name: str,
     batch_size: int,
     max_length: int,
     max_new_tokens: int,
     temperature: float,
     llm_retries: int,
+    reasoning_effort: str,
 ) -> list[dict[str, Any]]:
     torch_module = require_torch()
     output_rows: list[dict[str, Any]] = []
@@ -1268,12 +1367,14 @@ def build_query_variant_rows(
                 tokenizer=tokenizer,
                 model=model,
                 device=device,
+                model_name=model_name,
                 queries=[source.original for source in batch_sources],
                 languages=[source.language for source in batch_sources],
                 max_length=max_length,
                 max_new_tokens=max_new_tokens,
                 temperature=temperature,
                 retries=llm_retries,
+                reasoning_effort=reasoning_effort,
             )
         except Exception as error:
             if not (is_oom_error(error) and current_batch_size > MIN_OOM_BATCH_SIZE):
@@ -1312,11 +1413,13 @@ def iter_expanded_query_rows(
     tokenizer: Any,
     model: Any,
     device: Any,
+    model_name: str,
     batch_size: int,
     max_length: int,
     max_new_tokens: int,
     temperature: float,
     llm_retries: int,
+    reasoning_effort: str,
     query_chunk_size: int,
     log_every_queries: int,
 ) -> Iterable[dict[str, Any]]:
@@ -1332,11 +1435,13 @@ def iter_expanded_query_rows(
             tokenizer=tokenizer,
             model=model,
             device=device,
+            model_name=model_name,
             batch_size=batch_size,
             max_length=max_length,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
             llm_retries=llm_retries,
+            reasoning_effort=reasoning_effort,
         )
         for row in chunk_rows:
             yield row
@@ -1406,11 +1511,13 @@ def main() -> None:
         tokenizer=tokenizer,
         model=model,
         device=device,
+        model_name=args.model,
         batch_size=args.batch_size,
         max_length=args.max_length,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
         llm_retries=args.llm_retries,
+        reasoning_effort=args.reasoning_effort,
         query_chunk_size=args.query_chunk_size,
         log_every_queries=args.log_every_queries,
     )
