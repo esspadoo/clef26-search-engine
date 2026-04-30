@@ -35,9 +35,12 @@ SCRIPT_PATH = Path(__file__).resolve()
 CODE_ROOT = SCRIPT_PATH.parents[6] 
 REPO_ROOT = SCRIPT_PATH.parents[7]
 
-DEFAULT_QUERIES = CODE_ROOT / "data" / "expanded_queries_bge_large.json"
+DEFAULT_QUERIES = CODE_ROOT / "data" / "expanded_queries_multilingual_merged.json"
 DEFAULT_CORPUS = CODE_ROOT / "data" / "collection_data.json"
 DEFAULT_OUTPUT = REPO_ROOT / "results" / "bi_encoder_results.json"
+HYBRID_DENSE_QUERY_FIELD = "embedding"
+HYBRID_SPARSE_QUERY_FIELD = "sparse"
+HYBRID_COLBERT_QUERY_FIELD = "colbert"
 
 
 def parse_args() -> argparse.Namespace:
@@ -102,7 +105,15 @@ def parse_args() -> argparse.Namespace:
             "If not provided and model is BAAI/bge-m3, defaults to 1024."
         ),
     )
-    parser.add_argument("--query-field", default="auto")
+    parser.add_argument(
+        "--query-field",
+        default="auto",
+        help=(
+            "Query field for dense-only retrieval. In hybrid mode, the script uses "
+            "`embedding` for dense, `sparse` for sparse, and `colbert` for late interaction; "
+            "this option is only used as a fallback for older query files."
+        ),
+    )
     parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument(
@@ -601,6 +612,33 @@ def pick_query_text(item: dict[str, Any], query_field: str) -> str:
     return ""
 
 
+def pick_first_query_text(item: dict[str, Any], field_names: Iterable[str]) -> tuple[str, str | None]:
+    for field_name in field_names:
+        value = item.get(field_name, "")
+        if isinstance(value, str) and value.strip():
+            return value.strip(), field_name
+    return "", None
+
+
+def apply_query_prefix(text: str, query_prefix: str) -> str:
+    return f"{query_prefix}{text}" if query_prefix else text
+
+
+def pick_hybrid_query_text(
+    item: dict[str, Any],
+    target_field: str,
+    fallback_query_field: str,
+) -> tuple[str, str | None]:
+    fallback_fields = (
+        (fallback_query_field,)
+        if fallback_query_field != "auto"
+        else ("expanded", "original", "text", "query")
+    )
+    fields = [target_field]
+    fields.extend(field for field in fallback_fields if field != target_field)
+    return pick_first_query_text(item, fields)
+
+
 def iter_query_records(raw_queries: Any) -> Iterable[tuple[str, dict[str, Any]]]:
     if isinstance(raw_queries, list):
         for position, item in enumerate(raw_queries):
@@ -634,7 +672,7 @@ def load_queries(
             continue
 
         query_ids.append(qid)
-        query_texts.append(f"{query_prefix}{text}" if query_prefix else text)
+        query_texts.append(apply_query_prefix(text, query_prefix))
 
         if max_queries is not None and len(query_ids) >= max_queries:
             break
@@ -647,6 +685,82 @@ def load_queries(
         raise ValueError("No valid queries were loaded.")
 
     return query_ids, query_texts
+
+
+def load_hybrid_queries(
+    path: Path,
+    fallback_query_field: str,
+    max_queries: int | None,
+    query_prefix: str,
+) -> tuple[list[str], list[str], list[str], list[str]]:
+    raw_queries = load_json(path)
+
+    query_ids: list[str] = []
+    dense_texts: list[str] = []
+    sparse_texts: list[str] = []
+    colbert_texts: list[str] = []
+    skipped = 0
+    fallback_counts = {
+        HYBRID_DENSE_QUERY_FIELD: 0,
+        HYBRID_SPARSE_QUERY_FIELD: 0,
+        HYBRID_COLBERT_QUERY_FIELD: 0,
+    }
+
+    for qid, item in iter_query_records(raw_queries):
+        dense_text, dense_field = pick_hybrid_query_text(
+            item,
+            HYBRID_DENSE_QUERY_FIELD,
+            fallback_query_field,
+        )
+        sparse_text, sparse_field = pick_hybrid_query_text(
+            item,
+            HYBRID_SPARSE_QUERY_FIELD,
+            fallback_query_field,
+        )
+        colbert_text, colbert_field = pick_hybrid_query_text(
+            item,
+            HYBRID_COLBERT_QUERY_FIELD,
+            fallback_query_field,
+        )
+        if not dense_text or not sparse_text or not colbert_text:
+            skipped += 1
+            continue
+
+        if dense_field != HYBRID_DENSE_QUERY_FIELD:
+            fallback_counts[HYBRID_DENSE_QUERY_FIELD] += 1
+        if sparse_field != HYBRID_SPARSE_QUERY_FIELD:
+            fallback_counts[HYBRID_SPARSE_QUERY_FIELD] += 1
+        if colbert_field != HYBRID_COLBERT_QUERY_FIELD:
+            fallback_counts[HYBRID_COLBERT_QUERY_FIELD] += 1
+
+        query_ids.append(qid)
+        dense_texts.append(apply_query_prefix(dense_text, query_prefix))
+        sparse_texts.append(apply_query_prefix(sparse_text, query_prefix))
+        colbert_texts.append(apply_query_prefix(colbert_text, query_prefix))
+
+        if max_queries is not None and len(query_ids) >= max_queries:
+            break
+
+    print(f"Loaded {len(query_ids)} hybrid queries from {path}")
+    print(
+        "Hybrid query fields: "
+        f"dense={HYBRID_DENSE_QUERY_FIELD}, "
+        f"sparse={HYBRID_SPARSE_QUERY_FIELD}, "
+        f"colbert={HYBRID_COLBERT_QUERY_FIELD}"
+    )
+    if skipped:
+        print(f"Skipped {skipped} queries missing a usable hybrid query text")
+    for target_field, count in fallback_counts.items():
+        if count:
+            print(
+                f"Warning: {count} hybrid queries did not have a usable `{target_field}` "
+                "field; used fallback query text."
+            )
+
+    if not query_ids:
+        raise ValueError("No valid hybrid queries were loaded.")
+
+    return query_ids, dense_texts, sparse_texts, colbert_texts
 
 
 def build_document_text(item: dict[str, Any]) -> str:
@@ -831,7 +945,9 @@ def dense_search(
 def hybrid_search(
     model: Any,
     query_ids: list[str],
-    query_texts: list[str],
+    query_dense_texts: list[str],
+    query_sparse_texts: list[str],
+    query_colbert_texts: list[str],
     corpus_pubkeys: list[str],
     corpus_texts: list[str],
     index_handle: FaissIndexHandle,
@@ -860,25 +976,52 @@ def hybrid_search(
             "At least one hybrid weight must be non-zero "
             "(--dense-weight, --sparse-weight, --colbert-weight)."
         )
+    if not (
+        len(query_ids)
+        == len(query_dense_texts)
+        == len(query_sparse_texts)
+        == len(query_colbert_texts)
+    ):
+        raise ValueError("Hybrid query id, dense, sparse, and ColBERT text counts must match.")
 
     candidate_k = min(
         len(corpus_pubkeys),
         max(top_k, top_k * candidate_multiplier),
     )
 
-    query_output = encode_bge_m3(
+    query_dense_output = encode_bge_m3(
         model=model,
-        texts=query_texts,
+        texts=query_dense_texts,
         batch_size=batch_size,
-        label="queries (hybrid)",
+        label=f"queries (hybrid dense from `{HYBRID_DENSE_QUERY_FIELD}`)",
         max_length=hybrid_max_length,
         return_dense=True,
+        return_sparse=False,
+        return_colbert_vecs=False,
+    )
+    query_sparse_output = encode_bge_m3(
+        model=model,
+        texts=query_sparse_texts,
+        batch_size=batch_size,
+        label=f"queries (hybrid sparse from `{HYBRID_SPARSE_QUERY_FIELD}`)",
+        max_length=hybrid_max_length,
+        return_dense=False,
         return_sparse=True,
+        return_colbert_vecs=False,
+    )
+    query_colbert_output = encode_bge_m3(
+        model=model,
+        texts=query_colbert_texts,
+        batch_size=batch_size,
+        label=f"queries (hybrid colbert from `{HYBRID_COLBERT_QUERY_FIELD}`)",
+        max_length=hybrid_max_length,
+        return_dense=False,
+        return_sparse=False,
         return_colbert_vecs=True,
     )
-    query_embeddings = np.asarray(query_output["dense_vecs"], dtype=np.float32)
-    query_sparse = query_output["lexical_weights"]
-    query_colbert = query_output["colbert_vecs"]
+    query_embeddings = np.asarray(query_dense_output["dense_vecs"], dtype=np.float32)
+    query_sparse = query_sparse_output["lexical_weights"]
+    query_colbert = query_colbert_output["colbert_vecs"]
     dense_scores, dense_indices = index_handle.index.search(query_embeddings, candidate_k)
 
     results: dict[str, list[str]] = {}
@@ -1002,18 +1145,41 @@ def main() -> None:
     if effective_max_length is not None:
         print(f"Encoder max length: {effective_max_length}")
 
-    query_ids, query_texts = load_queries(
-        path=args.queries,
-        query_field=args.query_field,
-        max_queries=args.max_queries,
-        query_prefix=query_prefix,
-    )
-    corpus_pubkeys, corpus_texts = load_corpus(args.corpus)
-
     if retrieval_mode == "hybrid" and not args.model.lower().startswith("baai/bge-m3"):
         raise ValueError(
             '--retrieval-mode "hybrid" requires BGE-M3 (e.g., --model BAAI/bge-m3).'
         )
+    if retrieval_mode == "hybrid" and args.query_field != "auto":
+        print(
+            "Hybrid mode uses retrieval-specific query fields first; "
+            f"--query-field={args.query_field} will be used only as fallback."
+        )
+
+    if retrieval_mode == "hybrid":
+        (
+            query_ids,
+            query_dense_texts,
+            query_sparse_texts,
+            query_colbert_texts,
+        ) = load_hybrid_queries(
+            path=args.queries,
+            fallback_query_field=args.query_field,
+            max_queries=args.max_queries,
+            query_prefix=query_prefix,
+        )
+        query_texts = query_dense_texts
+    else:
+        query_ids, query_texts = load_queries(
+            path=args.queries,
+            query_field=args.query_field,
+            max_queries=args.max_queries,
+            query_prefix=query_prefix,
+        )
+        query_dense_texts = query_texts
+        query_sparse_texts = query_texts
+        query_colbert_texts = query_texts
+
+    corpus_pubkeys, corpus_texts = load_corpus(args.corpus)
 
     if args.model.lower().startswith("baai/bge-m3"):
         model = build_bge_m3_model(
@@ -1049,7 +1215,9 @@ def main() -> None:
             results = hybrid_search(
                 model=model,
                 query_ids=query_ids,
-                query_texts=query_texts,
+                query_dense_texts=query_dense_texts,
+                query_sparse_texts=query_sparse_texts,
+                query_colbert_texts=query_colbert_texts,
                 corpus_pubkeys=corpus_pubkeys,
                 corpus_texts=corpus_texts,
                 index_handle=index_handle,
