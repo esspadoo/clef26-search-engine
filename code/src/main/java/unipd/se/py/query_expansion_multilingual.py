@@ -1,17 +1,12 @@
-"""Build multilingual query expansions for sparse, dense, and ColBERT retrieval.
+"""Build a flat multilingual query-expansion JSON file.
 
-The script reads one or more raw query files, expands each query into three
-retrieval-oriented views, and merges the results across languages into a single
-JSON array. The canonical output contains:
+The script reads one or more raw query files, expands every original query into
+retrieval-specific string fields, and writes a single UTF-8 JSON array. The
+output schema is enforced centrally and contains only:
 
-    - original: merged original query text
-    - sparse: lexical / BM25-oriented expansion
-    - embedding: dense embedding-oriented expansion
-    - colbert: late-interaction / ColBERT-oriented expansion
+    index, pubkey, original, keywords, sparse, embedding, colbert, expanded
 
-For backward compatibility each output record also contains `expanded` as an
-alias of `sparse`, so legacy consumers keep working while the new fields are
-adopted.
+There is no language grouping and no nested expansion metadata in the output.
 """
 
 from __future__ import annotations
@@ -19,17 +14,11 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from collections import Counter, OrderedDict, defaultdict
+import shutil
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
-
-import numpy as np
-
-try:
-    import faiss
-except ImportError:  # pragma: no cover - handled at runtime
-    faiss = None
 
 try:
     import torch
@@ -37,9 +26,10 @@ except ImportError:  # pragma: no cover - handled at runtime
     torch = None
 
 try:
-    from FlagEmbedding import BGEM3FlagModel
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 except ImportError:  # pragma: no cover - handled at runtime
-    BGEM3FlagModel = None
+    AutoModelForCausalLM = None
+    AutoTokenizer = None
 
 
 SCRIPT_PATH = Path(__file__).resolve()
@@ -49,17 +39,33 @@ REPO_ROOT = SCRIPT_PATH.parents[7]
 DEFAULT_INPUT_GLOB = "*_train.json"
 DEFAULT_CORPUS = CODE_ROOT / "data" / "collection_data.json"
 DEFAULT_OUTPUT = CODE_ROOT / "data" / "expanded_queries_multilingual_merged.json"
-DEFAULT_MODEL_NAME = "BAAI/bge-m3"
-DEFAULT_BATCH_SIZE = 64
+DEFAULT_MODEL_NAME = "meta-llama/Llama-3.2-1B"
+DEFAULT_BATCH_SIZE = 1
 DEFAULT_MAX_LENGTH = 1024
-DEFAULT_TOP_K = 5
-DEFAULT_CANDIDATE_MULTIPLIER = 5
+DEFAULT_TOP_K = 10
+DEFAULT_CANDIDATE_MULTIPLIER = 3
 DEFAULT_COLBERT_SCORE_BATCH_SIZE = 256
 DEFAULT_COLBERT_CORPUS_CACHE_SIZE = 0
 DEFAULT_COLBERT_CORPUS_ENCODE_BATCH_SIZE = 8
+DEFAULT_QUERY_CHUNK_SIZE = 256
+DEFAULT_LOG_EVERY_QUERIES = 1000
+DEFAULT_MAX_NEW_TOKENS = 512
+DEFAULT_LLM_RETRIES = 3
+DEFAULT_TEMPERATURE = 0.0
 MIN_OOM_BATCH_SIZE = 1
 MIN_OOM_MAX_LENGTH = 128
 MIN_OOM_CANDIDATE_COUNT = 1
+REQUIRED_OUTPUT_KEYS = (
+    "index",
+    "pubkey",
+    "original",
+    "keywords",
+    "sparse",
+    "embedding",
+    "colbert",
+    "expanded",
+)
+LLM_EXPANSION_KEYS = ("keywords", "sparse", "embedding", "colbert", "expanded")
 
 TOKEN_RE = re.compile(r"[A-Za-zÀ-ÿ0-9]+(?:['\-][A-Za-zÀ-ÿ0-9]+)*")
 
@@ -115,6 +121,43 @@ COMMON_STOPWORDS = {
     "where",
     "why",
     "how",
+    "der",
+    "die",
+    "das",
+    "den",
+    "dem",
+    "des",
+    "ein",
+    "eine",
+    "einer",
+    "und",
+    "oder",
+    "für",
+    "mit",
+    "auf",
+    "ist",
+    "sind",
+    "von",
+    "zu",
+    "im",
+    "le",
+    "la",
+    "les",
+    "un",
+    "une",
+    "des",
+    "du",
+    "de",
+    "et",
+    "ou",
+    "dans",
+    "sur",
+    "pour",
+    "avec",
+    "est",
+    "sont",
+    "que",
+    "qui",
 }
 
 
@@ -125,12 +168,13 @@ class QuerySource:
     index: str
     pubkey: str
     original: str
+    order: int
 
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
-            "Generate merged multilingual query expansions for sparse, dense, and ColBERT retrieval."
+            "Generate flat multilingual query expansions with a local Hugging Face LLM."
         )
     )
     parser.add_argument(
@@ -143,7 +187,12 @@ def parse_args() -> argparse.Namespace:
             f"`{DEFAULT_INPUT_GLOB}` files under `code/data/`."
         ),
     )
-    parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
+    parser.add_argument(
+        "--corpus",
+        type=Path,
+        default=DEFAULT_CORPUS,
+        help="Legacy argument kept for compatibility; LLM expansion does not load the corpus.",
+    )
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
     parser.add_argument(
         "--compat-output",
@@ -155,29 +204,60 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
-    parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
+    parser.add_argument(
+        "--batch-size",
+        type=int,
+        default=DEFAULT_BATCH_SIZE,
+        help="Legacy argument kept for compatibility; LLM expansion processes one query at a time.",
+    )
     parser.add_argument("--max-length", type=int, default=DEFAULT_MAX_LENGTH)
-    parser.add_argument("--top-k", type=int, default=DEFAULT_TOP_K)
-    parser.add_argument("--candidate-multiplier", type=int, default=DEFAULT_CANDIDATE_MULTIPLIER)
+    parser.add_argument(
+        "--max-new-tokens",
+        type=int,
+        default=DEFAULT_MAX_NEW_TOKENS,
+        help="Maximum number of tokens generated by the LLM for each query expansion.",
+    )
+    parser.add_argument(
+        "--llm-retries",
+        type=int,
+        default=DEFAULT_LLM_RETRIES,
+        help="Maximum number of LLM generation attempts before using a validated safe fallback.",
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=DEFAULT_TEMPERATURE,
+        help="LLM sampling temperature. Use 0 for deterministic greedy decoding.",
+    )
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=DEFAULT_TOP_K,
+        help="Legacy argument kept for compatibility; ignored by LLM expansion.",
+    )
+    parser.add_argument(
+        "--candidate-multiplier",
+        type=int,
+        default=DEFAULT_CANDIDATE_MULTIPLIER,
+        help="Legacy argument kept for compatibility; ignored by LLM expansion.",
+    )
     parser.add_argument(
         "--colbert-score-batch-size",
         type=int,
         default=DEFAULT_COLBERT_SCORE_BATCH_SIZE,
+        help="Legacy argument kept for compatibility; ignored by LLM expansion.",
     )
     parser.add_argument(
         "--colbert-corpus-cache-size",
         type=int,
         default=DEFAULT_COLBERT_CORPUS_CACHE_SIZE,
-        help=(
-            "Maximum number of corpus ColBERT vectors kept in RAM for reuse. "
-            "Set to 0 to disable caching (lowest memory, slower runtime)."
-        ),
+        help="Legacy argument kept for compatibility; ignored by LLM expansion.",
     )
     parser.add_argument(
         "--colbert-corpus-encode-batch-size",
         type=int,
         default=DEFAULT_COLBERT_CORPUS_ENCODE_BATCH_SIZE,
-        help="Batch size used when encoding on-demand corpus ColBERT candidates.",
+        help="Legacy argument kept for compatibility; ignored by LLM expansion.",
     )
     parser.add_argument(
         "--max-queries",
@@ -186,9 +266,35 @@ def parse_args() -> argparse.Namespace:
         help="Optional debug limit; if set, only the first N queries per input file are processed.",
     )
     parser.add_argument(
+        "--query-chunk-size",
+        type=int,
+        default=DEFAULT_QUERY_CHUNK_SIZE,
+        help=(
+            "Number of query source records processed at a time. Lower values reduce RAM usage; "
+            "set to 0 to process all queries at once."
+        ),
+    )
+    parser.add_argument(
+        "--log-every-queries",
+        type=int,
+        default=DEFAULT_LOG_EVERY_QUERIES,
+        help="Print expansion progress every N query source records. Set to 0 to disable progress logs.",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Validate and summarize input query files without loading retrieval models or writing output.",
+    )
+    parser.add_argument(
+        "--validate-output",
+        type=Path,
+        default=None,
+        help="Validate an existing expanded query JSON file against the flat output schema and exit.",
+    )
+    parser.add_argument(
+        "--schema-self-test",
+        action="store_true",
+        help="Run a small schema/validation self-test without loading retrieval models.",
     )
     return parser.parse_args()
 
@@ -204,12 +310,34 @@ def write_json(path: Path, payload: Any) -> None:
         json.dump(payload, handle, indent=2, ensure_ascii=False)
 
 
+def write_json_array_stream(path: Path, rows: Iterable[dict[str, Any]]) -> int:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f".{path.name}.tmp")
+    count = 0
+    seen_indexes: set[int] = set()
+    try:
+        with temp_path.open("w", encoding="utf-8") as handle:
+            handle.write("[\n")
+            for row in rows:
+                validate_output_item(row, seen_indexes=seen_indexes, expected_index=count)
+                if count > 0:
+                    handle.write(",\n")
+                handle.write("  ")
+                json.dump(row, handle, ensure_ascii=False, separators=(",", ":"))
+                count += 1
+            handle.write("\n]\n")
+        temp_path.replace(path)
+    except Exception:
+        try:
+            temp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+    return count
+
+
 def normalize_text(text: str) -> str:
     return " ".join(text.split())
-
-
-def maybe_int(value: str) -> int | str:
-    return int(value) if value.isdigit() else value
 
 
 def infer_language_from_path(path: Path) -> str:
@@ -337,8 +465,16 @@ def pick_source_text(item: dict[str, Any]) -> str:
     for field in ("original", "text", "query", "expanded", "sparse", "embedding", "colbert"):
         value = item.get(field, "")
         if isinstance(value, str) and value.strip():
-            return normalize_text(value)
+            return value
     return ""
+
+
+def pick_source_pubkey(item: dict[str, Any]) -> str | None:
+    for field in ("pubkey", "docid", "document_id", "target_pubkey"):
+        value = item.get(field)
+        if value is not None and str(value).strip():
+            return str(value)
+    return None
 
 
 def load_query_sources(paths: list[Path], max_queries: int | None) -> list[QuerySource]:
@@ -353,7 +489,7 @@ def load_query_sources(paths: list[Path], max_queries: int | None) -> list[Query
                 continue
 
             text = pick_source_text(item)
-            pubkey = item.get("pubkey")
+            pubkey = pick_source_pubkey(item)
             if not text or pubkey is None:
                 skipped += 1
                 continue
@@ -364,8 +500,9 @@ def load_query_sources(paths: list[Path], max_queries: int | None) -> list[Query
                     language=source_language,
                     path=path,
                     index=str(qid),
-                    pubkey=str(pubkey),
+                    pubkey=pubkey,
                     original=text,
+                    order=len(sources),
                 )
             )
 
@@ -393,30 +530,37 @@ def discover_input_paths(output_paths: Iterable[Path | None]) -> list[Path]:
 
 def summarize_query_sources(sources: list[QuerySource]) -> None:
     by_language: Counter[str] = Counter(source.language for source in sources)
-    unique_keys = {(source.index, source.pubkey) for source in sources}
     print(
         "Query source summary: "
-        f"{len(sources)} input records, {len(unique_keys)} merged records, "
+        f"{len(sources)} input records, {len(sources)} flat output records, "
         f"languages={dict(sorted(by_language.items()))}"
     )
+
+
+def query_source_sort_key(source: QuerySource) -> int:
+    return source.order
+
+
+def iter_query_source_chunks(
+    sources: list[QuerySource],
+    chunk_size: int,
+) -> Iterable[list[QuerySource]]:
+    ordered_sources = sorted(sources, key=query_source_sort_key)
+    if chunk_size == 0:
+        yield ordered_sources
+        return
+
+    for start in range(0, len(ordered_sources), chunk_size):
+        yield ordered_sources[start : start + chunk_size]
 
 
 def require_torch() -> Any:
     if torch is None:
         raise ImportError(
-            "PyTorch is required for multilingual query expansion. "
+            "PyTorch is required for Llama query expansion. "
             "Install it in this environment before running without --dry-run."
         )
     return torch
-
-
-def require_faiss() -> Any:
-    if faiss is None:
-        raise ImportError(
-            "faiss is required for multilingual query expansion. "
-            "Install faiss-cpu or faiss-gpu in this environment before running without --dry-run."
-        )
-    return faiss
 
 
 def is_oom_error(error: BaseException) -> bool:
@@ -438,227 +582,266 @@ def clear_cuda_cache(torch_module: Any) -> None:
         torch_module.cuda.empty_cache()
 
 
-def build_bge_m3_model(model_name: str) -> Any:
-    torch_module = require_torch()
-    if BGEM3FlagModel is None:
+def require_transformers() -> tuple[Any, Any]:
+    if AutoTokenizer is None or AutoModelForCausalLM is None:
         raise ImportError(
-            "FlagEmbedding is required for multilingual query expansion. "
-            "Install it with: pip install -U FlagEmbedding"
+            "transformers is required for Llama query expansion. "
+            "Install it with: pip install -U transformers"
+        )
+    return AutoTokenizer, AutoModelForCausalLM
+
+
+def build_llm_model(model_name: str) -> tuple[Any, Any, Any]:
+    torch_module = require_torch()
+    tokenizer_cls, model_cls = require_transformers()
+
+    try:
+        tokenizer = tokenizer_cls.from_pretrained(model_name)
+        if tokenizer.pad_token_id is None:
+            tokenizer.pad_token = tokenizer.eos_token
+
+        if torch_module.cuda.is_available():
+            supports_bf16 = getattr(torch_module.cuda, "is_bf16_supported", lambda: False)
+            dtype = (
+                torch_module.bfloat16
+                if supports_bf16()
+                else torch_module.float16
+            )
+        else:
+            dtype = torch_module.float32
+        model = model_cls.from_pretrained(model_name, torch_dtype=dtype)
+        device = torch_module.device("cuda:0" if torch_module.cuda.is_available() else "cpu")
+        model.to(device)
+        model.eval()
+        return tokenizer, model, device
+    except Exception as error:
+        raise RuntimeError(
+            f"Could not load LLM model `{model_name}`. "
+            "For meta-llama/Llama-3.2-1B, make sure you accepted the model terms "
+            "on Hugging Face and authenticated this environment with HF_TOKEN or "
+            "`huggingface-cli login`."
+        ) from error
+
+
+def build_llm_prompt(query: str, lang: str, previous_error: str | None = None) -> str:
+    error_instruction = ""
+    if previous_error:
+        error_instruction = (
+            "\nYour previous answer was invalid because: "
+            f"{previous_error}\nReturn corrected JSON only."
         )
 
-    use_fp16 = torch_module.cuda.is_available()
+    query_json = json.dumps(query, ensure_ascii=False)
+    lang_json = json.dumps(lang, ensure_ascii=False)
+    return f"""You generate retrieval-specific query expansions.
+
+Return only one valid JSON object with exactly these string fields:
+{{
+  "keywords": "...",
+  "sparse": "...",
+  "embedding": "...",
+  "colbert": "...",
+  "expanded": "..."
+}}
+
+Rules:
+- Do not include markdown, code fences, commentary, arrays, or nested objects.
+- All five values must be strings.
+- Do not hallucinate facts.
+- Do not translate unless translation is already present in the query.
+- Preserve original-language terms.
+- keywords: compact important terms only; entities, nouns, technical terms, names, locations, dates, identifiers, acronyms, modifiers; no sentence.
+- sparse: lexical BM25/SPLADE-style expansion; exact-match terms, synonyms, acronyms, aliases, spelling and morphology variants; phrase fragments separated by spaces or semicolons; no long prose.
+- embedding: concise HyDE/query2doc-style natural-language semantic pseudo-document; include intent, context, and likely relevant-document framing.
+- colbert: concise late-interaction expansion; preserve important tokens and entities; add focused context and aliases; avoid synonym spam.
+- expanded: readable general-purpose merged expansion string combining the useful hints from the other fields.
+
+Language hint: {lang_json}
+Original query: {query_json}{error_instruction}
+
+JSON:"""
+
+
+def extract_balanced_json_object(text: str) -> str | None:
+    start = text.find("{")
+    if start < 0:
+        return None
+
+    depth = 0
+    in_string = False
+    escaped = False
+    for position in range(start, len(text)):
+        char = text[position]
+        if escaped:
+            escaped = False
+            continue
+        if char == "\\":
+            escaped = True
+            continue
+        if char == '"':
+            in_string = not in_string
+            continue
+        if in_string:
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : position + 1]
+    return None
+
+
+def parse_llm_json(text: str) -> dict[str, Any]:
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```(?:json)?", "", cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r"```$", "", cleaned).strip()
+
     try:
-        return BGEM3FlagModel(model_name, use_fp16=use_fp16)
-    except TypeError:
-        return BGEM3FlagModel(model_name)
+        parsed = json.loads(cleaned)
+    except json.JSONDecodeError:
+        json_object = extract_balanced_json_object(cleaned)
+        if json_object is None:
+            raise ValueError("LLM response did not contain a JSON object.")
+        parsed = json.loads(json_object)
+
+    if not isinstance(parsed, dict):
+        raise ValueError("LLM response JSON must be an object.")
+    return parsed
 
 
-def encode_bge_m3(
+def validate_llm_expansions(payload: Any) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        raise ValueError("LLM expansion payload must be an object.")
+    if set(payload.keys()) != set(LLM_EXPANSION_KEYS):
+        raise ValueError(f"LLM expansion keys must be exactly {LLM_EXPANSION_KEYS}.")
+
+    validated: dict[str, str] = {}
+    for key in LLM_EXPANSION_KEYS:
+        value = payload[key]
+        if not isinstance(value, str):
+            raise ValueError(f"LLM field `{key}` must be a string.")
+        if not value.strip():
+            raise ValueError(f"LLM field `{key}` must not be empty.")
+        validated[key] = normalize_text(value)
+    return validated
+
+
+def generate_llm_text(
+    *,
+    tokenizer: Any,
     model: Any,
-    texts: list[str],
-    batch_size: int,
-    label: str,
+    device: Any,
+    prompt: str,
     max_length: int,
-    return_dense: bool,
-    return_sparse: bool,
-    return_colbert_vecs: bool,
-) -> dict[str, Any]:
+    max_new_tokens: int,
+    temperature: float,
+) -> str:
     torch_module = require_torch()
-    faiss_module = require_faiss()
-    if batch_size <= 0:
-        raise ValueError("--batch-size must be greater than 0.")
-    if max_length <= 0:
-        raise ValueError("--max-length must be greater than 0.")
-
-    current_batch_size = batch_size
     current_max_length = max_length
+    current_max_new_tokens = max_new_tokens
+
     while True:
         try:
-            total_items = len(texts)
-            if total_items == 0:
-                empty: dict[str, Any] = {}
-                if return_dense:
-                    empty["dense_vecs"] = np.empty((0, 0), dtype=np.float32)
-                if return_sparse:
-                    empty["lexical_weights"] = []
-                if return_colbert_vecs:
-                    empty["colbert_vecs"] = []
-                return empty
+            inputs = tokenizer(
+                prompt,
+                return_tensors="pt",
+                truncation=True,
+                max_length=current_max_length,
+            )
+            inputs = {key: value.to(device) for key, value in inputs.items()}
+            input_length = inputs["input_ids"].shape[-1]
+            generation_kwargs: dict[str, Any] = {
+                "max_new_tokens": current_max_new_tokens,
+                "pad_token_id": tokenizer.pad_token_id,
+                "eos_token_id": tokenizer.eos_token_id,
+                "do_sample": temperature > 0,
+            }
+            if temperature > 0:
+                generation_kwargs["temperature"] = temperature
+                generation_kwargs["top_p"] = 0.9
 
-            dense_chunks: list[np.ndarray] = []
-            sparse_chunks: list[Any] = []
-            colbert_chunks: list[Any] = []
-            for start in range(0, total_items, current_batch_size):
-                end = min(total_items, start + current_batch_size)
-                chunk_output = model.encode(
-                    texts[start:end],
-                    batch_size=current_batch_size,
-                    max_length=current_max_length,
-                    return_dense=return_dense,
-                    return_sparse=return_sparse,
-                    return_colbert_vecs=return_colbert_vecs,
-                )
-                if return_dense:
-                    dense = np.asarray(chunk_output["dense_vecs"], dtype=np.float32)
-                    faiss_module.normalize_L2(dense)
-                    dense_chunks.append(dense)
-                if return_sparse:
-                    sparse_chunks.extend(chunk_output["lexical_weights"])
-                if return_colbert_vecs:
-                    colbert_chunks.extend(chunk_output["colbert_vecs"])
-
-            output: dict[str, Any] = {}
-            if return_dense:
-                output["dense_vecs"] = np.concatenate(dense_chunks, axis=0)
-            if return_sparse:
-                output["lexical_weights"] = sparse_chunks
-            if return_colbert_vecs:
-                output["colbert_vecs"] = colbert_chunks
-            return output
+            with torch_module.no_grad():
+                output_ids = model.generate(**inputs, **generation_kwargs)
+            generated_ids = output_ids[0][input_length:]
+            return tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
         except Exception as error:
             if not (
                 is_oom_error(error)
-                and (current_batch_size > MIN_OOM_BATCH_SIZE or current_max_length > MIN_OOM_MAX_LENGTH)
+                and (
+                    current_max_new_tokens > MIN_OOM_MAX_LENGTH
+                    or current_max_length > MIN_OOM_MAX_LENGTH
+                )
             ):
                 raise
 
-            if current_batch_size > MIN_OOM_BATCH_SIZE:
-                next_batch_size = max(MIN_OOM_BATCH_SIZE, current_batch_size // 2)
+            clear_cuda_cache(torch_module)
+            if current_max_new_tokens > MIN_OOM_MAX_LENGTH:
+                next_max_new_tokens = max(MIN_OOM_MAX_LENGTH, current_max_new_tokens // 2)
                 print(
-                    f"OOM while encoding {label} with batch_size={current_batch_size}, "
-                    f"max_length={current_max_length}. Retrying with batch_size={next_batch_size}."
+                    f"OOM while generating LLM output with max_new_tokens={current_max_new_tokens}. "
+                    f"Retrying with max_new_tokens={next_max_new_tokens}."
                 )
-                clear_cuda_cache(torch_module)
-                current_batch_size = next_batch_size
+                current_max_new_tokens = next_max_new_tokens
                 continue
 
             next_max_length = max(MIN_OOM_MAX_LENGTH, current_max_length // 2)
             print(
-                f"OOM while encoding {label} with batch_size={current_batch_size}, "
-                f"max_length={current_max_length}. Retrying with max_length={next_max_length}."
+                f"OOM while generating LLM output with max_length={current_max_length}. "
+                f"Retrying with max_length={next_max_length}."
             )
-            clear_cuda_cache(torch_module)
             current_max_length = next_max_length
 
 
-def compute_colbert_scores_batched(
-    *,
-    query_colbert: np.ndarray,
-    candidate_colbert: list[np.ndarray],
-    batch_size: int,
-) -> np.ndarray:
-    torch_module = require_torch()
-    if batch_size <= 0:
-        raise ValueError("--colbert-score-batch-size must be greater than 0.")
-    if not candidate_colbert:
-        return np.empty((0,), dtype=np.float32)
-
-    def _score_on_device(device: torch.device, current_batch_size: int) -> np.ndarray:
-        q_reps = torch.as_tensor(query_colbert, dtype=torch.float32, device=device)
-        if q_reps.ndim != 2 or q_reps.shape[0] == 0:
-            return np.zeros(len(candidate_colbert), dtype=np.float32)
-
-        score_chunks: list[np.ndarray] = []
-        for start in range(0, len(candidate_colbert), current_batch_size):
-            batch = candidate_colbert[start : start + current_batch_size]
-            batch_scores = np.zeros(len(batch), dtype=np.float32)
-            non_empty_indices: list[int] = []
-            non_empty_docs: list[np.ndarray] = []
-
-            for local_idx, doc_colbert in enumerate(batch):
-                if isinstance(doc_colbert, np.ndarray) and doc_colbert.ndim == 2 and doc_colbert.shape[0] > 0:
-                    non_empty_indices.append(local_idx)
-                    non_empty_docs.append(doc_colbert)
-
-            if not non_empty_docs:
-                score_chunks.append(batch_scores)
-                continue
-
-            max_doc_tokens = max(doc.shape[0] for doc in non_empty_docs)
-            embedding_dim = q_reps.shape[1]
-            doc_tensor = torch.zeros((len(non_empty_docs), max_doc_tokens, embedding_dim), dtype=torch.float32, device=device)
-            doc_mask = torch.zeros((len(non_empty_docs), max_doc_tokens), dtype=torch.bool, device=device)
-
-            for tensor_row, doc_colbert in enumerate(non_empty_docs):
-                doc_reps = torch.as_tensor(doc_colbert, dtype=torch.float32, device=device)
-                doc_length = doc_reps.shape[0]
-                doc_tensor[tensor_row, :doc_length] = doc_reps
-                doc_mask[tensor_row, :doc_length] = True
-
-            token_scores = torch.einsum("qd,bkd->bqk", q_reps, doc_tensor)
-            token_scores = token_scores.masked_fill(~doc_mask.unsqueeze(1), float("-inf"))
-            max_scores = token_scores.max(dim=-1).values
-            reduced_scores = max_scores.sum(dim=-1) / q_reps.shape[0]
-            reduced_scores_np = reduced_scores.detach().cpu().numpy().astype(np.float32, copy=False)
-
-            for output_idx, score in zip(non_empty_indices, reduced_scores_np):
-                batch_scores[output_idx] = float(score)
-
-            score_chunks.append(batch_scores)
-
-        return np.concatenate(score_chunks, axis=0)
-
-    use_cuda = torch_module.cuda.is_available()
-    device = torch_module.device("cuda:0" if use_cuda else "cpu")
-    current_batch_size = batch_size
-
-    while True:
-        try:
-            return _score_on_device(device=device, current_batch_size=current_batch_size)
-        except Exception as error:
-            if not is_oom_error(error):
-                raise
-
-            if current_batch_size > 1:
-                next_batch_size = max(1, current_batch_size // 2)
-                print(
-                    f"OOM while ColBERT scoring with colbert_score_batch_size={current_batch_size}. "
-                    f"Retrying with colbert_score_batch_size={next_batch_size}."
-                )
-                current_batch_size = next_batch_size
-                clear_cuda_cache(torch_module)
-                continue
-
-            if device.type == "cuda":
-                print("OOM while ColBERT scoring at colbert_score_batch_size=1. Falling back to CPU scoring.")
-                device = torch_module.device("cpu")
-                clear_cuda_cache(torch_module)
-                continue
-
-            raise
-
-
-def encode_colbert_vectors(
-    *,
-    model: Any,
-    texts: list[str],
-    batch_size: int,
-    max_length: int,
-    label: str,
-) -> list[np.ndarray]:
-    if not texts:
-        return []
-
-    output = encode_bge_m3(
-        model=model,
-        texts=texts,
-        batch_size=batch_size,
-        label=label,
-        max_length=max_length,
-        return_dense=False,
-        return_sparse=False,
-        return_colbert_vecs=True,
+def build_safe_fallback_expansions(query: str, lang: str) -> dict[str, str]:
+    terms = extract_query_terms(query, load_stopwords(lang), max_terms=12)
+    return build_rule_based_expansions(
+        query=query,
+        lang=lang,
+        query_terms=terms,
+        sparse_terms=[],
+        dense_terms=[],
+        colbert_terms=[],
     )
-    encoded = output["colbert_vecs"]
-    return [np.asarray(v, dtype=np.float32) for v in encoded]
 
 
-def build_faiss_index(corpus_embeddings: np.ndarray) -> faiss.IndexFlatIP:
-    faiss_module = require_faiss()
-    dimension = corpus_embeddings.shape[1]
-    index = faiss_module.IndexFlatIP(dimension)
-    index.add(corpus_embeddings)
-    return index
+def generate_llm_expansions(
+    *,
+    tokenizer: Any,
+    model: Any,
+    device: Any,
+    query: str,
+    lang: str,
+    max_length: int,
+    max_new_tokens: int,
+    temperature: float,
+    retries: int,
+) -> dict[str, str]:
+    last_error: str | None = None
+    attempts = max(1, retries)
+
+    for _ in range(attempts):
+        prompt = build_llm_prompt(query, lang, previous_error=last_error)
+        raw_output = generate_llm_text(
+            tokenizer=tokenizer,
+            model=model,
+            device=device,
+            prompt=prompt,
+            max_length=max_length,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+        )
+        try:
+            return validate_llm_expansions(parse_llm_json(raw_output))
+        except Exception as error:
+            last_error = str(error)
+
+    print(
+        "Warning: LLM returned invalid expansion JSON after "
+        f"{attempts} attempts; using validated fallback for one query."
+    )
+    return validate_llm_expansions(build_safe_fallback_expansions(query, lang))
 
 
 def extract_terms(texts: Iterable[str], stopwords: set[str], max_terms: int) -> list[str]:
@@ -678,279 +861,388 @@ def extract_terms(texts: Iterable[str], stopwords: set[str], max_terms: int) -> 
     return terms
 
 
-def summarize_documents(records: list[dict[str, Any]], doc_indices: list[int], *, max_terms: int, stopwords: set[str]) -> str:
-    snippets: list[str] = []
-    for doc_index in doc_indices:
-        if 0 <= doc_index < len(records):
-            record = records[doc_index]
-            title = record.get("title", "")
-            abstract = record.get("abstract", "")
-            snippets.append(title if title else record.get("text", ""))
-            if abstract:
-                snippets.append(abstract)
-    return normalize_text(" ".join(extract_terms(snippets, stopwords, max_terms=max_terms)))
+def extract_query_terms(query: str, stopwords: set[str], max_terms: int) -> list[str]:
+    if max_terms <= 0:
+        return []
+
+    primary: list[str] = []
+    secondary: list[str] = []
+    seen: set[str] = set()
+    for raw_token in TOKEN_RE.findall(query):
+        token = normalize_text(raw_token.strip("#@"))
+        if not token:
+            continue
+        normalized = token.lower()
+        if len(normalized) < 3 or normalized in stopwords or normalized in seen:
+            continue
+        seen.add(normalized)
+        is_identifier = any(char.isdigit() for char in token) or "-" in token
+        is_acronym = len(token) > 1 and token.upper() == token and any(char.isalpha() for char in token)
+        is_entity_like = token[:1].isupper()
+        if is_identifier or is_acronym or is_entity_like or len(normalized) > 5:
+            primary.append(token)
+        else:
+            secondary.append(token)
+
+    return (primary + secondary)[:max_terms]
 
 
-def build_representation(
-    original: str,
-    query_terms: list[str],
-    doc_terms: list[str],
-    *,
-    prefix: str = "",
+def build_term_variants(term: str, lang: str) -> list[str]:
+    normalized = normalize_text(term)
+    if not normalized:
+        return []
+
+    variants = [normalized]
+    lower = normalized.lower()
+    if lower != normalized:
+        variants.append(lower)
+    if normalized.upper() == normalized and len(normalized) > 1:
+        variants.append(normalized.lower())
+
+    hyphen_normalized = normalized.replace("‑", "-").replace("–", "-")
+    if "-" in hyphen_normalized:
+        variants.append(hyphen_normalized.replace("-", ""))
+        variants.append(hyphen_normalized.replace("-", " "))
+
+    if len(lower) > 4:
+        if lang.startswith("en"):
+            if lower.endswith("ies"):
+                variants.append(lower[:-3] + "y")
+            elif lower.endswith("es"):
+                variants.append(lower[:-2])
+            elif lower.endswith("s"):
+                variants.append(lower[:-1])
+        elif lang.startswith(("de", "fr")) and lower.endswith("s"):
+            variants.append(lower[:-1])
+
+    return dedupe_terms(variants)
+
+
+def build_keywords(query: str, lang: str, query_terms: list[str] | None = None) -> str:
+    terms = query_terms
+    if terms is None:
+        terms = extract_query_terms(query, load_stopwords(lang), max_terms=12)
+    return "; ".join(dedupe_terms(terms[:12])) or normalize_text(query)
+
+
+def build_sparse_expansion(
+    query: str,
+    lang: str,
+    query_terms: list[str] | None = None,
+    doc_terms: list[str] | None = None,
 ) -> str:
-    parts = [original]
-    if prefix:
-        parts.insert(0, prefix)
-    if query_terms:
-        parts.append(" ".join(query_terms))
-    if doc_terms:
-        parts.append(" ".join(doc_terms))
-    return merge_texts(parts)
+    terms = query_terms
+    if terms is None:
+        terms = extract_query_terms(query, load_stopwords(lang), max_terms=12)
+
+    expanded_terms: list[str] = []
+    for term in terms[:14]:
+        expanded_terms.extend(build_term_variants(term, lang))
+    expanded_terms.extend((doc_terms or [])[:18])
+    return " ; ".join(dedupe_terms(expanded_terms)) or normalize_text(query)
 
 
-def build_query_variants_for_language(
-    *,
-    source_queries: list[QuerySource],
-    model: Any,
-    corpus_pubkeys: list[str],
-    corpus_records: list[dict[str, Any]],
-    dense_index: faiss.IndexFlatIP,
-    corpus_sparse_cache: list[dict[str, float]],
-    batch_size: int,
-    max_length: int,
-    top_k: int,
-    candidate_multiplier: int,
-    colbert_score_batch_size: int,
-    colbert_corpus_cache_size: int,
-    colbert_corpus_encode_batch_size: int,
-) -> list[dict[str, Any]]:
-    if top_k <= 0:
-        raise ValueError("--top-k must be greater than 0.")
-    if candidate_multiplier <= 0:
-        raise ValueError("--candidate-multiplier must be greater than 0.")
-    if colbert_corpus_cache_size < 0:
-        raise ValueError("--colbert-corpus-cache-size must be greater than or equal to 0.")
-    if colbert_corpus_encode_batch_size <= 0:
-        raise ValueError("--colbert-corpus-encode-batch-size must be greater than 0.")
+def build_embedding_expansion(
+    query: str,
+    lang: str,
+    query_terms: list[str] | None = None,
+    doc_terms: list[str] | None = None,
+) -> str:
+    terms = query_terms
+    if terms is None:
+        terms = extract_query_terms(query, load_stopwords(lang), max_terms=10)
 
-    stopwords_by_language: dict[str, set[str]] = defaultdict(set)
-    for source in source_queries:
-        stopwords_by_language[source.language] = load_stopwords(source.language)
+    focus = ", ".join(dedupe_terms(terms[:8])) or normalize_text(query)
+    context = ", ".join(dedupe_terms((doc_terms or [])[:8]))
+    if lang.startswith("de"):
+        tail = f" mit Kontext zu {context}" if context else ""
+        return normalize_text(f"Relevantes Dokument zu {focus}{tail}; es behandelt die Suchintention und passende wissenschaftliche oder faktische Belege.")
+    if lang.startswith("fr"):
+        tail = f" avec contexte sur {context}" if context else ""
+        return normalize_text(f"Document pertinent sur {focus}{tail}; il décrit l'intention de recherche et des éléments scientifiques ou factuels associés.")
 
-    query_texts = [source.original for source in source_queries]
-    query_output = encode_bge_m3(
-        model=model,
-        texts=query_texts,
-        batch_size=batch_size,
-        label="queries",
-        max_length=max_length,
-        return_dense=True,
-        return_sparse=True,
-        return_colbert_vecs=True,
+    tail = f" with context about {context}" if context else ""
+    return normalize_text(f"Relevant document discussing {focus}{tail}; it addresses the search intent and related scientific or factual evidence.")
+
+
+def build_colbert_expansion(
+    query: str,
+    lang: str,
+    query_terms: list[str] | None = None,
+    doc_terms: list[str] | None = None,
+) -> str:
+    terms = query_terms
+    if terms is None:
+        terms = extract_query_terms(query, load_stopwords(lang), max_terms=12)
+
+    focused_terms = dedupe_terms([*terms[:12], *(doc_terms or [])[:10]])
+    parts = [normalize_text(query), " ".join(focused_terms)]
+    return " ; ".join(part for part in parts if part).strip() or normalize_text(query)
+
+
+def build_general_expansion(
+    keywords: str,
+    sparse: str,
+    embedding: str,
+    colbert: str,
+) -> str:
+    return normalize_text(
+        f"{keywords}. {embedding} Lexical hints: {sparse}. Token hints: {colbert}."
     )
-    query_dense = np.asarray(query_output["dense_vecs"], dtype=np.float32)
-    query_sparse = query_output["lexical_weights"]
-    query_colbert = query_output["colbert_vecs"]
 
-    dense_candidate_k = min(len(corpus_pubkeys), max(top_k, top_k * candidate_multiplier))
-    _, dense_indices = dense_index.search(query_dense, dense_candidate_k)
-    current_colbert_candidate_k = dense_candidate_k
-    current_colbert_corpus_cache_size = colbert_corpus_cache_size
 
-    merged_rows: dict[tuple[str, str], dict[str, Any]] = {}
-    colbert_cache: OrderedDict[int, np.ndarray] = OrderedDict()
+def build_rule_based_expansions(
+    *,
+    query: str,
+    lang: str,
+    query_terms: list[str],
+    sparse_terms: list[str],
+    dense_terms: list[str],
+    colbert_terms: list[str],
+) -> dict[str, str]:
+    fallback = normalize_text(query)
+    try:
+        keywords = build_keywords(query, lang, query_terms=query_terms)
+        sparse = build_sparse_expansion(query, lang, query_terms=query_terms, doc_terms=sparse_terms)
+        embedding = build_embedding_expansion(query, lang, query_terms=query_terms, doc_terms=dense_terms)
+        colbert = build_colbert_expansion(query, lang, query_terms=query_terms, doc_terms=colbert_terms)
+        expanded = build_general_expansion(keywords, sparse, embedding, colbert)
+    except Exception:
+        keywords = fallback
+        sparse = fallback
+        embedding = fallback
+        colbert = fallback
+        expanded = fallback
 
-    for row, source in enumerate(source_queries):
-        stopwords = stopwords_by_language[source.language]
-        query_terms = extract_terms([source.original], stopwords, max_terms=8)
+    return {
+        "keywords": str(keywords or fallback),
+        "sparse": str(sparse or fallback),
+        "embedding": str(embedding or fallback),
+        "colbert": str(colbert or fallback),
+        "expanded": str(expanded or fallback),
+    }
 
-        sparse_scores = np.asarray(
-            model.compute_lexical_matching_score([query_sparse[row]], corpus_sparse_cache),
-            dtype=np.float32,
-        ).reshape(-1)
-        sparse_ranked = np.argsort(-sparse_scores)[:top_k]
 
-        dense_ranked = [int(idx) for idx in dense_indices[row][:top_k] if 0 <= int(idx) < len(corpus_pubkeys)]
+def coerce_int_field(value: Any, field_name: str) -> int:
+    if isinstance(value, bool):
+        raise ValueError(f"{field_name} must be an integer, got bool.")
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip().lstrip("-").isdigit():
+        return int(value.strip())
+    raise ValueError(f"{field_name} must be an integer-compatible value, got {value!r}.")
 
-        while True:
-            try:
-                colbert_candidate_indices = [
-                    int(idx)
-                    for idx in dense_indices[row][:current_colbert_candidate_k]
-                    if 0 <= int(idx) < len(corpus_pubkeys)
-                ]
-                if current_colbert_corpus_cache_size > 0:
-                    missing_indices = [idx for idx in colbert_candidate_indices if idx not in colbert_cache]
-                    if missing_indices:
-                        missing_texts = [corpus_records[idx]["text"] for idx in missing_indices]
-                        missing_vectors = encode_colbert_vectors(
-                            model=model,
-                            texts=missing_texts,
-                            batch_size=colbert_corpus_encode_batch_size,
-                            max_length=max_length,
-                            label="colbert-corpus-candidates",
-                        )
-                        for idx, vector in zip(missing_indices, missing_vectors):
-                            colbert_cache[idx] = vector
-                            colbert_cache.move_to_end(idx)
-                            while len(colbert_cache) > current_colbert_corpus_cache_size:
-                                colbert_cache.popitem(last=False)
 
-                    colbert_candidates: list[np.ndarray] = []
-                    for idx in colbert_candidate_indices:
-                        vector = colbert_cache.get(idx)
-                        if vector is None:
-                            continue
-                        colbert_cache.move_to_end(idx)
-                        colbert_candidates.append(vector)
+def build_output_record(
+    *,
+    output_index: int,
+    source: QuerySource,
+    expansions: dict[str, str],
+) -> dict[str, Any]:
+    record = {
+        "index": output_index,
+        "pubkey": coerce_int_field(source.pubkey, "pubkey"),
+        "original": source.original,
+        "keywords": str(expansions.get("keywords", "")),
+        "sparse": str(expansions.get("sparse", "")),
+        "embedding": str(expansions.get("embedding", "")),
+        "colbert": str(expansions.get("colbert", "")),
+        "expanded": str(expansions.get("expanded", "")),
+    }
+    validate_output_item(record, expected_index=output_index)
+    return record
 
-                    # Keep score alignment with candidate indices even if transient vectors were evicted.
-                    if len(colbert_candidates) != len(colbert_candidate_indices):
-                        refreshed_vectors = encode_colbert_vectors(
-                            model=model,
-                            texts=[corpus_records[idx]["text"] for idx in colbert_candidate_indices],
-                            batch_size=colbert_corpus_encode_batch_size,
-                            max_length=max_length,
-                            label="colbert-corpus-candidates-refresh",
-                        )
-                        colbert_candidates = refreshed_vectors
-                        for idx, vector in zip(colbert_candidate_indices, refreshed_vectors):
-                            colbert_cache[idx] = vector
-                            colbert_cache.move_to_end(idx)
-                            while len(colbert_cache) > current_colbert_corpus_cache_size:
-                                colbert_cache.popitem(last=False)
-                else:
-                    colbert_candidates = encode_colbert_vectors(
-                        model=model,
-                        texts=[corpus_records[idx]["text"] for idx in colbert_candidate_indices],
-                        batch_size=colbert_corpus_encode_batch_size,
-                        max_length=max_length,
-                        label="colbert-corpus-candidates",
-                    )
 
-                colbert_scores = compute_colbert_scores_batched(
-                    query_colbert=query_colbert[row],
-                    candidate_colbert=colbert_candidates,
-                    batch_size=colbert_score_batch_size,
-                )
-                colbert_ranked = [colbert_candidate_indices[pos] for pos in np.argsort(-colbert_scores)[:top_k]]
-                break
-            except Exception as error:
-                if not is_oom_error(error):
-                    raise
+def validate_output_item(
+    item: Any,
+    *,
+    seen_indexes: set[int] | None = None,
+    expected_index: int | None = None,
+) -> None:
+    if not isinstance(item, dict):
+        raise ValueError("Each output item must be a JSON object.")
+    if set(item.keys()) != set(REQUIRED_OUTPUT_KEYS):
+        raise ValueError(f"Output keys must be exactly {REQUIRED_OUTPUT_KEYS}, got {tuple(item.keys())}.")
 
-                torch_module = require_torch()
-                clear_cuda_cache(torch_module)
+    index = item["index"]
+    if isinstance(index, bool) or not isinstance(index, int):
+        raise ValueError("Output field `index` must be an integer.")
+    if expected_index is not None and index != expected_index:
+        raise ValueError(f"Output index must be sequential; expected {expected_index}, got {index}.")
+    if seen_indexes is not None:
+        if index in seen_indexes:
+            raise ValueError(f"Duplicate output index {index}.")
+        seen_indexes.add(index)
 
-                if current_colbert_corpus_cache_size > 0:
-                    next_cache_size = current_colbert_corpus_cache_size // 2
-                    print(
-                        "OOM while building ColBERT expansion candidates with "
-                        f"colbert_corpus_cache_size={current_colbert_corpus_cache_size}. "
-                        f"Retrying with colbert_corpus_cache_size={next_cache_size}."
-                    )
-                    current_colbert_corpus_cache_size = next_cache_size
-                    colbert_cache.clear()
-                    continue
+    pubkey = item["pubkey"]
+    if isinstance(pubkey, bool) or not isinstance(pubkey, int):
+        raise ValueError("Output field `pubkey` must be an integer.")
 
-                if current_colbert_candidate_k > MIN_OOM_CANDIDATE_COUNT:
-                    next_candidate_k = max(MIN_OOM_CANDIDATE_COUNT, current_colbert_candidate_k // 2)
-                    print(
-                        "OOM while building ColBERT expansion candidates with "
-                        f"candidate_count={current_colbert_candidate_k}. "
-                        f"Retrying with candidate_count={next_candidate_k}."
-                    )
-                    current_colbert_candidate_k = next_candidate_k
-                    colbert_cache.clear()
-                    continue
+    for field in REQUIRED_OUTPUT_KEYS[2:]:
+        value = item[field]
+        if not isinstance(value, str):
+            raise ValueError(f"Output field `{field}` must be a string.")
 
-                raise
 
-        sparse_terms = extract_terms((corpus_records[idx]["text"] for idx in sparse_ranked), stopwords, max_terms=18)
-        dense_terms = extract_terms((corpus_records[idx]["title"] or corpus_records[idx]["text"] for idx in dense_ranked), stopwords, max_terms=12)
-        colbert_terms = extract_terms((corpus_records[idx]["text"] for idx in colbert_ranked), stopwords, max_terms=24)
+def validate_output_items(items: Any) -> int:
+    if not isinstance(items, list):
+        raise ValueError("Output JSON must be a single flat array.")
+    seen_indexes: set[int] = set()
+    for expected_index, item in enumerate(items):
+        validate_output_item(item, seen_indexes=seen_indexes, expected_index=expected_index)
+    return len(items)
 
-        sparse_text = build_representation(source.original, query_terms, sparse_terms)
-        embedding_text = build_representation(source.original, query_terms[:4], dense_terms, prefix="")
-        colbert_text = build_representation(source.original, query_terms, colbert_terms)
 
-        key = (source.index, source.pubkey)
-        record = merged_rows.setdefault(
-            key,
+def validate_output_file(path: Path) -> int:
+    return validate_output_items(load_json(path))
+
+
+def run_schema_self_test() -> None:
+    mock_llm_output = (
+        'noise {"keywords":"a","sparse":"b","embedding":"c",'
+        '"colbert":"d","expanded":"e"}'
+    )
+    validate_llm_expansions(parse_llm_json(mock_llm_output))
+    try:
+        validate_llm_expansions(
             {
-                "index": maybe_int(source.index),
-                "pubkey": maybe_int(source.pubkey),
-                "languages": [],
-                "sources": [],
-                "_original_parts": [],
-                "_keywords_parts": [],
-                "_sparse_parts": [],
-                "_embedding_parts": [],
-                "_colbert_parts": [],
-            },
-        )
-
-        record["languages"].append(source.language)
-        record["sources"].append(
-            {
-                "language": source.language,
-                "index": maybe_int(source.index),
-                "pubkey": maybe_int(source.pubkey),
-                "original": source.original,
-                "keywords": " ".join(query_terms),
-                "sparse": sparse_text,
-                "embedding": embedding_text,
-                "colbert": colbert_text,
-                "expanded": sparse_text,
+                "keywords": "a",
+                "sparse": ["not", "a", "string"],
+                "embedding": "c",
+                "colbert": "d",
+                "expanded": "e",
             }
         )
-        record["_original_parts"].append(source.original)
-        record["_keywords_parts"].append(" ".join(query_terms))
-        record["_sparse_parts"].append(sparse_text)
-        record["_embedding_parts"].append(embedding_text)
-        record["_colbert_parts"].append(colbert_text)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("Malformed LLM expansion payload was not rejected.")
 
-    final_rows: list[dict[str, Any]] = []
-    for record in merged_rows.values():
-        languages = dedupe_terms(record["languages"])
-        original = merge_texts(record.pop("_original_parts"))
-        keywords = merge_texts(record.pop("_keywords_parts"))
-        sparse = merge_texts(record.pop("_sparse_parts"))
-        embedding = merge_texts(record.pop("_embedding_parts"))
-        colbert = merge_texts(record.pop("_colbert_parts"))
+    sample_source = QuerySource(
+        language="en",
+        path=Path("sample_train.json"),
+        index="42",
+        pubkey="999",
+        original="first original query about COVID-19 vaccine adverse reactions",
+        order=0,
+    )
+    query_terms = extract_query_terms(sample_source.original, load_stopwords(sample_source.language), max_terms=8)
+    expansions = build_rule_based_expansions(
+        query=sample_source.original,
+        lang=sample_source.language,
+        query_terms=query_terms,
+        sparse_terms=["vaccination", "side effects"],
+        dense_terms=["clinical study", "safety evidence"],
+        colbert_terms=["COVID-19", "adverse reactions"],
+    )
+    item = build_output_record(output_index=0, source=sample_source, expansions=expansions)
+    validate_output_items([item])
+    print(json.dumps([item], ensure_ascii=False, indent=2))
 
-        record["language"] = languages[0] if len(languages) == 1 else "merged"
-        record["languages"] = languages
-        record["original"] = original
-        record["keywords"] = keywords
-        record["sparse"] = sparse
-        record["embedding"] = embedding
-        record["colbert"] = colbert
-        record["expanded"] = sparse
 
-        final_rows.append(record)
+def build_query_variant_rows(
+    *,
+    source_queries: list[QuerySource],
+    start_index: int,
+    tokenizer: Any,
+    model: Any,
+    device: Any,
+    max_length: int,
+    max_new_tokens: int,
+    temperature: float,
+    llm_retries: int,
+) -> list[dict[str, Any]]:
+    output_rows: list[dict[str, Any]] = []
+    for row, source in enumerate(source_queries):
+        expansions = generate_llm_expansions(
+            tokenizer=tokenizer,
+            model=model,
+            device=device,
+            query=source.original,
+            lang=source.language,
+            max_length=max_length,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            retries=llm_retries,
+        )
+        output_rows.append(
+            build_output_record(
+                output_index=start_index + row,
+                source=source,
+                expansions=expansions,
+            )
+        )
 
-    final_rows.sort(key=lambda item: (str(item["index"]), str(item["pubkey"])))
-    return final_rows
+    return output_rows
+
+
+def iter_expanded_query_rows(
+    *,
+    source_queries: list[QuerySource],
+    tokenizer: Any,
+    model: Any,
+    device: Any,
+    max_length: int,
+    max_new_tokens: int,
+    temperature: float,
+    llm_retries: int,
+    query_chunk_size: int,
+    log_every_queries: int,
+) -> Iterable[dict[str, Any]]:
+    total_sources = len(source_queries)
+    processed_sources = 0
+    next_output_index = 0
+    next_log_at = log_every_queries if log_every_queries > 0 else 0
+
+    for chunk in iter_query_source_chunks(source_queries, query_chunk_size):
+        chunk_rows = build_query_variant_rows(
+            source_queries=chunk,
+            start_index=next_output_index,
+            tokenizer=tokenizer,
+            model=model,
+            device=device,
+            max_length=max_length,
+            max_new_tokens=max_new_tokens,
+            temperature=temperature,
+            llm_retries=llm_retries,
+        )
+        for row in chunk_rows:
+            yield row
+
+        processed_sources += len(chunk)
+        next_output_index += len(chunk_rows)
+        if log_every_queries > 0 and (
+            processed_sources >= next_log_at or processed_sources >= total_sources
+        ):
+            print(f"Expanded {processed_sources}/{total_sources} query source records.")
+            while next_log_at <= processed_sources:
+                next_log_at += log_every_queries
 
 
 def main() -> None:
     args = parse_args()
 
-    if args.batch_size <= 0:
-        raise ValueError("--batch-size must be greater than 0.")
     if args.max_length <= 0:
         raise ValueError("--max-length must be greater than 0.")
-    if args.top_k <= 0:
-        raise ValueError("--top-k must be greater than 0.")
-    if args.candidate_multiplier <= 0:
-        raise ValueError("--candidate-multiplier must be greater than 0.")
-    if args.colbert_score_batch_size <= 0:
-        raise ValueError("--colbert-score-batch-size must be greater than 0.")
-    if args.colbert_corpus_cache_size < 0:
-        raise ValueError("--colbert-corpus-cache-size must be greater than or equal to 0.")
-    if args.colbert_corpus_encode_batch_size <= 0:
-        raise ValueError("--colbert-corpus-encode-batch-size must be greater than 0.")
+    if args.max_new_tokens <= 0:
+        raise ValueError("--max-new-tokens must be greater than 0.")
+    if args.llm_retries <= 0:
+        raise ValueError("--llm-retries must be greater than 0.")
+    if args.temperature < 0:
+        raise ValueError("--temperature must be greater than or equal to 0.")
+    if args.query_chunk_size < 0:
+        raise ValueError("--query-chunk-size must be greater than or equal to 0.")
+    if args.log_every_queries < 0:
+        raise ValueError("--log-every-queries must be greater than or equal to 0.")
+
+    if args.schema_self_test:
+        run_schema_self_test()
+        return
+
+    if args.validate_output is not None:
+        count = validate_output_file(args.validate_output)
+        print(f"Validated {count} flat query expansion records in {args.validate_output}")
+        return
 
     if args.inputs:
         input_paths = args.inputs
@@ -973,44 +1265,27 @@ def main() -> None:
             print(f"Optional compatibility output would be written to {args.compat_output}")
         return
 
-    corpus_pubkeys, corpus_texts, corpus_records = load_corpus(args.corpus)
-    model = build_bge_m3_model(args.model)
+    tokenizer, model, device = build_llm_model(args.model)
 
-    corpus_output = encode_bge_m3(
-        model=model,
-        texts=corpus_texts,
-        batch_size=args.batch_size,
-        label="corpus",
-        max_length=args.max_length,
-        return_dense=True,
-        return_sparse=True,
-        return_colbert_vecs=False,
-    )
-    corpus_embeddings = np.asarray(corpus_output["dense_vecs"], dtype=np.float32)
-    corpus_sparse_cache = corpus_output["lexical_weights"]
-    dense_index = build_faiss_index(corpus_embeddings)
-
-    merged_rows = build_query_variants_for_language(
+    expanded_rows = iter_expanded_query_rows(
         source_queries=query_sources,
+        tokenizer=tokenizer,
         model=model,
-        corpus_pubkeys=corpus_pubkeys,
-        corpus_records=corpus_records,
-        dense_index=dense_index,
-        corpus_sparse_cache=corpus_sparse_cache,
-        batch_size=args.batch_size,
+        device=device,
         max_length=args.max_length,
-        top_k=args.top_k,
-        candidate_multiplier=args.candidate_multiplier,
-        colbert_score_batch_size=args.colbert_score_batch_size,
-        colbert_corpus_cache_size=args.colbert_corpus_cache_size,
-        colbert_corpus_encode_batch_size=args.colbert_corpus_encode_batch_size,
+        max_new_tokens=args.max_new_tokens,
+        temperature=args.temperature,
+        llm_retries=args.llm_retries,
+        query_chunk_size=args.query_chunk_size,
+        log_every_queries=args.log_every_queries,
     )
 
-    write_json(args.output, merged_rows)
+    saved_count = write_json_array_stream(args.output, expanded_rows)
     if args.compat_output is not None and args.compat_output != args.output:
-        write_json(args.compat_output, merged_rows)
+        args.compat_output.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(args.output, args.compat_output)
 
-    print(f"Saved {len(merged_rows)} merged query records to {args.output}")
+    print(f"Saved {saved_count} flat query expansion records to {args.output}")
     if args.compat_output is not None and args.compat_output != args.output:
         print(f"Saved compatibility copy to {args.compat_output}")
 
