@@ -15,6 +15,7 @@ import argparse
 import json
 import re
 import shutil
+import warnings
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,7 +41,7 @@ DEFAULT_INPUT_GLOB = "*_train.json"
 DEFAULT_CORPUS = CODE_ROOT / "data" / "collection_data.json"
 DEFAULT_OUTPUT = CODE_ROOT / "data" / "expanded_queries_multilingual_merged.json"
 DEFAULT_MODEL_NAME = "meta-llama/Llama-3.2-1B"
-DEFAULT_BATCH_SIZE = 1
+DEFAULT_BATCH_SIZE = 8
 DEFAULT_MAX_LENGTH = 1024
 DEFAULT_TOP_K = 10
 DEFAULT_CANDIDATE_MULTIPLIER = 3
@@ -208,7 +209,7 @@ def parse_args() -> argparse.Namespace:
         "--batch-size",
         type=int,
         default=DEFAULT_BATCH_SIZE,
-        help="Legacy argument kept for compatibility; LLM expansion processes one query at a time.",
+        help="Number of query prompts generated together in each LLM batch.",
     )
     parser.add_argument("--max-length", type=int, default=DEFAULT_MAX_LENGTH)
     parser.add_argument(
@@ -599,6 +600,7 @@ def build_llm_model(model_name: str) -> tuple[Any, Any, Any]:
         tokenizer = tokenizer_cls.from_pretrained(model_name)
         if tokenizer.pad_token_id is None:
             tokenizer.pad_token = tokenizer.eos_token
+        tokenizer.padding_side = "left"
 
         if torch_module.cuda.is_available():
             supports_bf16 = getattr(torch_module.cuda, "is_bf16_supported", lambda: False)
@@ -609,7 +611,15 @@ def build_llm_model(model_name: str) -> tuple[Any, Any, Any]:
             )
         else:
             dtype = torch_module.float32
-        model = model_cls.from_pretrained(model_name, torch_dtype=dtype)
+        with warnings.catch_warnings():
+            warnings.filterwarnings(
+                "ignore",
+                message=r"`do_sample` is set to `False`\..*",
+                category=UserWarning,
+                module=r"transformers\.generation\.configuration_utils",
+            )
+            model = model_cls.from_pretrained(model_name, torch_dtype=dtype)
+        sanitize_generation_config(model)
         device = torch_module.device("cuda:0" if torch_module.cuda.is_available() else "cpu")
         model.to(device)
         model.eval()
@@ -621,6 +631,17 @@ def build_llm_model(model_name: str) -> tuple[Any, Any, Any]:
             "on Hugging Face and authenticated this environment with HF_TOKEN or "
             "`huggingface-cli login`."
         ) from error
+
+
+def sanitize_generation_config(model: Any) -> None:
+    generation_config = getattr(model, "generation_config", None)
+    if generation_config is None:
+        return
+
+    generation_config.do_sample = False
+    generation_config.temperature = 1.0
+    generation_config.top_p = 1.0
+    generation_config.top_k = 50
 
 
 def build_llm_prompt(query: str, lang: str, previous_error: str | None = None) -> str:
@@ -728,55 +749,108 @@ def validate_llm_expansions(payload: Any) -> dict[str, str]:
     return validated
 
 
-def generate_llm_text(
+def build_generation_kwargs(
+    *,
+    tokenizer: Any,
+    max_new_tokens: int,
+    temperature: float,
+) -> dict[str, Any]:
+    use_sampling = temperature > 0
+    generation_kwargs: dict[str, Any] = {
+        "max_new_tokens": max_new_tokens,
+        "pad_token_id": tokenizer.pad_token_id,
+        "eos_token_id": tokenizer.eos_token_id,
+        "do_sample": use_sampling,
+    }
+    if use_sampling:
+        generation_kwargs["temperature"] = temperature
+        generation_kwargs["top_p"] = 0.9
+    else:
+        generation_kwargs["temperature"] = 1.0
+        generation_kwargs["top_p"] = 1.0
+        generation_kwargs["top_k"] = 50
+    return generation_kwargs
+
+
+def generate_llm_texts_once(
     *,
     tokenizer: Any,
     model: Any,
     device: Any,
-    prompt: str,
+    prompts: list[str],
     max_length: int,
     max_new_tokens: int,
     temperature: float,
-) -> str:
+) -> list[str]:
+    torch_module = require_torch()
+    if not prompts:
+        return []
+
+    inputs = tokenizer(
+        prompts,
+        return_tensors="pt",
+        truncation=True,
+        max_length=max_length,
+        padding=True,
+    )
+    inputs = {key: value.to(device) for key, value in inputs.items()}
+    prompt_length = inputs["input_ids"].shape[-1]
+    generation_kwargs = build_generation_kwargs(
+        tokenizer=tokenizer,
+        max_new_tokens=max_new_tokens,
+        temperature=temperature,
+    )
+
+    with torch_module.no_grad():
+        output_ids = model.generate(**inputs, **generation_kwargs)
+
+    generated_texts: list[str] = []
+    for output_row in output_ids:
+        generated_ids = output_row[prompt_length:]
+        generated_texts.append(tokenizer.decode(generated_ids, skip_special_tokens=True).strip())
+    return generated_texts
+
+
+def generate_llm_texts(
+    *,
+    tokenizer: Any,
+    model: Any,
+    device: Any,
+    prompts: list[str],
+    max_length: int,
+    max_new_tokens: int,
+    temperature: float,
+) -> list[str]:
     torch_module = require_torch()
     current_max_length = max_length
     current_max_new_tokens = max_new_tokens
 
     while True:
         try:
-            inputs = tokenizer(
-                prompt,
-                return_tensors="pt",
-                truncation=True,
+            return generate_llm_texts_once(
+                tokenizer=tokenizer,
+                model=model,
+                device=device,
+                prompts=prompts,
                 max_length=current_max_length,
+                max_new_tokens=current_max_new_tokens,
+                temperature=temperature,
             )
-            inputs = {key: value.to(device) for key, value in inputs.items()}
-            input_length = inputs["input_ids"].shape[-1]
-            generation_kwargs: dict[str, Any] = {
-                "max_new_tokens": current_max_new_tokens,
-                "pad_token_id": tokenizer.pad_token_id,
-                "eos_token_id": tokenizer.eos_token_id,
-                "do_sample": temperature > 0,
-            }
-            if temperature > 0:
-                generation_kwargs["temperature"] = temperature
-                generation_kwargs["top_p"] = 0.9
-
-            with torch_module.no_grad():
-                output_ids = model.generate(**inputs, **generation_kwargs)
-            generated_ids = output_ids[0][input_length:]
-            return tokenizer.decode(generated_ids, skip_special_tokens=True).strip()
         except Exception as error:
             if not (
                 is_oom_error(error)
                 and (
-                    current_max_new_tokens > MIN_OOM_MAX_LENGTH
+                    len(prompts) > 1
+                    or current_max_new_tokens > MIN_OOM_MAX_LENGTH
                     or current_max_length > MIN_OOM_MAX_LENGTH
                 )
             ):
                 raise
 
             clear_cuda_cache(torch_module)
+            if len(prompts) > 1:
+                raise
+
             if current_max_new_tokens > MIN_OOM_MAX_LENGTH:
                 next_max_new_tokens = max(MIN_OOM_MAX_LENGTH, current_max_new_tokens // 2)
                 print(
@@ -806,42 +880,71 @@ def build_safe_fallback_expansions(query: str, lang: str) -> dict[str, str]:
     )
 
 
-def generate_llm_expansions(
+def generate_llm_expansions_batch(
     *,
     tokenizer: Any,
     model: Any,
     device: Any,
-    query: str,
-    lang: str,
+    queries: list[str],
+    languages: list[str],
     max_length: int,
     max_new_tokens: int,
     temperature: float,
     retries: int,
-) -> dict[str, str]:
-    last_error: str | None = None
+) -> list[dict[str, str]]:
+    if len(queries) != len(languages):
+        raise ValueError("queries and languages must have the same length.")
+    if not queries:
+        return []
+
     attempts = max(1, retries)
+    results: list[dict[str, str] | None] = [None] * len(queries)
+    pending_indices = list(range(len(queries)))
+    last_errors: dict[int, str | None] = {index: None for index in pending_indices}
 
     for _ in range(attempts):
-        prompt = build_llm_prompt(query, lang, previous_error=last_error)
-        raw_output = generate_llm_text(
+        prompts = [
+            build_llm_prompt(
+                queries[index],
+                languages[index],
+                previous_error=last_errors.get(index),
+            )
+            for index in pending_indices
+        ]
+        raw_outputs = generate_llm_texts(
             tokenizer=tokenizer,
             model=model,
             device=device,
-            prompt=prompt,
+            prompts=prompts,
             max_length=max_length,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
         )
-        try:
-            return validate_llm_expansions(parse_llm_json(raw_output))
-        except Exception as error:
-            last_error = str(error)
+        next_pending: list[int] = []
+        for index, raw_output in zip(pending_indices, raw_outputs):
+            try:
+                results[index] = validate_llm_expansions(parse_llm_json(raw_output))
+            except Exception as error:
+                last_errors[index] = str(error)
+                next_pending.append(index)
+        pending_indices = next_pending
+        if not pending_indices:
+            break
 
-    print(
-        "Warning: LLM returned invalid expansion JSON after "
-        f"{attempts} attempts; using validated fallback for one query."
-    )
-    return validate_llm_expansions(build_safe_fallback_expansions(query, lang))
+    if pending_indices:
+        print(
+            "Warning: LLM returned invalid expansion JSON after "
+            f"{attempts} attempts for {len(pending_indices)} queries; using validated fallbacks."
+        )
+        for index in pending_indices:
+            results[index] = validate_llm_expansions(
+                build_safe_fallback_expansions(queries[index], languages[index])
+            )
+
+    missing = [index for index, result in enumerate(results) if result is None]
+    if missing:
+        raise ValueError(f"Missing LLM expansion results for batch indices: {missing}")
+    return [result for result in results if result is not None]
 
 
 def extract_terms(texts: Iterable[str], stopwords: set[str], max_terms: int) -> list[str]:
@@ -1147,31 +1250,58 @@ def build_query_variant_rows(
     tokenizer: Any,
     model: Any,
     device: Any,
+    batch_size: int,
     max_length: int,
     max_new_tokens: int,
     temperature: float,
     llm_retries: int,
 ) -> list[dict[str, Any]]:
+    torch_module = require_torch()
     output_rows: list[dict[str, Any]] = []
-    for row, source in enumerate(source_queries):
-        expansions = generate_llm_expansions(
-            tokenizer=tokenizer,
-            model=model,
-            device=device,
-            query=source.original,
-            lang=source.language,
-            max_length=max_length,
-            max_new_tokens=max_new_tokens,
-            temperature=temperature,
-            retries=llm_retries,
-        )
-        output_rows.append(
-            build_output_record(
-                output_index=start_index + row,
-                source=source,
-                expansions=expansions,
+    current_batch_size = max(MIN_OOM_BATCH_SIZE, batch_size)
+    row = 0
+
+    while row < len(source_queries):
+        batch_sources = source_queries[row : row + current_batch_size]
+        try:
+            batch_expansions = generate_llm_expansions_batch(
+                tokenizer=tokenizer,
+                model=model,
+                device=device,
+                queries=[source.original for source in batch_sources],
+                languages=[source.language for source in batch_sources],
+                max_length=max_length,
+                max_new_tokens=max_new_tokens,
+                temperature=temperature,
+                retries=llm_retries,
             )
-        )
+        except Exception as error:
+            if not (is_oom_error(error) and current_batch_size > MIN_OOM_BATCH_SIZE):
+                raise
+            next_batch_size = max(MIN_OOM_BATCH_SIZE, current_batch_size // 2)
+            print(
+                f"OOM while generating batch_size={current_batch_size}. "
+                f"Retrying with batch_size={next_batch_size}."
+            )
+            clear_cuda_cache(torch_module)
+            current_batch_size = next_batch_size
+            continue
+
+        if len(batch_expansions) != len(batch_sources):
+            raise ValueError(
+                "LLM batch expansion count mismatch: "
+                f"expected {len(batch_sources)}, got {len(batch_expansions)}."
+            )
+
+        for local_index, (source, expansions) in enumerate(zip(batch_sources, batch_expansions)):
+            output_rows.append(
+                build_output_record(
+                    output_index=start_index + row + local_index,
+                    source=source,
+                    expansions=expansions,
+                )
+            )
+        row += len(batch_sources)
 
     return output_rows
 
@@ -1182,6 +1312,7 @@ def iter_expanded_query_rows(
     tokenizer: Any,
     model: Any,
     device: Any,
+    batch_size: int,
     max_length: int,
     max_new_tokens: int,
     temperature: float,
@@ -1201,6 +1332,7 @@ def iter_expanded_query_rows(
             tokenizer=tokenizer,
             model=model,
             device=device,
+            batch_size=batch_size,
             max_length=max_length,
             max_new_tokens=max_new_tokens,
             temperature=temperature,
@@ -1224,6 +1356,8 @@ def main() -> None:
 
     if args.max_length <= 0:
         raise ValueError("--max-length must be greater than 0.")
+    if args.batch_size <= 0:
+        raise ValueError("--batch-size must be greater than 0.")
     if args.max_new_tokens <= 0:
         raise ValueError("--max-new-tokens must be greater than 0.")
     if args.llm_retries <= 0:
@@ -1272,6 +1406,7 @@ def main() -> None:
         tokenizer=tokenizer,
         model=model,
         device=device,
+        batch_size=args.batch_size,
         max_length=args.max_length,
         max_new_tokens=args.max_new_tokens,
         temperature=args.temperature,
