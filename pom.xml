@@ -9,6 +9,29 @@
     <groupId>unipd.se</groupId>
     <artifactId>retrix</artifactId>
     <version>1.0</version>
+    <inceptionYear>2026</inceptionYear>
+    <developers>
+        <developer>
+            <name>Baldan Fabio</name>
+            <email>fabio.baldan.1@studenti.unipd.it</email>
+        </developer>
+        <developer>
+            <name>Padoan Giancarlo</name>
+            <email>giancarlo.padoan@studenti.unipd.it</email>
+        </developer>
+        <developer>
+            <name>Garberino Alvise</name>
+            <email>alvise.garberino@studenti.unipd.it</email>
+        </developer>
+        <developer>
+            <name>Tessari Marco</name>
+            <email>marco.tessari.8@studenti.unipd.it</email>
+        </developer>
+        <developer>
+            <name>Donati Davide</name>
+            <email>davide.donati@studenti.unipd.it</email>
+        </developer>
+    </developers>
 
     <dependencies>
         <!-- Lucene -->

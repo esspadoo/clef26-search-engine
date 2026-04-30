@@ -63,7 +63,10 @@ public class Main {
         System.out.println("Starting retrieval [cores=" + cores + "]");
 
         String papersPath  = args.length > 0 && !args[0].equals("_") ? args[0] : "code/data/collection_data.json";
-        String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/expanded_queries_multilingual_merged.json";
+        //String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/expanded_queries_bge_large.json";
+
+        //per run dev_set
+        String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/ENexpanded_queries_bge_largeDEV.json";
 
         // If rerankedResultPath is provided, skip BM25 and directly evaluate re-ranked results
         String rerankedPath = args.length > 2 ? args[2] : null;
