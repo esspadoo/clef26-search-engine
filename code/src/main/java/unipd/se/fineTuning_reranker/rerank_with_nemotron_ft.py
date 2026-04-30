@@ -3,15 +3,18 @@ rerank_with_nemotron_ft.py
 
 Inference con llama-nemotron-rerank-1b-v2 fine-tuned.
 
+Carica il modello con AutoModelForSequenceClassification + AutoTokenizer
+direttamente — coerente con come finetune_nemotron_reranker_v2.py salva
+il modello (model.save_pretrained + tokenizer.save_pretrained).
+
+NON usa CrossEncoder di sentence-transformers perché il modello salvato
+è un HuggingFace nativo, non un CrossEncoder wrappato.
+
 IMPORTANTE:
-  - Nemotron NON usa prefissi né template speciali sulle query.
-    Solo clean_text() — identico al training.
-  - trust_remote_code=True è OBBLIGATORIO per caricare il modello
-    (architettura bidirectional attention non standard).
-  - I logits di Nemotron sono negativi (la testa di classificazione
-    produce logit non normalizzati): usare il logit raw è corretto
-    per il ranking (ordine preservato), ma se vuoi score in [0,1]
-    applica torch.sigmoid(). Qui usiamo il logit raw per il ranking.
+  - trust_remote_code=True obbligatorio (architettura bidirectional custom)
+  - Nessun prefisso sulle query — solo clean_text(), identico al training
+  - use_sigmoid=True (default): porta i logit raw in [0,1] senza
+    cambiare l'ordine relativo (sigmoid è monotona crescente)
 
 Uso:
   python rerank_with_nemotron_ft.py \
@@ -26,6 +29,7 @@ Uso:
 
 import json
 import logging
+import emoji
 import re
 import gc
 import argparse
@@ -33,7 +37,7 @@ import unicodedata
 from pathlib import Path
 
 import torch
-from sentence_transformers.cross_encoder import CrossEncoder
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 from tqdm import tqdm
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
@@ -68,14 +72,12 @@ def doc_text(item: dict, max_chars: int) -> str:
 # ── Loaders ────────────────────────────────────────────────────────────────────
 
 def load_collection(path: str, max_chars: int) -> dict[str, str]:
-    """Autodetect pubkey (2026) vs cord_uid (2025)."""
+    """Entrambi i corpus usano 'pubkey' come chiave."""
     data   = json.load(open(path, encoding="utf-8"))
     corpus = {}
     for item in data:
         if "pubkey" in item and item["pubkey"] is not None:
             key = str(item["pubkey"])
-        elif "cord_uid" in item and item["cord_uid"] is not None:
-            key = str(item["cord_uid"])
         else:
             continue
         text = doc_text(item, max_chars)
@@ -86,7 +88,6 @@ def load_collection(path: str, max_chars: int) -> dict[str, str]:
 
 
 def load_queries(path: str) -> dict[str, str]:
-    """Solo clean_text — nessun prefisso."""
     data    = json.load(open(path, encoding="utf-8"))
     queries = {}
     for item in data:
@@ -105,48 +106,70 @@ def load_nemotron_run(path: str) -> dict[str, list[str]]:
 
 # ── Scoring ────────────────────────────────────────────────────────────────────
 
-def predict_with_oom_fallback(
-        model:       CrossEncoder,
-        pairs:       list[list[str]],
+def score_pairs(
+        model,
+        tokenizer,
+        query:       str,
+        docs:        list[str],
         batch_size:  int,
-        use_sigmoid: bool = True,
+        max_length:  int,
+        device:      torch.device,
+        use_sigmoid: bool,
 ) -> list[float]:
     """
-    Scoring con OOM fallback.
-
-    Nemotron produce logit raw negativi (es. -8.3, -6.1).
-    use_sigmoid=True applica torch.sigmoid() per portare gli score
-    in [0, 1] — l'ordine relativo è preservato, ma i valori diventano
-    interpretabili come probabilità di rilevanza.
-    use_sigmoid=False usa i logit raw (ugualmente validi per il ranking).
+    Calcola gli score per una query contro una lista di documenti.
+    Gestisce OOM dimezzando il batch_size automaticamente.
     """
-    current_bs = batch_size
-    while current_bs >= 1:
-        try:
-            scores = model.predict(
-                pairs,
-                batch_size=current_bs,
-                show_progress_bar=False,
-                convert_to_numpy=True,
-            )
-            if isinstance(scores, (float, int)):
-                raw = torch.tensor([float(scores)])
-            else:
-                raw = torch.tensor(scores, dtype=torch.float32)
+    all_scores = []
 
-            if use_sigmoid:
-                raw = torch.sigmoid(raw)
+    for i in range(0, len(docs), batch_size):
+        batch_docs = docs[i : i + batch_size]
+        current_bs = len(batch_docs)
 
-            return raw.tolist()
+        while current_bs >= 1:
+            try:
+                enc = tokenizer(
+                    [query] * current_bs,
+                    batch_docs[:current_bs],
+                    max_length=max_length,
+                    truncation=True,
+                    padding=True,
+                    return_tensors="pt",
+                    )
+                enc = {k: v.to(device) for k, v in enc.items()}
 
-        except torch.cuda.OutOfMemoryError:
-            log.warning(f"OOM con batch_size={current_bs}, provo {current_bs // 2}...")
-            torch.cuda.empty_cache()
-            gc.collect()
-            current_bs //= 2
+                with torch.no_grad():
+                    out    = model(**enc)
+                    logits = out.logits  # shape: (batch, 1)
+                    if logits.dim() > 1:
+                        logits = logits.squeeze(-1)
+                    if use_sigmoid:
+                        logits = torch.sigmoid(logits)
+                    scores = logits.float().cpu().tolist()
 
-    log.error("OOM anche con batch_size=1. Restituisco 0.5 per tutti.")
-    return [0.5] * len(pairs)
+                # Se il batch era stato ridotto per OOM, processa il resto
+                all_scores.extend(scores)
+                if current_bs < len(batch_docs):
+                    # Ricorsione sul resto del batch originale
+                    remaining = batch_docs[current_bs:]
+                    rest = score_pairs(
+                        model, tokenizer, query, remaining,
+                        current_bs, max_length, device, use_sigmoid
+                    )
+                    all_scores.extend(rest)
+                break
+
+            except torch.cuda.OutOfMemoryError:
+                log.warning(f"OOM con batch_size={current_bs}, provo {current_bs // 2}...")
+                torch.cuda.empty_cache()
+                gc.collect()
+                current_bs //= 2
+
+        else:
+            log.error("OOM anche con batch_size=1. Restituisco 0.5.")
+            all_scores.extend([0.5] * len(batch_docs))
+
+    return all_scores
 
 
 # ── Sanity check ───────────────────────────────────────────────────────────────
@@ -167,40 +190,52 @@ def sanity_check(results: dict, nemotron_run: dict, rerank_depth: int):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Reranking con llama-nemotron-rerank-1b-v2 fine-tuned"
+        description="Reranking con llama-nemotron-rerank-1b-v2 fine-tuned (HF nativo)"
     )
-    parser.add_argument("--model_dir",     required=True)
+    parser.add_argument("--model_dir",     required=True,
+                        help="Path a models/nemotron-rerank-1b-retrix/final")
     parser.add_argument("--nemotron_run",  required=True)
     parser.add_argument("--collection",    required=True)
     parser.add_argument("--queries",       required=True)
     parser.add_argument("--output",        required=True)
     parser.add_argument("--rerank_depth",  type=int, default=100)
     parser.add_argument("--batch_size",    type=int, default=64)
+    parser.add_argument("--max_length",    type=int, default=512)
     parser.add_argument("--max_doc_chars", type=int, default=4000)
     parser.add_argument("--no_sigmoid",    action="store_true",
                         help="Usa logit raw invece di sigmoid (default: sigmoid attiva)")
     args = parser.parse_args()
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info(f"Device: {device}")
 
-    # trust_remote_code=True è OBBLIGATORIO per Nemotron
-    log.info(f"Caricamento modello da {args.model_dir} (trust_remote_code=True)...")
-    model = CrossEncoder(
+    # ── Carica tokenizer e modello ─────────────────────────────────────────────
+    log.info(f"Caricamento da {args.model_dir} (trust_remote_code=True)...")
+    tokenizer = AutoTokenizer.from_pretrained(
         args.model_dir,
-        device=device,
         trust_remote_code=True,
-        automodel_args={
-            "torch_dtype": torch.bfloat16,
-            "trust_remote_code": True,
-        },
     )
-    log.info(f"max_length={model.max_length}, num_labels={model.num_labels}")
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
 
+    model = AutoModelForSequenceClassification.from_pretrained(
+        args.model_dir,
+        trust_remote_code=True,
+        torch_dtype=torch.bfloat16,
+    )
+    model.to(device)
+    model.eval()
+    log.info(f"Modello caricato. Parametri: {sum(p.numel() for p in model.parameters()):,}")
+
+    # ── Carica dati ────────────────────────────────────────────────────────────
     corpus       = load_collection(args.collection, args.max_doc_chars)
     queries      = load_queries(args.queries)
     nemotron_run = load_nemotron_run(args.nemotron_run)
 
+    use_sigmoid = not args.no_sigmoid
+    log.info(f"use_sigmoid={use_sigmoid}")
+
+    # ── Reranking ──────────────────────────────────────────────────────────────
     results      = {}
     n_missing_q  = 0
     n_empty_docs = 0
@@ -219,19 +254,21 @@ def main():
             n_empty_docs += 1
             continue
 
-        pairs  = [[query, doc] for doc in valid_docs]
-        scores = predict_with_oom_fallback(
-            model, pairs, args.batch_size,
-            use_sigmoid=not args.no_sigmoid,
+        scores = score_pairs(
+            model, tokenizer, query, valid_docs,
+            batch_size=args.batch_size,
+            max_length=args.max_length,
+            device=device,
+            use_sigmoid=use_sigmoid,
         )
 
         ranked       = sorted(zip(valid_ids, scores), key=lambda x: x[1], reverse=True)
         results[qid] = [doc_id for doc_id, _ in ranked]
 
     if n_missing_q:
-        log.warning(f"Query mancanti: {n_missing_q}")
+        log.warning(f"Query mancanti nel file queries: {n_missing_q}")
     if n_empty_docs:
-        log.warning(f"Query senza doc nel corpus: {n_empty_docs}")
+        log.warning(f"Query senza documenti nel corpus: {n_empty_docs}")
 
     sanity_check(results, nemotron_run, args.rerank_depth)
 
