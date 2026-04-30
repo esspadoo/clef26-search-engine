@@ -9,8 +9,9 @@ JSON array. The canonical output contains:
     - embedding: dense embedding-oriented expansion
     - colbert: late-interaction / ColBERT-oriented expansion
 
-For backward compatibility the script also writes `expanded` as an alias of
-`sparse`, so legacy consumers keep working while the new fields are adopted.
+For backward compatibility each output record also contains `expanded` as an
+alias of `sparse`, so legacy consumers keep working while the new fields are
+adopted.
 """
 
 from __future__ import annotations
@@ -23,9 +24,17 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-import faiss
 import numpy as np
-import torch
+
+try:
+    import faiss
+except ImportError:  # pragma: no cover - handled at runtime
+    faiss = None
+
+try:
+    import torch
+except ImportError:  # pragma: no cover - handled at runtime
+    torch = None
 
 try:
     from FlagEmbedding import BGEM3FlagModel
@@ -40,7 +49,6 @@ REPO_ROOT = SCRIPT_PATH.parents[7]
 DEFAULT_INPUT_GLOB = "*_train.json"
 DEFAULT_CORPUS = CODE_ROOT / "data" / "collection_data.json"
 DEFAULT_OUTPUT = CODE_ROOT / "data" / "expanded_queries_multilingual_merged.json"
-DEFAULT_COMPAT_OUTPUT = CODE_ROOT / "data" / "expanded_queries_bge_large.json"
 DEFAULT_MODEL_NAME = "BAAI/bge-m3"
 DEFAULT_BATCH_SIZE = 64
 DEFAULT_MAX_LENGTH = 1024
@@ -49,6 +57,9 @@ DEFAULT_CANDIDATE_MULTIPLIER = 5
 DEFAULT_COLBERT_SCORE_BATCH_SIZE = 256
 DEFAULT_COLBERT_CORPUS_CACHE_SIZE = 0
 DEFAULT_COLBERT_CORPUS_ENCODE_BATCH_SIZE = 8
+MIN_OOM_BATCH_SIZE = 1
+MIN_OOM_MAX_LENGTH = 128
+MIN_OOM_CANDIDATE_COUNT = 1
 
 TOKEN_RE = re.compile(r"[A-Za-zÀ-ÿ0-9]+(?:['\-][A-Za-zÀ-ÿ0-9]+)*")
 
@@ -134,7 +145,15 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--corpus", type=Path, default=DEFAULT_CORPUS)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--compat-output", type=Path, default=DEFAULT_COMPAT_OUTPUT)
+    parser.add_argument(
+        "--compat-output",
+        type=Path,
+        default=None,
+        help=(
+            "Optional second output path for legacy consumers. By default the "
+            "script writes only --output."
+        ),
+    )
     parser.add_argument("--model", default=DEFAULT_MODEL_NAME)
     parser.add_argument("--batch-size", type=int, default=DEFAULT_BATCH_SIZE)
     parser.add_argument("--max-length", type=int, default=DEFAULT_MAX_LENGTH)
@@ -165,6 +184,11 @@ def parse_args() -> argparse.Namespace:
         type=int,
         default=None,
         help="Optional debug limit; if set, only the first N queries per input file are processed.",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Validate and summarize input query files without loading retrieval models or writing output.",
     )
     return parser.parse_args()
 
@@ -358,14 +382,71 @@ def load_query_sources(paths: list[Path], max_queries: int | None) -> list[Query
     return sources
 
 
+def discover_input_paths(output_paths: Iterable[Path | None]) -> list[Path]:
+    excluded_names = {path.name for path in output_paths if path is not None}
+    return [
+        path
+        for path in sorted(CODE_ROOT.joinpath("data").glob(DEFAULT_INPUT_GLOB))
+        if path.name not in excluded_names
+    ]
+
+
+def summarize_query_sources(sources: list[QuerySource]) -> None:
+    by_language: Counter[str] = Counter(source.language for source in sources)
+    unique_keys = {(source.index, source.pubkey) for source in sources}
+    print(
+        "Query source summary: "
+        f"{len(sources)} input records, {len(unique_keys)} merged records, "
+        f"languages={dict(sorted(by_language.items()))}"
+    )
+
+
+def require_torch() -> Any:
+    if torch is None:
+        raise ImportError(
+            "PyTorch is required for multilingual query expansion. "
+            "Install it in this environment before running without --dry-run."
+        )
+    return torch
+
+
+def require_faiss() -> Any:
+    if faiss is None:
+        raise ImportError(
+            "faiss is required for multilingual query expansion. "
+            "Install faiss-cpu or faiss-gpu in this environment before running without --dry-run."
+        )
+    return faiss
+
+
+def is_oom_error(error: BaseException) -> bool:
+    message = str(error).lower()
+    return isinstance(error, MemoryError) or any(
+        marker in message
+        for marker in (
+            "out of memory",
+            "cuda error: out of memory",
+            "cuda out of memory",
+            "cublas_status_alloc_failed",
+            "cudnn_status_alloc_failed",
+        )
+    )
+
+
+def clear_cuda_cache(torch_module: Any) -> None:
+    if torch_module is not None and torch_module.cuda.is_available():
+        torch_module.cuda.empty_cache()
+
+
 def build_bge_m3_model(model_name: str) -> Any:
+    torch_module = require_torch()
     if BGEM3FlagModel is None:
         raise ImportError(
             "FlagEmbedding is required for multilingual query expansion. "
             "Install it with: pip install -U FlagEmbedding"
         )
 
-    use_fp16 = torch.cuda.is_available()
+    use_fp16 = torch_module.cuda.is_available()
     try:
         return BGEM3FlagModel(model_name, use_fp16=use_fp16)
     except TypeError:
@@ -382,12 +463,15 @@ def encode_bge_m3(
     return_sparse: bool,
     return_colbert_vecs: bool,
 ) -> dict[str, Any]:
+    torch_module = require_torch()
+    faiss_module = require_faiss()
     if batch_size <= 0:
         raise ValueError("--batch-size must be greater than 0.")
     if max_length <= 0:
         raise ValueError("--max-length must be greater than 0.")
 
     current_batch_size = batch_size
+    current_max_length = max_length
     while True:
         try:
             total_items = len(texts)
@@ -409,14 +493,14 @@ def encode_bge_m3(
                 chunk_output = model.encode(
                     texts[start:end],
                     batch_size=current_batch_size,
-                    max_length=max_length,
+                    max_length=current_max_length,
                     return_dense=return_dense,
                     return_sparse=return_sparse,
                     return_colbert_vecs=return_colbert_vecs,
                 )
                 if return_dense:
                     dense = np.asarray(chunk_output["dense_vecs"], dtype=np.float32)
-                    faiss.normalize_L2(dense)
+                    faiss_module.normalize_L2(dense)
                     dense_chunks.append(dense)
                 if return_sparse:
                     sparse_chunks.extend(chunk_output["lexical_weights"])
@@ -432,15 +516,29 @@ def encode_bge_m3(
                 output["colbert_vecs"] = colbert_chunks
             return output
         except Exception as error:
-            if not (torch.cuda.is_available() and "out of memory" in str(error).lower() and current_batch_size > 1):
+            if not (
+                is_oom_error(error)
+                and (current_batch_size > MIN_OOM_BATCH_SIZE or current_max_length > MIN_OOM_MAX_LENGTH)
+            ):
                 raise
-            next_batch_size = max(1, current_batch_size // 2)
+
+            if current_batch_size > MIN_OOM_BATCH_SIZE:
+                next_batch_size = max(MIN_OOM_BATCH_SIZE, current_batch_size // 2)
+                print(
+                    f"OOM while encoding {label} with batch_size={current_batch_size}, "
+                    f"max_length={current_max_length}. Retrying with batch_size={next_batch_size}."
+                )
+                clear_cuda_cache(torch_module)
+                current_batch_size = next_batch_size
+                continue
+
+            next_max_length = max(MIN_OOM_MAX_LENGTH, current_max_length // 2)
             print(
-                f"CUDA OOM while encoding {label} with batch_size={current_batch_size}. "
-                f"Retrying with batch_size={next_batch_size}."
+                f"OOM while encoding {label} with batch_size={current_batch_size}, "
+                f"max_length={current_max_length}. Retrying with max_length={next_max_length}."
             )
-            torch.cuda.empty_cache()
-            current_batch_size = next_batch_size
+            clear_cuda_cache(torch_module)
+            current_max_length = next_max_length
 
 
 def compute_colbert_scores_batched(
@@ -449,6 +547,7 @@ def compute_colbert_scores_batched(
     candidate_colbert: list[np.ndarray],
     batch_size: int,
 ) -> np.ndarray:
+    torch_module = require_torch()
     if batch_size <= 0:
         raise ValueError("--colbert-score-batch-size must be greater than 0.")
     if not candidate_colbert:
@@ -499,32 +598,31 @@ def compute_colbert_scores_batched(
 
         return np.concatenate(score_chunks, axis=0)
 
-    use_cuda = torch.cuda.is_available()
-    device = torch.device("cuda:0" if use_cuda else "cpu")
+    use_cuda = torch_module.cuda.is_available()
+    device = torch_module.device("cuda:0" if use_cuda else "cpu")
     current_batch_size = batch_size
 
     while True:
         try:
             return _score_on_device(device=device, current_batch_size=current_batch_size)
         except Exception as error:
-            is_cuda_oom = use_cuda and "out of memory" in str(error).lower()
-            if not is_cuda_oom:
+            if not is_oom_error(error):
                 raise
 
             if current_batch_size > 1:
                 next_batch_size = max(1, current_batch_size // 2)
                 print(
-                    f"CUDA OOM while ColBERT scoring with batch_size={current_batch_size}. "
-                    f"Retrying with batch_size={next_batch_size}."
+                    f"OOM while ColBERT scoring with colbert_score_batch_size={current_batch_size}. "
+                    f"Retrying with colbert_score_batch_size={next_batch_size}."
                 )
                 current_batch_size = next_batch_size
-                torch.cuda.empty_cache()
+                clear_cuda_cache(torch_module)
                 continue
 
             if device.type == "cuda":
-                print("CUDA OOM while ColBERT scoring at batch_size=1. Falling back to CPU scoring.")
-                device = torch.device("cpu")
-                torch.cuda.empty_cache()
+                print("OOM while ColBERT scoring at colbert_score_batch_size=1. Falling back to CPU scoring.")
+                device = torch_module.device("cpu")
+                clear_cuda_cache(torch_module)
                 continue
 
             raise
@@ -556,8 +654,9 @@ def encode_colbert_vectors(
 
 
 def build_faiss_index(corpus_embeddings: np.ndarray) -> faiss.IndexFlatIP:
+    faiss_module = require_faiss()
     dimension = corpus_embeddings.shape[1]
-    index = faiss.IndexFlatIP(dimension)
+    index = faiss_module.IndexFlatIP(dimension)
     index.add(corpus_embeddings)
     return index
 
@@ -655,6 +754,8 @@ def build_query_variants_for_language(
 
     dense_candidate_k = min(len(corpus_pubkeys), max(top_k, top_k * candidate_multiplier))
     _, dense_indices = dense_index.search(query_dense, dense_candidate_k)
+    current_colbert_candidate_k = dense_candidate_k
+    current_colbert_corpus_cache_size = colbert_corpus_cache_size
 
     merged_rows: dict[tuple[str, str], dict[str, Any]] = {}
     colbert_cache: OrderedDict[int, np.ndarray] = OrderedDict()
@@ -671,62 +772,99 @@ def build_query_variants_for_language(
 
         dense_ranked = [int(idx) for idx in dense_indices[row][:top_k] if 0 <= int(idx) < len(corpus_pubkeys)]
 
-        colbert_candidate_indices = [int(idx) for idx in dense_indices[row][:dense_candidate_k] if 0 <= int(idx) < len(corpus_pubkeys)]
-        if colbert_corpus_cache_size > 0:
-            missing_indices = [idx for idx in colbert_candidate_indices if idx not in colbert_cache]
-            if missing_indices:
-                missing_texts = [corpus_records[idx]["text"] for idx in missing_indices]
-                missing_vectors = encode_colbert_vectors(
-                    model=model,
-                    texts=missing_texts,
-                    batch_size=colbert_corpus_encode_batch_size,
-                    max_length=max_length,
-                    label="colbert-corpus-candidates",
-                )
-                for idx, vector in zip(missing_indices, missing_vectors):
-                    colbert_cache[idx] = vector
-                    colbert_cache.move_to_end(idx)
-                    while len(colbert_cache) > colbert_corpus_cache_size:
-                        colbert_cache.popitem(last=False)
+        while True:
+            try:
+                colbert_candidate_indices = [
+                    int(idx)
+                    for idx in dense_indices[row][:current_colbert_candidate_k]
+                    if 0 <= int(idx) < len(corpus_pubkeys)
+                ]
+                if current_colbert_corpus_cache_size > 0:
+                    missing_indices = [idx for idx in colbert_candidate_indices if idx not in colbert_cache]
+                    if missing_indices:
+                        missing_texts = [corpus_records[idx]["text"] for idx in missing_indices]
+                        missing_vectors = encode_colbert_vectors(
+                            model=model,
+                            texts=missing_texts,
+                            batch_size=colbert_corpus_encode_batch_size,
+                            max_length=max_length,
+                            label="colbert-corpus-candidates",
+                        )
+                        for idx, vector in zip(missing_indices, missing_vectors):
+                            colbert_cache[idx] = vector
+                            colbert_cache.move_to_end(idx)
+                            while len(colbert_cache) > current_colbert_corpus_cache_size:
+                                colbert_cache.popitem(last=False)
 
-            colbert_candidates: list[np.ndarray] = []
-            for idx in colbert_candidate_indices:
-                vector = colbert_cache.get(idx)
-                if vector is None:
+                    colbert_candidates: list[np.ndarray] = []
+                    for idx in colbert_candidate_indices:
+                        vector = colbert_cache.get(idx)
+                        if vector is None:
+                            continue
+                        colbert_cache.move_to_end(idx)
+                        colbert_candidates.append(vector)
+
+                    # Keep score alignment with candidate indices even if transient vectors were evicted.
+                    if len(colbert_candidates) != len(colbert_candidate_indices):
+                        refreshed_vectors = encode_colbert_vectors(
+                            model=model,
+                            texts=[corpus_records[idx]["text"] for idx in colbert_candidate_indices],
+                            batch_size=colbert_corpus_encode_batch_size,
+                            max_length=max_length,
+                            label="colbert-corpus-candidates-refresh",
+                        )
+                        colbert_candidates = refreshed_vectors
+                        for idx, vector in zip(colbert_candidate_indices, refreshed_vectors):
+                            colbert_cache[idx] = vector
+                            colbert_cache.move_to_end(idx)
+                            while len(colbert_cache) > current_colbert_corpus_cache_size:
+                                colbert_cache.popitem(last=False)
+                else:
+                    colbert_candidates = encode_colbert_vectors(
+                        model=model,
+                        texts=[corpus_records[idx]["text"] for idx in colbert_candidate_indices],
+                        batch_size=colbert_corpus_encode_batch_size,
+                        max_length=max_length,
+                        label="colbert-corpus-candidates",
+                    )
+
+                colbert_scores = compute_colbert_scores_batched(
+                    query_colbert=query_colbert[row],
+                    candidate_colbert=colbert_candidates,
+                    batch_size=colbert_score_batch_size,
+                )
+                colbert_ranked = [colbert_candidate_indices[pos] for pos in np.argsort(-colbert_scores)[:top_k]]
+                break
+            except Exception as error:
+                if not is_oom_error(error):
+                    raise
+
+                torch_module = require_torch()
+                clear_cuda_cache(torch_module)
+
+                if current_colbert_corpus_cache_size > 0:
+                    next_cache_size = current_colbert_corpus_cache_size // 2
+                    print(
+                        "OOM while building ColBERT expansion candidates with "
+                        f"colbert_corpus_cache_size={current_colbert_corpus_cache_size}. "
+                        f"Retrying with colbert_corpus_cache_size={next_cache_size}."
+                    )
+                    current_colbert_corpus_cache_size = next_cache_size
+                    colbert_cache.clear()
                     continue
-                colbert_cache.move_to_end(idx)
-                colbert_candidates.append(vector)
 
-            # Keep score alignment with candidate indices even if transient vectors were evicted.
-            if len(colbert_candidates) != len(colbert_candidate_indices):
-                refreshed_vectors = encode_colbert_vectors(
-                    model=model,
-                    texts=[corpus_records[idx]["text"] for idx in colbert_candidate_indices],
-                    batch_size=colbert_corpus_encode_batch_size,
-                    max_length=max_length,
-                    label="colbert-corpus-candidates-refresh",
-                )
-                colbert_candidates = refreshed_vectors
-                for idx, vector in zip(colbert_candidate_indices, refreshed_vectors):
-                    colbert_cache[idx] = vector
-                    colbert_cache.move_to_end(idx)
-                    while len(colbert_cache) > colbert_corpus_cache_size:
-                        colbert_cache.popitem(last=False)
-        else:
-            colbert_candidates = encode_colbert_vectors(
-                model=model,
-                texts=[corpus_records[idx]["text"] for idx in colbert_candidate_indices],
-                batch_size=colbert_corpus_encode_batch_size,
-                max_length=max_length,
-                label="colbert-corpus-candidates",
-            )
+                if current_colbert_candidate_k > MIN_OOM_CANDIDATE_COUNT:
+                    next_candidate_k = max(MIN_OOM_CANDIDATE_COUNT, current_colbert_candidate_k // 2)
+                    print(
+                        "OOM while building ColBERT expansion candidates with "
+                        f"candidate_count={current_colbert_candidate_k}. "
+                        f"Retrying with candidate_count={next_candidate_k}."
+                    )
+                    current_colbert_candidate_k = next_candidate_k
+                    colbert_cache.clear()
+                    continue
 
-        colbert_scores = compute_colbert_scores_batched(
-            query_colbert=query_colbert[row],
-            candidate_colbert=colbert_candidates,
-            batch_size=colbert_score_batch_size,
-        )
-        colbert_ranked = [colbert_candidate_indices[pos] for pos in np.argsort(-colbert_scores)[:top_k]]
+                raise
 
         sparse_terms = extract_terms((corpus_records[idx]["text"] for idx in sparse_ranked), stopwords, max_terms=18)
         dense_terms = extract_terms((corpus_records[idx]["title"] or corpus_records[idx]["text"] for idx in dense_ranked), stopwords, max_terms=12)
@@ -817,11 +955,23 @@ def main() -> None:
     if args.inputs:
         input_paths = args.inputs
     else:
-        input_paths = sorted(CODE_ROOT.joinpath("data").glob(DEFAULT_INPUT_GLOB))
-        input_paths = [path for path in input_paths if path.name not in {args.output.name, args.compat_output.name}]
+        input_paths = discover_input_paths((args.output, args.compat_output))
 
     if not input_paths:
         raise ValueError("No input query files were found.")
+
+    print("Input query files:")
+    for input_path in input_paths:
+        print(f"  - {input_path}")
+
+    query_sources = load_query_sources(input_paths, args.max_queries)
+    summarize_query_sources(query_sources)
+
+    if args.dry_run:
+        print(f"Dry run complete. Output would be written to {args.output}")
+        if args.compat_output is not None and args.compat_output != args.output:
+            print(f"Optional compatibility output would be written to {args.compat_output}")
+        return
 
     corpus_pubkeys, corpus_texts, corpus_records = load_corpus(args.corpus)
     model = build_bge_m3_model(args.model)
@@ -840,8 +990,6 @@ def main() -> None:
     corpus_sparse_cache = corpus_output["lexical_weights"]
     dense_index = build_faiss_index(corpus_embeddings)
 
-    query_sources = load_query_sources(input_paths, args.max_queries)
-
     merged_rows = build_query_variants_for_language(
         source_queries=query_sources,
         model=model,
@@ -859,14 +1007,13 @@ def main() -> None:
     )
 
     write_json(args.output, merged_rows)
-    if args.compat_output != args.output:
+    if args.compat_output is not None and args.compat_output != args.output:
         write_json(args.compat_output, merged_rows)
 
     print(f"Saved {len(merged_rows)} merged query records to {args.output}")
-    if args.compat_output != args.output:
+    if args.compat_output is not None and args.compat_output != args.output:
         print(f"Saved compatibility copy to {args.compat_output}")
 
 
 if __name__ == "__main__":
     main()
-
