@@ -24,45 +24,62 @@
 
 %%
 %% The "title" command
-\title{SEUPD@CLEF: Team <Acronym>}
+\title{SEUPD@CLEF: Team retrix on Source Retrieval for Scientific Web Claims}
 
 %%
 %% The "author" command and its associated commands are used to define
 %% the authors and their affiliations.
-\author[1]{Name Surname}[%
-email=name.surname@studenti.unipd.it
+\author[1]{Fabio Baldan}[%
+email=fabio.baldan.1@studenti.unipd.it
 ]
 
-\author[1]{Name Surname}[%
-email=name.surname@studenti.unipd.it
+\author[1]{Giancarlo Padoan}[%
+email=giancarlo.padoan@studenti.unipd.it
 ]
 
-\author[1]{Name Surname}[%
-email=name.surname@studenti.unipd.it
+\author[1]{Alvise Garberino}[%
+email=alvise.garberino@studenti.unipd.it
+]
+
+\author[1]{Marco Tessari}[%
+email=marco.tessari.8@studenti.unipd.it
+]
+
+\author[1]{Davide Donati}[%
+email=davide.donati@studenti.unipd.it
 ]
 
 \address[1]{University of Padua, Italy}
+
 
 
 %%
 %% The abstract is a short summary of the work to be presented in the
 %% article.
 \begin{abstract}
-  A clear and well-documented \LaTeX{} document is presented as an
-  article formatted for publication by CEUR-WS in a conference
-  proceedings. Based on the ``ceurart'' document class, this article
-  presents and explains many of the common variations, as well as many
-  of the formatting elements an author may use in the preparation of
-  the documentation of their work.
+We present the results of the retrix group for the CheckThat! 2026 - Task 1, in which the goal is to identify the scientific paper implicitly referenced in a social media post. The input consists of short, noisy and usually informal posts that mention scientific findings without providing explicit links or explicit citations.
+
+Our approach is designed to operate in a multilingual setting, as the dataset includes posts in English, German, and French. To handle this, we used multi-lingual language models. 
+
+DA FINIRE CON PIPELINE FINALEEEEEE
+DA FINIRE CON PIPELINE FINALEEEEEE
+DA FINIRE CON PIPELINE FINALEEEEEE
+DA FINIRE CON PIPELINE FINALEEEEEE
 \end{abstract}
+
 
 %%
 %% Keywords. The author(s) should pick words that accurately describe
 %% the work being presented. Separate the keywords with commas.
 \begin{keywords}
-  keyword 1 \sep
-  keyword 2 \sep
-  keyword 3 
+  Fact Checking \sep
+  Information Retrieval \sep
+  Scientific Document Retrieval \sep
+  Social media fact verification \sep
+  CLEF \sep
+  Neural Re-ranking \sep
+  Cross Encoder
+  
 \end{keywords}
 
 %%
@@ -72,6 +89,25 @@ email=name.surname@studenti.unipd.it
 
 
 \input{section/introduction}
+To avoid fake news and online misinformation spread through platforms like Twitter, Facebook and Instagram is really important to be able to map the social media claims to a scientific paper that can provide certified and reliable information. This challenge is exemplified by Task 1 of the CLEF 2026 CheckThat! Lab, where participants are tasked with matching each post to the correct scientific paper from a fixed pool of candidate documents. 
+
+
+
+DA RIVEDERE
+The proposed solution adopts a two-stage hybrid information retrieval architecture. The first stage generates a candidate list by combining lexical retrieval using BM25, which captures explicit term overlap, with semantic retrieval based on dense embeddings obtained from fine-tuned dual-encoder models (e.g., BGE-m3). 
+FINE REVISIONE
+
+
+
+DA VEDERE A FINE PROGETTO
+The second stage refines the top results by applying neural re-ranking algorithms. Several design questions guide this exploration: which document metadata most usefully inform embedding creation? Does incorporating BM25-mined hard negative examples improve training? And to what degree do cross-encoders—including both task-specific models like SciBERT or MedBERT and more general LLM-based cross-encoders—enhance overall retrieval performance?
+
+
+Evaluated on the CheckThat! 2026 Task 1 dataset our system ranked XXXXXXXXXXXXX on the official leaderboard attaining a Mean Reciprocal Rank at 5 (MRR@5) of XXXXXXXXXXXXXX\% on the development set (XXXXX place) and XXXXXXXXXXXXX\% on the test set (XXXXXXXXXX out of XXXXXXXX teams). 
+Key contributions include a robust hybrid retrieval framework, empirical evidence on the effectiveness of embedding fine-tuning and LLM-based re-ranking for bridging informal-to-formal domain gaps.
+
+
+
 
 \input{section/methodology}
 
