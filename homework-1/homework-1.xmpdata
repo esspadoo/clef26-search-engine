@@ -1,6 +1,6 @@
-\Title{SEUPD@CLEF: Team <Acronym>}
-\Author{Name Surname\sep Name Surname\sep Name Surname}
-\Keywords{keyword 1 \sep keyword 2 \sep keyword 3}
+\Title{SEUPD@CLEF: Team retrix on Source Retrieval for Scientific Web Claims}
+\Author{Fabio Baldan\sep Giancarlo Padoan\sep Alvise Garberino\sep Marco Tessari\sep Davide Donati}
+\Keywords{Fact Checking \sep Information Retrieval \sep Scientific Document Retrieval \sep Social media fact verification \sep CLEF \sep Neural Re-ranking \sep Cross Encoder \par }
 \Subject{Layout by CEURART v0.5.3}
 \Copyright{\copyright\ 2026\ Copyright for this paper by its authors.\\ Use permitted under Creative Commons License Attribution 4.0 International (CC BY 4.0).}
 \CopyrightURL{https://creativecommons.org/licenses/by/4.0}

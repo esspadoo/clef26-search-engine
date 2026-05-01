@@ -2,3 +2,26 @@
 \label{sec:methodology}
 
 Describe the methodology you have adopted, the architecture of your system, your workflow, etc.
+
+We started by implementing a basic pipeline using BM25 as baseline, using Apache Lucene as the underlying framework.
+We then experimented with different stop lists, filters and weightings to  improve the MRR@5 score, used as final score
+in the CheckThat! Lab. We then proceeded to experiment with multi-stage pipelines based on neural models, which is the
+final structure of our project.
+\newline
+We implemented a three-stage pipeline for our information retrieval system, consisting of:
+\begin{itemize}
+    \item \textbf{Query expansion}: We expanded the original query with additional context to bridge the gap between informal and scientific language.
+    \item \textbf{Retrieval}: We retrieved relevant documents from the corpus using the expanded query.
+    \item \textbf{Reranking}: We reranked the retrieved documents based on their relevance to the original query.
+\end{itemize}
+For each of these stages, we experimented with different models, chosing the ones that performed better in relation to the others.
+
+\subsection{Query Expansion} \label{sub:queryexp}
+
+
+\subsection{Retrieval} \label{sub:retrieval}
+
+
+\subsection{Reranking} \label{sub:reranking}
+
+\subsection{Evaluation}
