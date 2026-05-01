@@ -89,25 +89,6 @@ DA FINIRE CON PIPELINE FINALEEEEEE
 
 
 \input{section/introduction}
-To avoid fake news and online misinformation spread through platforms like Twitter, Facebook and Instagram is really important to be able to map the social media claims to a scientific paper that can provide certified and reliable information. This challenge is exemplified by Task 1 of the CLEF 2026 CheckThat! Lab, where participants are tasked with matching each post to the correct scientific paper from a fixed pool of candidate documents. 
-
-
-
-DA RIVEDERE
-The proposed solution adopts a two-stage hybrid information retrieval architecture. The first stage generates a candidate list by combining lexical retrieval using BM25, which captures explicit term overlap, with semantic retrieval based on dense embeddings obtained from fine-tuned dual-encoder models (e.g., BGE-m3). 
-FINE REVISIONE
-
-
-
-DA VEDERE A FINE PROGETTO
-The second stage refines the top results by applying neural re-ranking algorithms. Several design questions guide this exploration: which document metadata most usefully inform embedding creation? Does incorporating BM25-mined hard negative examples improve training? And to what degree do cross-encoders—including both task-specific models like SciBERT or MedBERT and more general LLM-based cross-encoders—enhance overall retrieval performance?
-
-
-Evaluated on the CheckThat! 2026 Task 1 dataset our system ranked XXXXXXXXXXXXX on the official leaderboard attaining a Mean Reciprocal Rank at 5 (MRR@5) of XXXXXXXXXXXXXX\% on the development set (XXXXX place) and XXXXXXXXXXXXX\% on the test set (XXXXXXXXXX out of XXXXXXXX teams). 
-Key contributions include a robust hybrid retrieval framework, empirical evidence on the effectiveness of embedding fine-tuning and LLM-based re-ranking for bridging informal-to-formal domain gaps.
-
-
-
 
 \input{section/methodology}
 
