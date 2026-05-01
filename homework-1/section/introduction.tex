@@ -1,6 +1,22 @@
 \section{Introduction}
 \label{sec:introduction}
 
-Introduce the context, motivations, and goals of your project.
+To avoid fake news and online misinformation spread through platforms like Twitter, Facebook and Instagram is really important to be able to map the social media claims to a scientific paper that can provide certified and reliable information. This challenge is exemplified by Task 1 of the CLEF 2026 CheckThat! Lab where participants have the task to match each post to the correct scientific paper from a fixed pool of candidate documents. 
+
+The proposed solution adopts a three-stage hybrid information retrieval architecture. 
+
+The first stage
+
+
+The second stage generates an initial list of candidates based on dense similarity using a bi-encoder model (e.g. BGE-m3) to encode both queries and documents into dense vector representations by taking advantage of a FAISS index \cite{faiss_documentation}. For each query it enriches this candidate set by computing additional sparse lexical matching scores and ColBERT-style late interaction scores. The final ranking is computed as a weighted linear combination of these three scores (dense, sparse and multi-vector), with configurable weights and the top-k documents are returned.
+
+
+The third stage refines the top results by applying neural re-ranking algorithms. 
+
+
+
+
+
+Evaluated on the CheckThat! 2026 Task 1 dataset our system ranked XXXXXXXXXXXXX on the official leaderboard attaining a Mean Reciprocal Rank at 5 (MRR@5) of XXXXXXXXXXXXXX \% on the development set (XXXXX place) and XXXXXXXXXXXXX \% on the test set (XXXXXXXXXX out of XXXXXXXX teams).
 
 The paper is organized as follows: Section~\ref{sec:methodology} describes our approach; Section~\ref{sec:setup} explains our experimental setup; Section~\ref{sec:results} discusses our main findings; finally, Section~\ref{sec:conclusion} draws some conclusions and outlooks for future work.
