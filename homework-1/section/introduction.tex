@@ -1,22 +1,14 @@
 \section{Introduction}
 \label{sec:introduction}
 
-To avoid fake news and online misinformation spread through platforms like Twitter, Facebook and Instagram is really important to be able to map the social media claims to a scientific paper that can provide certified and reliable information. This challenge is exemplified by Task 1 of the CLEF 2026 CheckThat! Lab where participants have the task to match each post to the correct scientific paper from a fixed pool of candidate documents. 
+The rapid spread of scientific claims through social media creates a difficult fact-checking scenario: posts often report, simplify, or sensationalize research findings while omitting the original source. In many cases, the cited study is not linked explicitly with a URL or a bibliographic reference, but only mentioned indirectly through fragments such as the reported finding, the venue, the institution, or the authors. As a consequence, verifying such claims requires first identifying the scientific publication that is being implicitly referenced.
 
-The proposed solution adopts a three-stage hybrid information retrieval architecture. 
+This problem is the focus of Task~1 of the CLEF 2026 CheckThat! Lab, \emph{Source Retrieval for Scientific Web Claims}. Given a social media post containing a scientific claim and an implicit reference to a paper, the goal is to retrieve the correct publication from a fixed collection of 10,000 candidate papers; the task can be naturally framed as an information retrieval problem in which short, noisy posts must be matched against much longer and structurally richer scientific documents composed of titles, abstracts, venues, and author information.
 
-The first stage
+The task is challenging for several reasons. First, the linguistic gap between social media and scientific writing is substantial: posts are short, informal, and often contain paraphrases, slogans, hashtags, or incomplete statements, whereas scientific papers use more precise and technical language. Second, the reference to the source paper is implicit rather than explicit, so the retrieval system must infer the connection from partial semantic evidence rather than from direct citations. Third, relevant clues may appear in different forms, such as mentions of a scientific result, a medical outcome, a research institution, or a publication venue, requiring the system to combine lexical and semantic evidence effectively.
 
+An additional challenge is multilinguality; the official query sets include English, German, and French posts, while the candidate pool remains shared across languages. Therefore, the retrieval system must handle both cross-style and cross-language variation: it has to connect informal user-generated content with formal scientific text, and it must do so consistently across multiple languages. This makes the task particularly suitable for investigating retrieval architectures that can balance lexical matching, semantic similarity, and robust ranking strategies.
 
-The second stage generates an initial list of candidates based on dense similarity using a bi-encoder model (e.g. BGE-m3) to encode both queries and documents into dense vector representations by taking advantage of a FAISS index \cite{faiss_documentation}. For each query it enriches this candidate set by computing additional sparse lexical matching scores and ColBERT-style late interaction scores. The final ranking is computed as a weighted linear combination of these three scores (dense, sparse and multi-vector), with configurable weights and the top-k documents are returned.
+In this work, we study retrieval approaches for this task and analyze how different components contribute to the identification of the correct source paper; rather than focusing only on final ranking quality, we also consider the broader retrieval setting in which recall, robustness across languages, and compatibility with downstream re-ranking all play a central role.
 
-
-The third stage refines the top results by applying neural re-ranking algorithms. 
-
-
-
-
-
-Evaluated on the CheckThat! 2026 Task 1 dataset our system ranked XXXXXXXXXXXXX on the official leaderboard attaining a Mean Reciprocal Rank at 5 (MRR@5) of XXXXXXXXXXXXXX \% on the development set (XXXXX place) and XXXXXXXXXXXXX \% on the test set (XXXXXXXXXX out of XXXXXXXX teams).
-
-The paper is organized as follows: Section~\ref{sec:methodology} describes our approach; Section~\ref{sec:setup} explains our experimental setup; Section~\ref{sec:results} discusses our main findings; finally, Section~\ref{sec:conclusion} draws some conclusions and outlooks for future work.
+The paper is organized as follows: Section~\ref{sec:related} discusses the most relevant research directions related to this task; Section~\ref{sec:methodology} describes our approach; Section~\ref{sec:setup} explains our experimental setup; Section~\ref{sec:results} discusses our main findings; finally, Section~\ref{sec:conclusion} draws some conclusions and outlooks for future work.
