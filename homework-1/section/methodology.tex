@@ -23,7 +23,34 @@ For each of these stages, we experimented with different models, chosing the one
 \end{figure}
 
 \subsection{Query Expansion} \label{sub:queryexp}
+The first step in our pipeline is query expansion: given the original query, we generate extra terms and tokens related to it.
+This serves two purposes: to increase the number of available tokens for a match, and to bridge the gap between the original
+informal query and the formal academic language used in the document corpus.\newline
 
+Originally, we experimented with expanding the training dataset queries using \textbf{TODO: PRIMO MODELLO USATO (bge m3?)} by
+performing a generative continuation of the query. We then explored different methods for expansion,
+including Pseudo-Relevance Feedback (PRF) and similarity with static word embeddings using Word2Vec,
+testing these on both the original and the preliminary expanded queries.\newline
+
+In the final architecture, we settled on using the \textbf{TODO: MODELLO ULTIMO USATO} instruction-tuned model to perform generative
+augmentation. This model was prompted to generate three distinct representations for the given query,
+tailored to our multi-stage retrieval needs:
+\begin{itemize}
+    \item \textit{sparse}: A list of domain-specific keywords and technical synonyms (e.g., scientific nomenclature)
+    designed to maximize lexical overlap and mitigate the vocabulary mismatch in BM25-based retrieval.
+    \item \textit{dense}: A semantically enriched re-phrasing of the claim that provides a broader context, allowing the
+    bi-encoder in the next step of the architecture to produce more robust embeddings in the high-dimensional vector space.
+    \item \textit{ColBERT}: A structured, formal version of the claim (e.g., "Serum levels and ICU admission") that provides coherent
+    token sequences for fine-grained late-interaction re-ranking.\newline \textbf{DA CONFERMARE}
+\end{itemize}
+
+This multi-view expansion ensures that the downstream hybrid retriever can leverage both high-precision lexical matches
+and broad semantic overlaps. By generating these representations simultaneously within a single inference step of
+\textbf{TODO: MODELLO ULTIMO USATO},
+we maintain a coherent relationship between the different query 'views', effectively providing a unified but multi-faceted
+context for the retrieval pipeline.\newline
+
+The resulting expanded queries are then fed into the multi-stage retrieval framework described next.
 
 \subsection{Retrieval} \label{sub:retrieval}
 
