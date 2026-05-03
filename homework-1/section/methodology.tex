@@ -8,7 +8,7 @@ We then experimented with different stop lists, filters and weightings to  impro
 in the CheckThat! Lab. We then proceeded to experiment with multi-stage pipelines based on neural models, which is the
 final structure of our project.
 \newline
-We implemented a three-stage pipeline for our information retrieval system, consisting of:
+We implemented a three-stage pipeline (figure \ref{fig:pipeline}) for our information retrieval system, consisting of:
 \begin{itemize}
     \item \textbf{Query expansion}: We expanded the original query with additional context to bridge the gap between informal and scientific language.
     \item \textbf{Retrieval}: We retrieved relevant documents from the corpus using the expanded query.
@@ -17,9 +17,10 @@ We implemented a three-stage pipeline for our information retrieval system, cons
 For each of these stages, we experimented with different models, chosing the ones that performed better in relation to the others.
 
 \begin{figure}
-  \centering
-  \includegraphics[width=1\linewidth]{figure/pipeline.png}
-  \caption{Three-stage pipeline for information retrieval.}
+    \centering
+    \includegraphics[width=1\linewidth]{figure/pipeline.png}
+    \caption{Three-stage pipeline for information retrieval.}
+    \label{fig:pipeline}
 \end{figure}
 
 \subsection{Query Expansion} \label{sub:queryexp}
