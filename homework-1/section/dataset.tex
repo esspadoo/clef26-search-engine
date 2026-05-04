@@ -1,0 +1,51 @@
+\section{Dataset}
+\label{sec:dataset}
+
+The dataset used in this work is organized as a document retrieval task: given a short social-media post
+that implicitly refers to a scientific result, the system must identify the corresponding paper from a
+fixed candidate pool. In the version available in our project, the data are divided into a shared document
+collection (\texttt{code/data/collection\_data.json}) and language-specific query files for English,
+German, and French; this setting is inherently multilingual on the query side, while the candidate pool
+is shared across all languages.
+
+The document collection contains 10,000 scientific papers; each entry is identified by a unique
+\texttt{pubkey} and includes \texttt{title}, \texttt{abstract}, \texttt{venue}, and \texttt{authors}; in
+our pipeline, each paper is represented by the concatenation of title and abstract, which provides a
+compact but informative document view for both retrieval and reranking. The collection is not split by
+language, so all queries, regardless of their language, must be matched against the same set of candidate
+papers.
+
+The raw query set is organized into multiple JSON files under \texttt{code/data/Train\_set/},
+\texttt{code/data/Dev\_set/}, and \texttt{code/data/Test\_set/}, each containing the text of the social
+media post together with its identifier (\texttt{index}); in the training and development portions of
+the dataset, each query is further paired with the gold \texttt{pubkey} of the scientific paper
+implicitly referenced in the post, which enables supervised model development and internal evaluation.
+By contrast, the public test files provide only the query identifiers and post texts, with the relevance
+labels withheld in accordance with the official evaluation protocol. Table~\ref{tab:dataset-stats}
+summarizes the size of the data splits used in our experiments; while training data are available for
+English, German, and French, the public development portion included in the repository covers only
+German and French.
+
+\begin{center}
+    \captionof{table}{Dataset statistics for the version used in our experiments.}
+    \label{tab:dataset-stats}
+    \begin{tabular}{lcccc}
+        \toprule
+        Split & EN & DE & FR & Total \\
+        \midrule
+        Train & 14,977 & 1,460 & 2,807 & 19,244 \\
+        Dev   & --     & 386   & 702   & 1,088 \\
+        Test  & 6,076  & 876   & 1,220 & 8,172 \\
+        \bottomrule
+    \end{tabular}
+\end{center}
+
+One of the main challenges of the dataset lies in the marked mismatch between queries and documents:
+the social-media posts are short and noisy, averaging roughly 29--34 words in the labeled splits,
+whereas the document representations obtained by concatenating title and abstract are substantially
+longer, with an average length of about 245 words. At the same time, the relation between queries and
+papers is many-to-one, since the labeled training and development splits contain 20,332 queries but
+only 5,458 distinct referenced papers, which means that multiple posts may paraphrase, summarize, or
+discuss the same publication from different perspectives. Taken together, these characteristics make the
+benchmark particularly suitable for evaluating retrieval systems that must integrate lexical evidence,
+semantic similarity, and cross-lingual matching.

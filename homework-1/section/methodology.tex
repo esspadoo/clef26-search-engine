@@ -84,7 +84,7 @@ The reranking stage receives the candidate list produced by the hybrid retriever
 Its goal is to improve early precision (especially MRR@5) while preserving as much recall as possible from the first stage.
 
 Our strongest single-stage reranker is \texttt{nvidia/llama-nemotron-rerank-1b-v2}. For each query--document pair,
-we build an input sequence with the template \texttt{question: \{q\}\ \n\ \n passage: \{p\}} and compute a scalar relevance
+we build an input sequence with the template \texttt{question: \{q\}} followed by \texttt{passage: \{p\}} and compute a scalar relevance
 score with a sequence-classification head. Documents are then sorted by this score.
 In practice, reranking deeper candidate pools (e.g., 500--1000 documents) gave better final results than shallow pools,
 confirming the importance of high recall before neural ranking.
@@ -104,4 +104,3 @@ come from overly aggressive filtering.
 For internal analysis, our evaluator also computes additional ranking metrics (e.g., Recall@1/5/10/100, Precision@1/5/10,
 MAP, and nDCG@k). This broader view is useful to interpret trade-offs between recall-oriented retrieval settings and
 precision-oriented reranking settings, while keeping MRR@5 as the main criterion for reporting and model selection.
-
