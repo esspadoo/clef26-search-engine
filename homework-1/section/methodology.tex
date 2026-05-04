@@ -74,7 +74,7 @@ We also experimented with a learned fusion strategy for these hybrid signals. In
     s(q,d) = 0.5\,s_{\mathrm{dense}}(q,d) + 0.15\,s_{\mathrm{sparse}}(q,d) + 0.35\,s_{\mathrm{colbert}}(q,d).
 \]
 
-The largest weight is assigned to the dense score because it provides the main multilingual semantic signal; the sparse and ColBERT terms add complementary lexical and fine-grained matching evidence. Candidates are sorted by this score in descending order and truncated to the final \texttt{top\_k}. The retrieval output is a JSON mapping from query id to an ordered list of paper \texttt{pubkey}s, written by default to \texttt{results/bi\_encoder\_results.json}. Scores are not exported, because the next stage treats retrieval as a candidate generator and recomputes relevance with a cross-encoder over the returned document identifiers.
+The largest weight is assigned to the dense score because it provides the main multilingual semantic signal; the sparse and ColBERT terms add complementary lexical and fine-grained matching evidence. Candidates are sorted by this score in descending order and truncated to the final \texttt{top\_k}. The retrieval output is a JSON mapping from query id to an ordered list of paper \texttt{pubkey}s. Scores are not exported, because the next stage treats retrieval as a candidate generator and recomputes relevance with a cross-encoder over the returned document identifiers.
 
 
 \subsection{Reranking} \label{sub:reranking}
