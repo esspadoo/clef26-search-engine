@@ -1,11 +1,4 @@
 \section{Experimental Setup}
 \label{sec:setup}
 
-Describe the experimental setup, i.e.
-\begin{itemize}
-	\item used collections
-	\item evaluation measures
-	\item url to git repository and its organization
-	\item hardware used for experiments
-	\item ...
-\end{itemize}
+We conducted about 60 runs on the test split, while a smaller development split was used to inspect intermediate behavior before consolidating the final pipeline; across these runs we varied the query-expansion component, the English analyzer, and the weighting of dense, sparse, and ColBERT signals in the hybrid retriever. We also compared several rerankers, including Nemotron, Qwen3, GTE-ModernBERT, and cascaded reranking strategies, while varying the size of the candidate set passed to the rerankers; this tracking was used to identify representative systems, study the contribution of each component, and support the comparisons discussed in Section~\ref{sec:results}.
