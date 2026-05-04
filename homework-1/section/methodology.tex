@@ -1,14 +1,13 @@
 \section{Methodology}
 \label{sec:methodology}
 
-Describe the methodology you have adopted, the architecture of your system, your workflow, etc.
+We started from a lexical baseline based on Apache Lucene BM25 and progressively moved to a multi-stage neural pipeline.
+Early experiments focused on analyzer choices, stopword lists, and BM25 variants; these runs were useful to establish a stable
+baseline, but they also showed that lexical overlap alone is insufficient for this task.
 
-We started by implementing a basic pipeline using BM25 as baseline, using Apache Lucene as the underlying framework.
-We then experimented with different stop lists, filters and weightings to  improve the MRR@5 score, used as final score
-in the CheckThat! Lab. We then proceeded to experiment with multi-stage pipelines based on neural models, which is the
-final structure of our project.
+We therefore adopted a three-stage architecture that separates high-recall candidate generation from expensive neural ranking.
 \newline
-We implemented a three-stage pipeline (figure \ref{fig:pipeline}) for our information retrieval system, consisting of:
+We implemented a three-stage pipeline (Figure~\ref{fig:pipeline}) for our information retrieval system, consisting of:
 \begin{itemize}
     \item \textbf{Query expansion}: We expanded the original query with additional context to bridge the gap between informal and scientific language.
     \item \textbf{Retrieval}: We retrieved relevant documents from the corpus using the expanded query.
@@ -18,7 +17,7 @@ For each of these stages, we experimented with different models, chosing the one
 
 \begin{figure}
     \centering
-    \includegraphics[width=1\linewidth]{figure/pipeline.png}
+    \includegraphics[width=1\linewidth]{figure/pipeline}
     \caption{Three-stage pipeline for information retrieval.}
     \label{fig:pipeline}
 \end{figure}
@@ -28,27 +27,28 @@ The first step in our pipeline is query expansion: given the original query, we 
 This serves two purposes: to increase the number of available tokens for a match, and to bridge the gap between the original
 informal query and the formal academic language used in the document corpus.\newline
 
-Originally, we experimented with expanding the training dataset queries using \textbf{TODO: PRIMO MODELLO USATO (bge m3?)} by
-performing a generative continuation of the query. We then explored different methods for expansion,
+Originally, we experimented with PRF-style expansion using semantic retrieval with \texttt{BAAI/bge-large-en-v1.5}.
+We then explored different methods for expansion,
 including Pseudo-Relevance Feedback (PRF) and similarity with static word embeddings using Word2Vec,
 testing these on both the original and the preliminary expanded queries.\newline
 
-In the final architecture, we settled on using the \textbf{TODO: MODELLO ULTIMO USATO} instruction-tuned model to perform generative
-augmentation. This model was prompted to generate three distinct representations for the given query,
+In the final architecture, we used a multilingual LLM-based expansion script (\texttt{query\_expansion\_multilingual.py},
+default model \texttt{meta-llama/Llama-3.2-1B}) to generate multiple retrieval-oriented views of each query.
+The model is prompted to produce distinct representations,
 tailored to our multi-stage retrieval needs:
 \begin{itemize}
     \item \textit{sparse}: A list of domain-specific keywords and technical synonyms (e.g., scientific nomenclature)
     designed to maximize lexical overlap and mitigate the vocabulary mismatch in BM25-based retrieval.
     \item \textit{dense}: A semantically enriched re-phrasing of the claim that provides a broader context, allowing the
     bi-encoder in the next step of the architecture to produce more robust embeddings in the high-dimensional vector space.
-    \item \textit{ColBERT}: A structured, formal version of the claim (e.g., "Serum levels and ICU admission") that provides coherent
-    token sequences for fine-grained late-interaction re-ranking.\newline \textbf{DA CONFERMARE}
+    \item \textit{ColBERT}: A structured, formal version of the claim (e.g., ``Serum levels and ICU admission'') that provides coherent
+    token sequences for fine-grained late-interaction scoring.
 \end{itemize}
 
 This multi-view expansion ensures that the downstream hybrid retriever can leverage both high-precision lexical matches
 and broad semantic overlaps. By generating these representations simultaneously within a single inference step of
-\textbf{TODO: MODELLO ULTIMO USATO},
-we maintain a coherent relationship between the different query 'views', effectively providing a unified but multi-faceted
+the same LLM,
+we maintain a coherent relationship between the different query ``views'', effectively providing a unified but multi-faceted
 context for the retrieval pipeline.\newline
 
 The resulting expanded queries are then fed into the multi-stage retrieval framework described next.
@@ -59,9 +59,10 @@ This choice reflects the nature of the task: social media claims often contain i
 
 The retriever searches the fixed paper collection provided by the task organizers and named\\ \texttt{collection\_data.json}.\\ Each paper is represented at document level by the concatenation of its title and abstract, and the retrieved unit is always the paper \texttt{pubkey}. We did not split papers into smaller chunks because the task requires identifying the source publication rather than retrieving an evidence passage, and using one representation per paper avoids an additional chunk-to-document aggregation step. Although the collection also contains metadata such as venue and authors, the hybrid retriever uses only title and abstract, which are the fields consistently encoded for all documents.
 
-The input queries are the multilingual expanded queries \textbf{???????????????????WE NEED TO CONFIRM THIS ???????????????????} produced in the previous stage, stored as a JSON file described in the above section. 
+The input queries are the multilingual expanded queries stored in \texttt{expanded\_queries\_multilingual\_merged.json},
+produced by the expansion stage described above.
 
-The expansion step provides three views of the same information need: an \texttt{embedding} view for semantic matching, a \texttt{sparse} view for lexical and terminology-based evidence, and a \texttt{colbert} view for fine-grained token interaction. BGE-M3 is well suited to this setting because it can produce dense vectors, sparse lexical weights, and ColBERT-style multi-vector representations from the same multilingual model \cite{bge-m3}. Thus, the retriever can combine broad semantic matching with exact term evidence and token-level matching without switching between unrelated encoders.
+The expansion step provides three views of the same information need: an \texttt{embedding} view for semantic matching, a \texttt{sparse} view for lexical and terminology-based evidence, and a \texttt{colbert} view for fine-grained token interaction. BGE-M3 is well suited to this setting because it can produce dense vectors, sparse lexical weights, and ColBERT-style multi-vector representations from the same multilingual encoder. Thus, the retriever can combine broad semantic matching with exact term evidence and token-level matching without switching between unrelated encoders.
 
 Candidate selection is performed in two steps. First, all documents are encoded as dense BGE-M3 vectors and searched with an inner-product FAISS index \citep{faiss_documentation}. This dense stage is used as an efficient broad filter over the whole collection. The default setting retrieves a large pool, \texttt{candidate\_multiplier} $\times$ \texttt{top\_k}, with \texttt{candidate\_multiplier=3} and \texttt{top\_k=1000}, before the final truncation. This deliberately large candidate set favours recall, which is more important at this stage than precision. Second, the dense candidates are rescored using the sparse and ColBERT representations. The sparse component rewards important overlapping terms, while the ColBERT-style component captures local token correspondences that may be lost in a single dense vector \citep{KhattabZaharia2020}.
 
@@ -79,4 +80,28 @@ The largest weight is assigned to the dense score because it provides the main m
 
 \subsection{Reranking} \label{sub:reranking}
 
+The reranking stage receives the candidate list produced by the hybrid retriever and reorders it with cross-encoders.
+Its goal is to improve early precision (especially MRR@5) while preserving as much recall as possible from the first stage.
+
+Our strongest single-stage reranker is \texttt{nvidia/llama-nemotron-rerank-1b-v2}. For each query--document pair,
+we build an input sequence with the template \texttt{question: \{q\}\ \n\ \n passage: \{p\}} and compute a scalar relevance
+score with a sequence-classification head. Documents are then sorted by this score.
+In practice, reranking deeper candidate pools (e.g., 500--1000 documents) gave better final results than shallow pools,
+confirming the importance of high recall before neural ranking.
+
+We also evaluated alternative rerankers, including Qwen3 and GTE-ModernBERT variants, and tested cascaded reranking.
+In the best cascaded configuration, Nemotron is used as the first reranking pass and a second reranker
+(\texttt{BAAI/bge-reranker-v2-m3} or a fine-tuned \texttt{ModernBERT-large}) refines the top portion of the list.
+This two-step reranking improves top-rank ordering over single-stage reranking.
+
 \subsection{Evaluation}
+
+We evaluate systems on the CheckThat! Task 1 query sets by matching retrieved \texttt{pubkey}s against the gold \texttt{pubkey}
+for each query. The official optimization target is MRR@5, which we use as the primary score during model and parameter
+selection. In parallel, we track Recall@100 to monitor candidate-generation quality and to verify that reranking gains do not
+come from overly aggressive filtering.
+
+For internal analysis, our evaluator also computes additional ranking metrics (e.g., Recall@1/5/10/100, Precision@1/5/10,
+MAP, and nDCG@k). This broader view is useful to interpret trade-offs between recall-oriented retrieval settings and
+precision-oriented reranking settings, while keeping MRR@5 as the main criterion for reporting and model selection.
+
