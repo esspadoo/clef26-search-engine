@@ -1,6 +1,48 @@
 \section{Results and Discussion}
 \label{sec:results}
 
-Provide a summary of the performance on the previous year dataset.
+\subsection{Main Results}
 
-Discuss the results and any relevant issues.
+Table~\ref{tab:main-results} summarizes ten representative runs selected from our experimental campaign; rather than listing the top-scoring runs only, we chose configurations that cover the main families of experiments explored during the project, namely analyzer tuning, retrieval-only hybrid search, single-stage reranking, alternative rerankers, and cascaded reranking.
+
+\begin{table*}[t]
+    \centering
+    \footnotesize
+    \caption{Representative runs selected from the experimental campaign.}
+    \label{tab:main-results}
+    \begin{tabular}{p{2.6cm} p{2.8cm} p{6.0cm} c c}
+        \toprule
+        Family & Run label & Key configuration & MRR@5 & Recall@100 \\
+        \midrule
+        Analyzer tuning & Analyzer V2 & Lexical retrieval with \texttt{MyEnglishAnalyzer\_V2} and BGE-V1 expansion & 0.503 & 0.796 \\
+        Analyzer tuning & Analyzer V1.12 & Lexical retrieval with KStem and custom stoplist variant & 0.450 & 0.783 \\
+        Retrieval only & Hybrid A & BGE-M3 hybrid retrieval, dense 0.35, sparse 0.15, ColBERT 0.50 & 0.557 & 0.837 \\
+        Retrieval only & Hybrid B & BGE-M3 hybrid retrieval, dense 0.50, sparse 0.15, ColBERT 0.35 & 0.557 & 0.839 \\
+        Single-stage reranking & Nemotron top-400 & Hybrid retrieval followed by Nemotron reranking on 400 candidates & 0.694 & 0.893 \\
+        Single-stage reranking & Nemotron top-1000 & Hybrid retrieval followed by Nemotron reranking on 1000 candidates & 0.702 & 0.911 \\
+        Alternative rerankers & Qwen3-4B & Hybrid retrieval followed by Qwen3 reranking & 0.662 & 0.839 \\
+        Alternative rerankers & GTE-ModernBERT & Hybrid retrieval followed by GTE-ModernBERT reranking & 0.652 & 0.852 \\
+        Cascaded reranking & Nemotron + BGE-v2-M3 & Nemotron first-stage reranking followed by BGE reranking & 0.741 & 0.893 \\
+        Cascaded reranking & Nemotron + ModernBERT-FT & Nemotron first-stage reranking followed by fine-tuned ModernBERT reranking & 0.766 & 0.893 \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+The results in Table~\ref{tab:main-results} show a clear progression across the different stages of the project. The best retrieval-only configuration reaches an MRR@5 of 0.557, while the best cascaded system reaches 0.766. The largest individual improvement comes from adding \texttt{nvidia/llama-nemotron-rerank-1b-v2} as the first reranking stage, which moves the system from the 0.557 range of the hybrid-only runs to 0.702. A second reranking stage then brings a further gain, with the fine-tuned ModernBERT model producing the strongest final configuration.
+
+\subsection{Ablation / Run Analysis}
+
+\paragraph{Analyzer tuning:}
+We initially explored stronger English analyzers and several stemming and stopword variants in order to improve lexical matching between short social-media posts and scientific abstracts. This family peaks at an MRR@5 of 0.503 with \texttt{MyEnglishAnalyzer\_V2}, while the other analyzer variants remain around the 0.45--0.50 range. These runs were useful in validating the preprocessing choices, but they also showed that text normalization alone is not enough to bridge the semantic gap between informal claims and academic documents. Analyzer tuning yields measurable improvements, but its impact is limited when compared with semantic retrieval and neural reranking.
+
+\paragraph{Hybrid retrieval without reranking:}
+A shift from analyzer-focused experiments to hybrid retrieval leads to a substantially larger improvement; the two best retrieval-only systems, reported in Table~\ref{tab:main-results} as Hybrid A and Hybrid B, both reach an MRR@5 of about 0.557, with recall@100 between 0.837 and 0.839. The difference between them lies in the balance between the dense and ColBERT components, while the sparse contribution is kept fixed. This indicates that combining dense, sparse, and ColBERT-style signals already produces a strong candidate set before any reranking is applied; at the same time the very small difference between the two configurations suggests that, once the hybrid formulation is in place, the exact internal weighting matters less than the transition away from purely lexical retrieval. Hybrid retrieval is the first major step change in effectiveness and provides the strongest retrieval-only foundation for the full pipeline.
+
+\paragraph{Single-stage reranking with Nemotron:}
+Adding \texttt{nvidia/llama-nemotron-rerank-1b-v2} on top of the hybrid candidates produces the largest isolated gain in MRR@5; the representative Nemotron runs increase from the 0.557 range of the retrieval-only systems to 0.694 and 0.702, while recall@100 also rises from about 0.839 to as high as 0.911. We also observe a limited but consistent benefit from increasing the number of candidates exposed to the reranker: moving from the top-400 to the top-1000 setting slightly improves both MRR@5 and recall@100; this suggests that the reranker can exploit a broader candidate pool without being significantly affected by additional noise. The first reranking stage is the most impactful component of the pipeline, and a larger candidate pool brings further, although diminishing, gains.
+
+\paragraph{Alternative rerankers:}
+To verify that the gains were not tied to a single model, we also evaluated other rerankers, including Qwen3-reranker-4B and \texttt{Alibaba-NLP/gte-reranker-modernbert-base}; both models clearly outperform the retrieval-only baseline in terms of MRR@5, reaching values of 0.662 and 0.652, respectively. However, they remain below the Nemotron runs, especially on MRR@5, which suggests weaker ranking quality in the first positions of the final list; even so these experiments confirm that the hybrid retriever produces candidate sets that can be improved by different neural rerankers. Alternative rerankers validate the overall pipeline design, but Nemotron is the strongest first-stage reranker among the models we tested.
+
+\paragraph{Cascaded reranking:}
+Our best results are obtained by applying a second reranking stage to the candidates already filtered by Nemotron; the cascade based on \texttt{BAAI/bge-reranker-v2-m3} reaches an MRR@5 of 0.741, while the best overall system, based on a fine-tuned version of \texttt{answerdotai/ModernBERT-large}, reaches 0.766. Both cascaded runs keep recall@100 at 0.893, which is slightly lower than the Nemotron top-1000 configuration but still substantially higher than the retrieval-only systems; this indicates that the second reranker mainly improves the ordering of already strong candidates rather than increasing the breadth of the candidate pool. Cascaded reranking is the best strategy to maximize early precision, and the fine-tuned ModernBERT reranker provides the strongest final ranking.
