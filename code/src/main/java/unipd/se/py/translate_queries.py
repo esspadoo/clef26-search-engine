@@ -127,12 +127,12 @@ def load_pipeline(model_name: str, cache_dir: str | None, device: str):
 
 
 def translate_all(
-    queries: list[dict],
-    src_lang: str,
-    pipe,
-    batch_size: int,
-    max_new_tokens: int,
-    keep_original: bool,
+        queries: list[dict],
+        src_lang: str,
+        pipe,
+        batch_size: int,
+        max_new_tokens: int,
+        keep_original: bool,
 ) -> list[dict]:
     total = len(queries)
     log.info(
@@ -191,7 +191,8 @@ def translate_all(
         if keep_original:
             entry["text_original"] = q["text"]
         entry["text"] = translated
-        entry["pubkey"] = q["pubkey"]
+        if "pubkey" in q:
+            entry["pubkey"] = q["pubkey"]
         output.append(entry)
 
     return output
