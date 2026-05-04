@@ -1,4 +1,21 @@
 \section{Experimental Setup}
 \label{sec:setup}
 
-We conducted about 60 runs on the test split, while a smaller development split was used to inspect intermediate behavior before consolidating the final pipeline; across these runs we varied the query-expansion component, the English analyzer, and the weighting of dense, sparse, and ColBERT signals in the hybrid retriever. We also compared several rerankers, including Nemotron, Qwen3, GTE-ModernBERT, and cascaded reranking strategies, while varying the size of the candidate set passed to the rerankers; this tracking was used to identify representative systems, study the contribution of each component, and support the comparisons discussed in Section~\ref{sec:results}.
+We use the official CheckThat! 2026 Task 1 collection format: social-media claims as queries and a fixed paper corpus in
+\texttt{code/data/collection\_data.json}. Query files are handled in JSON format (English, German, and French) and expanded
+versions are generated in \texttt{code/data/expanded\_queries\_multilingual\_merged.json}. Retrieved outputs are always ranked
+lists of paper \texttt{pubkey}s.
+
+Our primary evaluation measure is MRR@5, consistent with the task objective and the official scorer used in
+\texttt{results/scoring\_official/}. During development, we also monitor Recall@100 and additional internal metrics from
+the Java evaluator (Recall@k, Precision@k, MAP, nDCG@k) to analyze recall/precision trade-offs across retrieval and
+reranking configurations.
+
+The implementation is organized into: (i) Java components for indexing, baseline retrieval, and evaluation
+(\texttt{code/src/main/java/unipd/se/}); (ii) Python components for multilingual query expansion, hybrid BGE-M3 retrieval,
+and neural reranking (\texttt{code/src/main/java/unipd/se/py/}); and (iii) run outputs and metrics under \texttt{results/}.
+The project repository is available at \url{https://bitbucket.org/upd-dei-stud-prj/seupd2526-retrix.git}.
+
+In terms of execution environment, lightweight preprocessing and analysis can run on CPU, while the neural stages
+(LLM-based expansion, hybrid BGE-M3 encoding, and cross-encoder reranking) are configured to use CUDA GPUs when available,
+with automatic CPU fallback paths implemented in the code.
