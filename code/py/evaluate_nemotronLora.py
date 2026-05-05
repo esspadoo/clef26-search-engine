@@ -1,19 +1,19 @@
 """
-Valutazione del reranker Nemotron fine-tunato con LoRA sul dataset Retrix.
+Evaluate a Nemotron reranker checkpoint on Retrix candidate rankings.
 
-Supporta due modalità di caricamento:
-  A) --model_dir con adapter LoRA (adapter_config.json + adapter_model.safetensors)
-     → carica il base model da HF, fonde i pesi LoRA con merge_and_unload()
-  B) --model_dir con pesi completi (config.json + model.safetensors)
-     → caricamento diretto senza PEFT (es. modello base non fine-tunato)
+Two checkpoint layouts are supported:
+  A) `--model_dir` points to a LoRA adapter
+     (`adapter_config.json` + `adapter_model.safetensors`). The script loads
+     the base model and merges the adapter with `merge_and_unload()`.
+  B) `--model_dir` points to full model weights
+     (`config.json` + `model.safetensors`). The script loads the model directly
+     without PEFT.
 
-Lo script rileva automaticamente quale modalità usare in base alla presenza
-di adapter_config.json nella directory.
+The output is a `{qid: [pubkey, ...]}` JSON object compatible with the Java
+evaluator. If qrels are provided and `ranx` is installed, local MRR@5, MAP, and
+nDCG@10 metrics are logged for quick validation.
 
-Produce {qid → [pubkey, ...]} compatibile con Evaluator.java.
-Stampa MRR@5, MAP, nDCG@10 locali se --qrels è fornito (richiede ranx).
-
-Uso (modello fine-tunato con LoRA):
+LoRA checkpoint usage:
   python evaluate_nemotron_reranker.py \\
       --model_dir    models/reranker-nemotron-1b/best \\
       --base_model   nvidia/llama-nemotron-rerank-1b-v2 \\
@@ -25,7 +25,7 @@ Uso (modello fine-tunato con LoRA):
       --rerank_top   20 \\
       --qrels        data/qrels.json
 
-Uso (modello base senza fine-tuning, per confronto):
+Base model comparison usage:
   python evaluate_nemotron_reranker.py \\
       --model_dir    nvidia/llama-nemotron-rerank-1b-v2 \\
       --topics       data/topics.json \\
@@ -58,12 +58,31 @@ BASE_MODEL_ID = "nvidia/llama-nemotron-rerank-1b-v2"
 # ---------------------------------------------------------------------------
 
 def load_json(path):
+    """Load a UTF-8 JSON document.
+
+    Args:
+        path: Path to the JSON file.
+
+    Returns:
+        The decoded JSON object.
+
+    Raises:
+        OSError: If the file cannot be read.
+        json.JSONDecodeError: If the file content is not valid JSON.
+    """
     with open(path, encoding="utf-8") as f:
         return json.load(f)
 
 
 def doc_to_text(item: dict) -> str:
-    """Corpus: title + abstract. Robusto a campi mancanti."""
+    """Build the passage text used by the cross-encoder.
+
+    Args:
+        item: Corpus record that may contain `title`, `abstract`, or `text`.
+
+    Returns:
+        A non-normalized passage string assembled from available fields.
+    """
     title    = item.get("title", "").strip()
     abstract = item.get("abstract", "").strip()
     if title and abstract:
@@ -72,30 +91,37 @@ def doc_to_text(item: dict) -> str:
 
 
 def make_prompt(query: str, passage: str) -> str:
-    """Formato prompt ufficiale NVIDIA Nemotron."""
+    """Format a query-passage pair using NVIDIA's Nemotron template."""
     return f"question:{query} \n \n passage:{passage}"
 
 
 def is_lora_adapter(model_dir: str) -> bool:
-    """Controlla se model_dir contiene un adapter LoRA o pesi completi."""
+    """Return whether `model_dir` contains PEFT LoRA adapter metadata."""
     return os.path.isfile(os.path.join(model_dir, "adapter_config.json"))
 
 
 # ---------------------------------------------------------------------------
-# Caricamento modello — rileva automaticamente LoRA vs pesi completi
+# Model loading: auto-detect LoRA adapters versus full checkpoints.
 # ---------------------------------------------------------------------------
 
 def load_model_and_tokenizer(model_dir: str, base_model_id: str):
-    """
-    Carica tokenizer e modello in modo appropriato:
-      - Se model_dir ha adapter_config.json → carica base model + fonde LoRA
-      - Altrimenti → carica direttamente come modello completo
+    """Load a Nemotron reranker model and matching tokenizer.
 
-    Restituisce (model, tokenizer) pronti per l'inferenza.
+    Args:
+        model_dir: LoRA adapter directory, full checkpoint directory, or model ID.
+        base_model_id: Hugging Face model ID used when `model_dir` is a LoRA
+            adapter.
+
+    Returns:
+        A `(model, tokenizer)` tuple ready for inference.
+
+    Raises:
+        ImportError: If required transformer or PEFT packages are unavailable.
+        OSError: If the checkpoint or tokenizer files cannot be loaded.
     """
     from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoConfig
 
-    # Determina se è un adapter LoRA o un modello completo
+    # The presence of adapter_config.json is the PEFT convention for LoRA output.
     lora_mode = is_lora_adapter(model_dir)
 
     if lora_mode:
@@ -103,10 +129,10 @@ def load_model_and_tokenizer(model_dir: str, base_model_id: str):
         logger.info(f"Base model: {base_model_id}")
     else:
         logger.info(f"Pesi completi rilevati, caricamento diretto da: {model_dir}")
-        base_model_id = model_dir  # usa model_dir come sorgente diretta
+        base_model_id = model_dir  # Use model_dir as the direct checkpoint source.
 
     # ------------------------------------------------------------------
-    # Tokenizer — sempre dal base model (il tokenizer non cambia con LoRA)
+    # Tokenizer: LoRA adapters do not change the base tokenizer vocabulary.
     # ------------------------------------------------------------------
     logger.info("Caricamento tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(
@@ -118,7 +144,8 @@ def load_model_and_tokenizer(model_dir: str, base_model_id: str):
         tokenizer.pad_token = tokenizer.eos_token
 
     # ------------------------------------------------------------------
-    # Config — workaround incompatibilità RoPE con transformers recenti
+    # Config: set pad_token_id explicitly to avoid classification-head padding
+    # ambiguities across transformers versions.
     # ------------------------------------------------------------------
     logger.info("Caricamento config...")
     config = AutoConfig.from_pretrained(
@@ -129,7 +156,7 @@ def load_model_and_tokenizer(model_dir: str, base_model_id: str):
     config.pad_token_id = tokenizer.pad_token_id
 
     # ------------------------------------------------------------------
-    # Modello base
+    # Base model.
     # ------------------------------------------------------------------
     logger.info("Caricamento modello base...")
     base_model = AutoModelForSequenceClassification.from_pretrained(
@@ -142,7 +169,7 @@ def load_model_and_tokenizer(model_dir: str, base_model_id: str):
     )
 
     # ------------------------------------------------------------------
-    # Fusione LoRA (solo se in modalità adapter)
+    # Merge LoRA weights only when the checkpoint is an adapter.
     # ------------------------------------------------------------------
     if lora_mode:
         from peft import PeftModel
@@ -164,7 +191,7 @@ def load_model_and_tokenizer(model_dir: str, base_model_id: str):
 
 
 # ---------------------------------------------------------------------------
-# Inferenza
+# Inference
 # ---------------------------------------------------------------------------
 
 @torch.no_grad()
@@ -176,7 +203,24 @@ def batch_score(
     max_length: int,
     device: str,
 ) -> list[float]:
-    """Calcola score Nemotron per una lista di prompt (query+passage)."""
+    """Score query-passage prompts with the Nemotron classification head.
+
+    Args:
+        model: Sequence-classification model returning one logit per prompt.
+        tokenizer: Matching tokenizer.
+        prompts: Formatted `question: ... passage: ...` strings.
+        batch_size: Number of prompts processed per forward pass.
+        max_length: Maximum token length after truncation.
+        device: Device where tokenized tensors are moved before inference.
+
+    Returns:
+        Relevance scores in the `[0, 1]` interval. If a CUDA OOM occurs for a
+        batch, neutral `0.5` fallback scores are emitted for that batch so the
+        caller can preserve candidate ordering.
+
+    Raises:
+        RuntimeError: For non-OOM inference failures.
+    """
     scores = []
     for i in range(0, len(prompts), batch_size):
         batch = prompts[i: i + batch_size]
@@ -189,7 +233,7 @@ def batch_score(
                 return_tensors="pt",
             ).to(device)
             logits = model(**enc).logits.squeeze(-1)
-            # Nemotron: sigmoid sul logit scalare → score in [0,1]
+            # Nemotron returns a single relevance logit per prompt.
             batch_scores = torch.sigmoid(logits).cpu().tolist()
             if isinstance(batch_scores, float):
                 batch_scores = [batch_scores]
@@ -209,6 +253,13 @@ def batch_score(
 # ---------------------------------------------------------------------------
 
 def main():
+    """Run checkpoint loading, reranking, optional evaluation, and JSON export.
+
+    Side effects:
+        Reads topics, corpus, BM25 candidates, and optional qrels from disk;
+        loads a large model; writes reranked results; and logs progress and
+        optional local metrics.
+    """
     parser = argparse.ArgumentParser(
         description="Valuta Nemotron fine-tunato (LoRA o pesi completi)"
     )
@@ -236,12 +287,12 @@ def main():
     logger.info(f"Device: {device}")
 
     # ------------------------------------------------------------------
-    # Caricamento modello
+    # Model loading.
     # ------------------------------------------------------------------
     model, tokenizer = load_model_and_tokenizer(args.model_dir, args.base_model)
 
     # ------------------------------------------------------------------
-    # Caricamento dati
+    # Data loading.
     # ------------------------------------------------------------------
     logger.info("Caricamento topics e corpus...")
     topics       = load_json(args.topics)
@@ -254,7 +305,7 @@ def main():
     logger.info(f"Corpus: {len(pubkey_to_text)} documenti | Topics: {len(qid_to_text)} query")
 
     # ------------------------------------------------------------------
-    # Reranking
+    # Reranking.
     # ------------------------------------------------------------------
     logger.info(f"Reranking — top_k={args.top_k}, rerank_top={args.rerank_top}...")
     final_results = {}
@@ -262,14 +313,14 @@ def main():
     for qid, candidate_pubkeys in tqdm(bm25_results.items(), desc="Queries"):
         q_text = qid_to_text.get(str(qid), "")
         if not q_text:
-            # Query non trovata nei topics → mantieni ordine BM25
+            # Missing topics cannot be scored; preserve first-stage ordering.
             final_results[str(qid)] = [str(pk) for pk in candidate_pubkeys[:args.rerank_top]]
             continue
 
         candidates      = [str(pk) for pk in candidate_pubkeys[:args.top_k]]
         candidate_texts = [pubkey_to_text.get(pk, "") for pk in candidates]
 
-        # Rimuovi candidati senza testo nel corpus
+        # Candidates without corpus text cannot be scored by the cross-encoder.
         valid = [(pk, txt) for pk, txt in zip(candidates, candidate_texts) if txt]
         if not valid:
             final_results[str(qid)] = candidates[:args.rerank_top]
@@ -287,7 +338,7 @@ def main():
         final_results[str(qid)] = [pk for pk, _ in ranked[:args.rerank_top]]
 
     # ------------------------------------------------------------------
-    # Salvataggio output per Evaluator.java
+    # Output for Evaluator.java.
     # ------------------------------------------------------------------
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -296,7 +347,7 @@ def main():
     logger.info(f"Risultati salvati in: {out_path}")
 
     # ------------------------------------------------------------------
-    # Metriche locali (opzionale — richiede ranx)
+    # Optional local metrics; ranx is intentionally not a hard dependency.
     # ------------------------------------------------------------------
     if args.qrels:
         try:

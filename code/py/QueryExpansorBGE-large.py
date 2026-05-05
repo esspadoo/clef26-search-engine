@@ -1,14 +1,15 @@
 """
-QueryExpansor — BGE-large-en-v1.5 (BAAI/bge-large-en-v1.5)
-Uno dei migliori modelli generici per retrieval (top sul benchmark BEIR).
-Richiede il prefisso "Represent this sentence for searching relevant passages: "
-SOLO sulle query — il corpus non ha prefisso.
+Expand English queries with BGE-large semantic neighbors and noun keywords.
 
-Rispetto a MiniLM: embedding 1024-dim (vs 384), addestrato con hard-negative mining
-su dataset di retrieval → migliore separazione tra documenti rilevanti e non.
+The script embeds the corpus and queries with `BAAI/bge-large-en-v1.5`, retrieves
+the top semantic neighbors for each query, extracts high-frequency candidate
+terms from those neighbors, and combines them with spaCy noun/proper-noun
+keywords from the original query.
 
-Output: data/expanded_queries_bge_large.json
-Aggiorna Main.java: queriesPath = "code/data/expanded_queries_bge_large.json"
+BGE-large requires the retrieval instruction prefix only for queries; corpus
+documents are encoded without a prefix. The output JSON keeps the original query
+identifier and adds `original`, `keywords`, and `expanded` fields consumed by
+the downstream Lucene/BM25 stage.
 """
 
 import json
@@ -34,7 +35,7 @@ DATA_BASE         = "../../../../../../data"
 
 MODEL_NAME = "BAAI/bge-large-en-v1.5"
 
-# BGE richiede questo prefisso SOLO sulle query (non sul corpus).
+# BGE uses this prefix for query embeddings only; corpus embeddings stay raw.
 BGE_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
 
 print(f"Device: {DEVICE}")
@@ -61,6 +62,17 @@ _TOKEN_RE = re.compile(r"[a-zA-Z0-9]+(?:['\-][a-zA-Z0-9]+)*")
 
 
 def load_stopwords(path):
+    """Load newline-delimited stop words as lowercase tokens.
+
+    Args:
+        path: Path to a UTF-8 stop-word file.
+
+    Returns:
+        A set of stripped, lowercased stop words.
+
+    Raises:
+        OSError: If the stop-word file cannot be read.
+    """
     with open(path, encoding="utf-8") as f:
         return {line.strip().lower() for line in f}
 
@@ -71,23 +83,43 @@ STOPWORDS.update(LUCENE_STOPS)
 
 
 def normalize_ascii(text):
+    """Return an ASCII-only representation of `text`.
+
+    Non-ASCII marks are stripped after NFKD normalization so downstream token
+    matching remains aligned with Lucene-style ASCII analysis.
+    """
     return unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
 
 
 def clean_query(text: str) -> str:
-    """Rimuove @menzioni e il simbolo '#' dagli hashtag, poi normalizza spazi.
-    Usata per pulire la query originale prima di costruire il campo 'expanded',
-    in modo che le menzioni non finiscano nel testo passato a Lucene."""
-    text = re.sub(r"\B@(\w+)", r"\1", text) # #hashtag -> hashtag
-    text = re.sub(r"\B#(\w+)", r"\1", text) # #hashtag -> hashtag
+    """Normalize social-text markers before building the expanded query.
+
+    Args:
+        text: Raw query text.
+
+    Returns:
+        Query text with mentions/hashtags converted to bare terms, emoji
+        removed, and whitespace collapsed.
+    """
+    text = re.sub(r"\B@(\w+)", r"\1", text)
+    text = re.sub(r"\B#(\w+)", r"\1", text)
     text = emoji.replace_emoji(text, replace='')
     text = re.sub(r"\s+", " ", text).strip()
     return text
 
 
-# FIX: stopwords opzionale — default a None, risolto a STOPWORDS dentro la funzione.
-# Questo evita il TypeError quando chiamata come raw_tokenize(t) senza secondo argomento.
 def raw_tokenize(text, stopwords=None):
+    """Tokenize corpus text for expansion-term counting.
+
+    Args:
+        text: Source document text.
+        stopwords: Optional stop-word set. When omitted, the module-level
+            `STOPWORDS` set is used.
+
+    Returns:
+        Lowercased ASCII tokens with mentions, stop words, short terms, and
+        possessive suffixes removed.
+    """
     if stopwords is None:
         stopwords = STOPWORDS
 
@@ -131,10 +163,8 @@ if DEVICE == "cuda":
 # Load data
 # ──────────────────────────────────────────────────────────────
 print("Loading data...")
-#with open(f"{DATA_BASE}/collection_data.json", "r", encoding="utf-8") as f:
 with open(f"{DATA_BASE}/collection_data.json", "r", encoding="utf-8") as f:
     papers = json.load(f)
-#with open(f"{DATA_BASE}/en_train.json", "r", encoding="utf-8") as f:
 with open(f"{DATA_BASE}/fr_DEV_en.json", "r", encoding="utf-8") as f:
     queries = json.load(f)
 
@@ -153,7 +183,7 @@ corpus_raw_tokens: list[list[str]] = [
 ]
 
 # ──────────────────────────────────────────────────────────────
-# Encode corpus — nessun prefisso
+# Encode corpus without the BGE query instruction prefix.
 # ──────────────────────────────────────────────────────────────
 print("Encoding corpus (GPU, no prefix)...")
 corpus_embeddings = model.encode(
@@ -166,7 +196,7 @@ corpus_embeddings = model.encode(
 )
 
 # ──────────────────────────────────────────────────────────────
-# Encode queries — con prefisso BGE
+# Encode queries with the BGE retrieval instruction prefix.
 # ──────────────────────────────────────────────────────────────
 print(f"Encoding queries (GPU, with prefix: '{BGE_QUERY_PREFIX[:40]}...')...")
 query_texts_prefixed = [BGE_QUERY_PREFIX + t for t in query_texts]
@@ -197,6 +227,15 @@ print("Extracting keywords from queries (spaCy batch)...")
 query_docs = list(nlp.pipe(query_texts, batch_size=SPACY_BATCH_SIZE, n_process=1))
 
 def extract_query_keywords(doc: spacy.tokens.Doc) -> str:
+    """Extract stable noun-like query keywords from a spaCy document.
+
+    Args:
+        doc: spaCy document produced with POS tagging enabled.
+
+    Returns:
+        A space-separated string of unique noun/proper-noun lemmas, preserving
+        first occurrence order.
+    """
     keywords = [
         token.lemma_.lower()
         for token in doc

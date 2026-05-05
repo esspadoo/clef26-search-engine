@@ -1,34 +1,18 @@
 """
-Reranker_nemotron.py — Llama-Nemotron-Rerank-1B re-ranking dei risultati BM25
-==============================================================================
-nvidia/llama-nemotron-rerank-1b-v2 è un cross-encoder (AutoModelForSequenceClassification)
-fine-tuned con bidirectional attention su Llama-3.2-1B.
+Re-rank first-stage retrieval results with Llama-Nemotron-Rerank-1B.
 
-Meccanismo ufficiale (da HuggingFace nvidia/llama-nemotron-rerank-1b-v2):
-  1. Formattare la coppia con il template: "question:{q} \\n \\n passage:{p}"
-  2. Tokenizzare come sequenza singola (NON come pair)
-  3. Forward pass → model(**batch).logits  shape [B, 1]
-  4. sigmoid(logits.view(-1)) → score in (0, 1), sempre positivo
-     - score alto (~1) = documento rilevante
-     - score basso (~0) = documento irrilevante
-  5. Ranking: sorted(..., reverse=True) — score più alto = posizione migliore
+`nvidia/llama-nemotron-rerank-1b-v2` is a cross-encoder exposed through
+`AutoModelForSequenceClassification`. Each query-document pair is formatted as
+one sequence using NVIDIA's official `question:{q} \\n \\n passage:{p}` template,
+then scored with the model's scalar classification logit and a sigmoid
+activation. Higher scores indicate more relevant documents.
 
-Differenze chiave rispetto a Qwen3-Reranker:
-  - AutoModelForSequenceClassification, NON AutoModelForCausalLM
-  - Nessun prefix/suffix fisso da pre-tokenizzare
-  - Score finale via sigmoid: valori in (0,1), sempre positivi, ordine non ambiguo
-  - torch_dtype=torch.bfloat16 (dtype nativo del modello)
-  - Richiede transformers >= 4.44
+The script reads expanded queries, corpus metadata, and first-stage candidate
+rankings, then writes a `{qid: [pubkey, ...]}` JSON object compatible with the
+Java evaluator. It supports CPU/single-GPU execution and a multi-GPU process
+split where each worker owns one visible CUDA device.
 
-Legge:
-  - data/expanded_queries_*.json   (query, campo "original")
-  - data/collection_data.json      (corpus, title+abstract)
-  - results/bm25_results.json      (output Java: { qid → [pubkey, ...] })
-
-Scrive:
-  - results/reranked_results_nemotron.json  (stesso formato: { qid → [pubkey, ...] })
-
-Uso:
+Usage:
   python Reranker_nemotron.py
   python Reranker_nemotron.py --top_k 100 --batch 32 --query_chunk 8
 """
@@ -49,7 +33,6 @@ parser.add_argument("--papers",      default="../../../../../../data/collection_
 
 parser.add_argument("--bm25",        default="../../../../../../../results/bi_encoder_results_bge_large_subtask4b_query_tweets_trainTopk1000.json")
 
-#parser.add_argument("--bm25",        default="../../../../../../../results/bm25_results.json")
 parser.add_argument("--output",      default="../../../../../../../results/reranked_results_nemotron_topk140_tweets_train2025_BiencoderTopk1000.json")
 parser.add_argument("--top_k",       type=int, default=140,
                     help="Candidati BM25 da passare al re-ranker (default: 100)")
@@ -67,12 +50,17 @@ MODEL_NAME = "nvidia/llama-nemotron-rerank-1b-v2"
 
 
 # ──────────────────────────────────────────────────────────────
-# Formattazione input — template ufficiale Nemotron
+# Input formatting: official Nemotron template.
 # ──────────────────────────────────────────────────────────────
 def format_pair(query: str, doc: str) -> str:
-    """
-    Template ufficiale nvidia/llama-nemotron-rerank-1b-v2.
-    Input è una sequenza singola (NON pair da tokenizer), come da docs.
+    """Format a query-document pair for Nemotron reranking.
+
+    Args:
+        query: Query text.
+        doc: Document text, usually title plus abstract.
+
+    Returns:
+        A single sequence string matching NVIDIA's reranker template.
     """
     return f"question:{query} \n \n passage:{doc}"
 
@@ -81,10 +69,16 @@ def format_pair(query: str, doc: str) -> str:
 # Sanity check
 # ──────────────────────────────────────────────────────────────
 def sanity_check_scores(score_fn) -> bool:
-    """
-    Verifica che il modello produca score discriminativi.
-    Dopo sigmoid: rilevante → vicino a 1, irrilevante → vicino a 0.
-    Soglia: diff > 0.05 è sufficiente per confermare discriminazione.
+    """Check whether the scorer separates an obviously relevant pair.
+
+    Args:
+        score_fn: Callable that accepts `(query, document)` pairs and returns
+            relevance scores.
+
+    Returns:
+        `True` when the two probe scores differ by at least 0.05; otherwise
+        `False`. Exceptions are caught so a failed diagnostic does not stop a
+        long reranking run.
     """
     test_pairs = [
         ("neural network classification",
@@ -108,15 +102,21 @@ def sanity_check_scores(score_fn) -> bool:
 
 
 # ──────────────────────────────────────────────────────────────
-# Helpers CPU
+# CPU-side helpers for pair construction and result reconstruction.
 # ──────────────────────────────────────────────────────────────
 def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
-    """
-    Costruisce le coppie (query_text, doc_text) per un chunk di query.
-    Ritorna:
-      all_pairs : lista piatta di (str, str)
-      meta      : [(qid, valid_keys, n_pairs, fallback_candidates), ...]
-      missing   : n° doc non trovati nel corpus
+    """Build flat scoring pairs for a chunk of queries.
+
+    Args:
+        query_items: Iterable of `(qid, candidate_pubkeys)` items.
+        paper_texts: Mapping from pubkey to document text.
+        query_texts: Mapping from qid to query text.
+        top_k: Maximum number of first-stage candidates scored per query.
+
+    Returns:
+        A tuple containing the flat `(query_text, doc_text)` pair list, metadata
+        needed to reconstruct per-query rankings, and the number of missing
+        candidate documents.
     """
     all_pairs = []
     meta      = []
@@ -148,9 +148,14 @@ def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
 
 
 def scores_to_results(meta, scores_flat):
-    """
-    Ricostruisce qid→[pubkey] dallo score array piatto.
-    Score in (0,1) dopo sigmoid: reverse=True mette i più rilevanti in cima.
+    """Convert flat scores back into `{qid: [pubkey, ...]}` rankings.
+
+    Args:
+        meta: Metadata emitted by `build_pairs_for_queries`.
+        scores_flat: Relevance scores aligned with the flat pair list.
+
+    Returns:
+        Per-query rankings sorted from highest to lowest Nemotron score.
     """
     results = {}
     offset  = 0
@@ -160,25 +165,29 @@ def scores_to_results(meta, scores_flat):
             continue
         scores = scores_flat[offset: offset + n_pairs]
         offset += n_pairs
-        # Score alti (~1) = più rilevanti → reverse=True
+        # Higher sigmoid scores mean higher predicted relevance.
         ranked = sorted(zip(valid_keys, scores), key=lambda x: x[1], reverse=True)
         results[qid] = [pk for pk, _ in ranked]
     return results
 
 
 # ──────────────────────────────────────────────────────────────
-# Caricamento modello — AutoModelForSequenceClassification
+# Model loading: AutoModelForSequenceClassification.
 # ──────────────────────────────────────────────────────────────
 def load_nemotron_reranker(device: str, max_length: int):
-    """
-    Carica nvidia/llama-nemotron-rerank-1b-v2 tramite AutoModelForSequenceClassification.
+    """Load Nemotron and return a scoring closure.
 
-    Architettura: cross-encoder (Llama-3.2-1B fine-tuned) con bidirectional
-    attention e classification head binaria. Output: logit scalare grezzo per
-    coppia, convertito via sigmoid in score ∈ (0, 1).
+    Args:
+        device: Device map target passed to Hugging Face loading.
+        max_length: Maximum sequence length used during tokenization.
 
-    NON usare AutoModelForCausalLM (produce output errati su questo modello).
-    Richiede transformers >= 4.44.
+    Returns:
+        A callable that accepts a list of `(query, document)` pairs and returns
+        sigmoid-normalized relevance scores.
+
+    Raises:
+        ImportError: If transformers is not available.
+        OSError: If model or tokenizer loading fails.
     """
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
@@ -186,7 +195,7 @@ def load_nemotron_reranker(device: str, max_length: int):
     tokenizer = AutoTokenizer.from_pretrained(
         MODEL_NAME,
         trust_remote_code=True,
-        padding_side="left",   # padding a sinistra — coerente con architettura decoder
+        padding_side="left",   # Decoder-family backbone expects left padding.
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -195,26 +204,23 @@ def load_nemotron_reranker(device: str, max_length: int):
     model = AutoModelForSequenceClassification.from_pretrained(
         MODEL_NAME,
         trust_remote_code=True,
-        torch_dtype=torch.bfloat16,   # BF16: dtype nativo del modello (non float16)
+        torch_dtype=torch.bfloat16,   # Native Nemotron dtype; avoid fp16 drift.
         device_map=device,
     )
-    # Sincronizza pad_token_id anche nella config del modello
+    # Keep tokenizer and model padding aligned for batched classification.
     if model.config.pad_token_id is None:
         model.config.pad_token_id = tokenizer.eos_token_id
     model.eval()
 
     def score_pairs(pairs: list) -> list:
-        """
-        Closure che incapsula modello e tokenizer.
-        Accetta lista di (query, doc) e ritorna lista di float in (0, 1).
+        """Score formatted pairs with the loaded model.
 
-        Logica:
-          texts = [format_pair(q, d) for q, d in pairs]
-          tokenizer(texts, ...) → batch_dict (sequenza singola, NON pair)
-          model(**batch_dict).logits → shape [B, 1]
-          sigmoid(logits.view(-1)) → score in (0,1) per ogni coppia
-            - ~1.0 = molto rilevante
-            - ~0.0 = irrilevante
+        Args:
+            pairs: Query-document pairs to score.
+
+        Returns:
+            Sigmoid-normalized scores where values near 1.0 indicate stronger
+            predicted relevance.
         """
         texts = [format_pair(q, d) for q, d in pairs]
 
@@ -237,12 +243,22 @@ def load_nemotron_reranker(device: str, max_length: int):
 
 
 # ──────────────────────────────────────────────────────────────
-# Inferenza con gestione OOM
+# Inference with adaptive OOM handling.
 # ──────────────────────────────────────────────────────────────
 def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
-    """
-    Itera le coppie a batch, chiama score_fn e aggrega i risultati.
-    Gestisce OOM dimezzando il batch e ripristinandolo al chunk successivo.
+    """Score pairs in batches while recovering from CUDA OOM.
+
+    Args:
+        score_fn: Pair-scoring callable returned by `load_nemotron_reranker`.
+        pairs: Query-document pairs to score.
+        batch_size: Preferred batch size.
+
+    Returns:
+        Scores aligned with `pairs`. If even batch size 1 runs out of memory,
+        neutral `0.5` scores are used for that failed batch.
+
+    Raises:
+        RuntimeError: For non-OOM failures raised by the scorer.
     """
     all_scores    = []
     current_batch = batch_size
@@ -267,7 +283,7 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
                     f"Score=0.5 come fallback (ordine BM25 mantenuto).",
                     flush=True,
                 )
-                # 0.5 = valore neutro dopo sigmoid, non perturba l'ordine relativo
+                # A neutral sigmoid score preserves first-stage order after sort ties.
                 all_scores.extend([0.5] * len(batch))
                 i += current_batch
                 current_batch = batch_size
@@ -279,7 +295,7 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
 
 
 # ──────────────────────────────────────────────────────────────
-# Worker per-GPU (path multi-GPU)
+# One worker per GPU for the multi-GPU execution path.
 # ──────────────────────────────────────────────────────────────
 def rerank_worker(
         gpu_id: int,
@@ -292,7 +308,24 @@ def rerank_worker(
         max_length: int,
         result_queue: mp.Queue,
 ) -> None:
-    # CRITICO: isola la GPU prima di qualsiasi import CUDA
+    """Run reranking for a partition of queries on one CUDA device.
+
+    Args:
+        gpu_id: Physical CUDA device index assigned to this worker.
+        query_items: First-stage candidate lists assigned to the worker.
+        paper_texts: Mapping from pubkey to document text.
+        query_texts: Mapping from qid to query text.
+        top_k: Number of candidates scored per query.
+        batch_size: Preferred model scoring batch size.
+        query_chunk: Number of queries grouped into each CPU preparation chunk.
+        max_length: Maximum tokenized pair length.
+        result_queue: Multiprocessing queue used to return local results.
+
+    Side effects:
+        Sets CUDA-related environment variables, loads a model copy, and writes
+        `(results, missing_count, scored_pair_count)` to `result_queue`.
+    """
+    # Isolate the worker before CUDA state is initialized.
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
@@ -351,7 +384,7 @@ if __name__ == "__main__":
         for i in range(NUM_GPUS):
             print(f"  [{i}] {torch.cuda.get_device_name(i)}")
 
-    # ── Carica dati ────────────────────────────────────────────
+    # Load input data.
     print("\nLoading data...")
 
     with open(args.queries, "r", encoding="utf-8") as f:
@@ -373,7 +406,7 @@ if __name__ == "__main__":
         for q in queries_raw
     }
 
-    # ── Sanity check sui dati ──────────────────────────────────
+    # Validate that candidate IDs and query IDs resolve before scoring.
     print(f"\nCorpus: {len(paper_texts)} documenti | "
           f"Queries: {len(query_texts)} | "
           f"BM25 results: {len(bm25_results)}")
@@ -398,7 +431,7 @@ if __name__ == "__main__":
           f"(top_k={args.top_k}, batch={args.batch}, "
           f"query_chunk={args.query_chunk}, max_length={args.max_length})...")
 
-    # ── Singola GPU / CPU ───────────────────────────────────────
+    # Single-GPU or CPU execution.
     if NUM_GPUS <= 1:
         score_fn = load_nemotron_reranker(DEVICE, args.max_length)
 
@@ -430,7 +463,7 @@ if __name__ == "__main__":
             scores_flat  = predict_scores(score_fn, all_pairs, args.batch)
             reranked_results.update(scores_to_results(meta, scores_flat))
 
-    # ── Multi-GPU ───────────────────────────────────────────────
+    # Multi-GPU execution.
     else:
         partitions = [[] for _ in range(NUM_GPUS)]
         for i, item in enumerate(all_query_items):
@@ -474,14 +507,14 @@ if __name__ == "__main__":
         for p in processes:
             p.join()
 
-        # Ripristina ordine originale delle query
+        # Restore the original query order after merging worker outputs.
         reranked_results = {
             qid: reranked_results[qid]
             for qid in bm25_results
             if qid in reranked_results
         }
 
-    # ── Report finale ──────────────────────────────────────────
+    # Final report.
     print(f"\nTotal pairs scored : {total_pairs}")
     print(f"Queries re-ranked  : {len(reranked_results)}")
     if missing_docs:
@@ -489,7 +522,7 @@ if __name__ == "__main__":
     coverage = len(reranked_results) / len(bm25_results) * 100
     print(f"Coverage           : {coverage:.1f}% ({len(reranked_results)}/{len(bm25_results)})")
 
-    # ── Salva ──────────────────────────────────────────────────
+    # Persist Evaluator.java-compatible rankings.
     out_dir = os.path.dirname(args.output)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
