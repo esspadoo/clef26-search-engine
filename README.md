@@ -313,7 +313,7 @@ python3 QueryExpansorBGE-large.py
 
 # Example to create the reranked results file for the english test set of CLEF 2026 CheckThat! task 1 
 python3 evaluate_nemotronLora.py \
---model_dir    models/reranker-nemotron-1bAarsen20252026/best \
+--model_dir    results/fineTuned_models/fineTune_nemotron/nemotronFT_Train2026-All2025/ \
 --base_model   nvidia/llama-nemotron-rerank-1b-v2 \
 --topics       final_en_test.json \
 --corpus       collection_data.json \
