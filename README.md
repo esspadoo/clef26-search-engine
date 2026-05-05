@@ -283,6 +283,7 @@ zlib-state==0.1.12
 
 
 ## Execution of the code ##
+**Advice**: the following code has the only scope to provide a simple but comprehensive guide to use and the right order of execution of the programs developed in this project. The paths can vary based on where the files are saved, especially for the JSON files.
 ```
 #!/bin/bash
 #TOKEN OF HUGGING FACE TO DOWNLOAD MODELS
