@@ -31,7 +31,7 @@ The repository is organised as follows:
 
 ## Virtual environments
 This project had been run on Python 3.12.13, with two different virtual environments for the execution of python code. 
-The one called "venv312" contains:
+The one called "venv312" (the one used for translate_queries.py and evaluate_nemotronLora.py) contains:
 ```
 accelerate==1.13.0
 aiohappyeyeballs==2.6.1
@@ -158,7 +158,7 @@ yarl==1.23.0
 zlib-state==0.1.12
 ```
 
-The one called "venv312FlagEmb" contains:
+The one called "venv312FlagEmb" (the one used for Bi_encoder.py and for QueryExpansorBGE-large.py) contains:
 ```
 accelerate==1.13.0
 aiohappyeyeballs==2.6.1
