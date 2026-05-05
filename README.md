@@ -36,13 +36,13 @@ The repository is organised as follows:
 export HF_TOKEN="hf_XXXXXXXXXXXXX"
 
 #VENV PYTHON 3.12
-source /home/baldanfabi/seupd2526-retrix/code/src/main/java/unipd/se/py/venv312/bin/activate
+source /home/{$USER$}/seupd2526-retrix/code/src/main/java/unipd/se/py/venv312/bin/activate
 
 #VENV PYTHON 3.12 MA PER FLAG EMBEDDINGS
-#source /home/baldanfabi/seupd2526-retrix/code/src/main/java/unipd/se/py/venv312FlagEmb/bin/activate
+#source /home/{$USER}/seupd2526-retrix/code/src/main/java/unipd/se/py/venv312FlagEmb/bin/activate
 
 
-cd /home/baldanfabi/seupd2526-retrix/code/py/
+cd /home/{$USER}/seupd2526-retrix/code/py/
 
 python3 translate_queries.py --input final_fr_test.json --lang fr \
     --output final_fr_TRADOTTOen_test.json
