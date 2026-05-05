@@ -23,8 +23,8 @@ The homeworks are carried out by groups of students and consists in participatin
 The repository is organised as follows:
 
 * `code`: this folder contains the source code of the developed system. See dedicated section below for more details.
-* `runs`: this folder contains the runs produced by the developed system.
-* `results`: this folder contains the performance scores of the runs.
+* `Analisi_Run.ods`: this file contains the details and some notes of the runs produced by the developed system. We chose this over other evaluation systems for the freedom and flexibility that it gives on noting and writing custom measures and notes
+* `results`: this folder contains the performance scores of the runs, fine-tuned models (and the code that brought to them) and some official/custom scripts to be able to score and upload our results on CLEF's systems.
 * `homework-1`: this folder contains the report describing the techniques applied and insights gained.
 * `homework-2`: this folder contains the final paper submitted to CLEF.
 * `slides`: this folder contains the slides used for presenting the conducted project.
