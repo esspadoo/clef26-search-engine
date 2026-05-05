@@ -29,6 +29,45 @@ The repository is organised as follows:
 * `homework-2`: this folder contains the final paper submitted to CLEF.
 * `slides`: this folder contains the slides used for presenting the conducted project.
 
+## Execution of the code ##
+```
+#!/bin/bash
+#TOKEN OF HUGGING FACE TO DOWNLOAD MODELS
+export HF_TOKEN="hf_XXXXXXXXXXXXX"
+
+#VENV PYTHON 3.12
+source /home/baldanfabi/seupd2526-retrix/code/src/main/java/unipd/se/py/venv312/bin/activate
+
+#VENV PYTHON 3.12 MA PER FLAG EMBEDDINGS
+#source /home/baldanfabi/seupd2526-retrix/code/src/main/java/unipd/se/py/venv312FlagEmb/bin/activate
+
+
+cd /home/baldanfabi/seupd2526-retrix/code/py/
+
+python3 translate_queries.py --input final_fr_test.json --lang fr \
+    --output final_fr_TRADOTTOen_test.json
+
+python3 translate_queries.py --input final_de_test.json --lang de \
+    --output final_de_TRADOTTOen_test.json
+
+# Remember to change the path in the program to the translated queries files
+python3 QueryExpansorBGE-large.py
+
+
+# Remember to change the path in the program to the expanded queries files
+#python3 Bi_encoder.py --precompute-corpus-hybrid
+
+# Example to create the reranked results file for the english test set of CLEF 2026 CheckThat! task 1 
+python3 evaluate_nemotronLora.py \
+--model_dir    models/reranker-nemotron-1bAarsen20252026/best \
+--base_model   nvidia/llama-nemotron-rerank-1b-v2 \
+--topics       final_en_test.json \
+--corpus       collection_data.json \
+--bm25_results bi_encoder_results_bge_large_enFINAL_topk3000.json \
+--output       reranked_results_nemotronFTAarsen2526_Lora_enFINALtopk2000_biEncoderTopk3000.json \
+--top_k 2000 --rerank_top 100
+```
+
 ### License ###
 
 All the contents of this repository are shared using the [Creative Commons Attribution-ShareAlike 4.0 International License](http://creativecommons.org/licenses/by-sa/4.0/).
