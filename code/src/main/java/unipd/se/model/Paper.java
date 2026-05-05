@@ -6,7 +6,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
  * Represents a scientific paper in the document collection.
  * <p>
  * Each paper stores the identifier used in the dataset, together with
- * its title, abstract, publication venue, and authors.
+ * its title, abstract, publication venue, and authorship information.
  * </p>
  *
  * @author RETRIX

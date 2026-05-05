@@ -1,17 +1,28 @@
 package unipd.se.model;
 
 /**
- * Represents a basic query loaded from the dataset.
- * A query contains an identifier, its text and the identifier of the
- * relevant scientific paper.
+ * Represents a basic query record loaded from the dataset.
+ * Each query stores its identifier, the original query text, and the
+ * identifier of the relevant scientific paper.
  *
  * @author RETRIX
  * @version 1.0
  * @since 1.0
  */
 public class QueryDoc implements SearchQuery {
+    /**
+     * Unique identifier of the query in the dataset.
+     */
     public String index;
+
+    /**
+     * Original text of the query.
+     */
     public String text;
+
+    /**
+     * Identifier of the relevant paper associated with the query.
+     */
     public String pubkey;
 
     /**
@@ -35,7 +46,7 @@ public class QueryDoc implements SearchQuery {
     }
 
     /**
-     * Returns the original text of the query.
+     * Returns the original search text of the query.
      *
      * @return the query text
      */
