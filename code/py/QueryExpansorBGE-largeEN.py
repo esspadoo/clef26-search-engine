@@ -65,7 +65,7 @@ def load_stopwords(path):
         return {line.strip().lower() for line in f}
 
 STOPWORDS = load_stopwords(
-    "../../../../../../../code/data/stoplist_en_ranksnl_large.txt"
+    "../data/stoplist_en_ranksnl_large.txt"
 )
 STOPWORDS.update(LUCENE_STOPS)
 

@@ -1,7 +1,7 @@
 import json
 
 # Carica il file JSON da convertire in TSV pronto per la submit in codaBench
-with open('reranked_results_nemotron_topk100BASELINE_DEV.json', 'r', encoding='utf-8') as f:
+with open('../reranked_results_nemotron_topk100BASELINE_DEV.json', 'r', encoding='utf-8') as f:
     data = json.load(f)
 
 # Crea il file TSV

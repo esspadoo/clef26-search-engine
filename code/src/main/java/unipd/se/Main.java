@@ -2,39 +2,18 @@ package unipd.se;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import unipd.se.model.ExpandedQueryDoc;
 import unipd.se.model.Paper;
-import org.apache.lucene.store.Directory;
 
 import java.io.File;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
 
-/*
- * Entry point for the Information Retrieval pipeline.
- *
- * Modalità 1 — BM25 only (default):
- *   java Main
- *   → esegue retrieval BM25, salva results/bm25_results.json, valuta e salva metriche
- *
- * Modalità 2 — BM25 + re-ranking neurale:
- *   java Main [papersPath] [queriesPath] [rerankedResultsPath]
- *   → se rerankedResultsPath è fornito, valuta QUELLO invece dei risultati BM25
- *
- * Flusso completo consigliato:
- *   1. java Main                          → produce results/bm25_results.json
- *   2. python Reranker.py                 → produce results/reranked_results.json
- *   3. java Main _ _ results/reranked_results.json   → valuta il re-ranking
- */
-
 /**
  * Main entry point of the information retrieval pipeline.
  * This class loads the scientific paper collection and the query set,
- * executes BM25 retrieval or evaluates previously re-ranked results,
+ * evaluates previously re-ranked results
  * and stores the evaluation metrics in JSON format.
  *
  * @author RETRIX
@@ -45,12 +24,11 @@ public class Main {
 
     /**
      * Runs the retrieval and evaluation pipeline.
-     * If no arguments are provided, the method loads the default paper
-     * collection and expanded queries, performs BM25 retrieval, stores the
-     * ranked results, and evaluates them.
+     * If no arguments are provided, it returns error.
      * If a third argument is provided, it is interpreted as the path to a
      * file containing re-ranked results, which are loaded and evaluated
-     * directly instead of running BM25 again.
+     * directly. Arguments to pass to evaluate a reranked results:
+     * _ _ results/reranked_results.json
      *
      * @param args command-line arguments:
      *             args[0] = path to the paper collection JSON file,
@@ -63,13 +41,12 @@ public class Main {
         System.out.println("Starting retrieval [cores=" + cores + "]");
 
         String papersPath  = args.length > 0 && !args[0].equals("_") ? args[0] : "code/data/collection_data.json";
-        //String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/expanded_queries_multilingual_merged.json";
 
         //per run dev_set EN
         String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/Dev_set/ENexpanded_queries_bge_largeDEV.json";
         //String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/Dev_set/expanded_queries_bge_large_frDEV_en.json";
 
-        // If rerankedResultPath is provided, skip BM25 and directly evaluate re-ranked results
+        // If rerankedResultPath is provided, evaluate re-ranked results
         String rerankedPath = args.length > 2 ? args[2] : null;
 
         ObjectMapper mapper = new ObjectMapper();
@@ -85,80 +62,53 @@ public class Main {
             List<Paper> papers             = papersFuture.get();
             List<ExpandedQueryDoc> queries = queriesFuture.get();
 
-            Map<String, List<String>> results;
+            Map<String, List<String>> results = null;
 
-            if (rerankedPath != null) {
+            if (rerankedPath != null && !rerankedPath.trim().isEmpty()) {
                 // Mode 2: load re-ranked results from file
-                System.out.println("Loading re-ranked results from: " + rerankedPath);
-                results = mapper.readValue(
-                        new File(rerankedPath),
-                        new TypeReference<>() {}
-                );
-                System.out.println("Loaded results for " + results.size() + " queries.");
+                File rerankedFile = new File(rerankedPath);
 
-            } else {
-                // Mode 1: run BM25 and save results
-                Directory index = IndexerV1.buildIndex(papers);
-
-                // Parallel search (Searcher internally manages parallelism)
-                results = SearcherV3.search(index, queries, 1.0f, 100);
-
-                // Save BM25 results in the background while the main thread prepares the configuration
-                Files.createDirectories(Paths.get("results"));
-
-                File bm25File = new File("results/bm25_results.json");
-                CompletableFuture<Void> saveFuture = CompletableFuture.runAsync(() -> {
-                    try {
-                        mapper.writerWithDefaultPrettyPrinter().writeValue(bm25File, results);
-                        System.out.println("BM25 results saved to: " + bm25File.getPath());
-                        System.out.println("→ Now run: python Reranker.py");
-                        System.out.println("→ Then re-run Main with: java Main _ _ results/reranked_results.json");
-                    } catch (Exception e) {
-                        System.err.println("Failed to save BM25 results: " + e.getMessage());
-                    }
-                });
-
-                // Build the configuration while the file is being written in the background
-                ObjectNode config = mapper.createObjectNode();
-                config.put("analyzer", "MyCustomAnalyzer");
-                config.put("query_parser", "SBERT");
-                config.put("top_n", 100);
-                config.put("title_boost", 1.0);
-                config.put("similarity", "BM25");
-                config.put("reranker", "none");
-                config.putPOJO("fields", new String[]{"title", "abstract"});
-
-                // Ensure that the file has been written before proceeding
-                saveFuture.join();
-
-                String basePath = "results/evaluation_results";
-                File file = new File(basePath + ".json");
-                int counter = 1;
-                while (file.exists()) {
-                    file = new File(basePath + "_" + counter++ + ".json");
+                // Check if file exists and is not empty
+                if (!rerankedFile.exists()) {
+                    System.err.println("Error: Reranked results file does not exist: " + rerankedPath);
+                    return;
                 }
-                Evaluator.evaluate(results, queries, config, file.getPath());
+
+                if (rerankedFile.length() == 0) {
+                    System.err.println("Error: Reranked results file is empty: " + rerankedPath);
+                    return;
+                }
+
+                System.out.println("Loading re-ranked results from: " + rerankedPath);
+                try {
+                    results = mapper.readValue(
+                            rerankedFile,
+                            new TypeReference<>() {}
+                    );
+                    System.out.println("Loaded results for " + results.size() + " queries.");
+                } catch (Exception e) {
+                    System.err.println("Error reading reranked results file: " + e.getMessage());
+                    return;
+                }
+            } else {
+                System.out.println("No reranked results file provided or path is empty. BM25 search will not be performed.");
+                return; // Exit without performing BM25 search
+            }
+
+            // Ensure we have valid results before proceeding
+            if (results == null || results.isEmpty()) {
+                System.err.println("Error: No valid results to evaluate.");
                 return;
             }
 
-            // 3. Configuration for reranked mode
-            ObjectNode config = mapper.createObjectNode();
-            config.put("analyzer",     "MyCustomAnalyzer");
-            config.put("query_parser", "SBERT");
-            config.put("top_n",        100);
-            config.put("title_boost",  1.0);
-            config.put("similarity",   "BM25");
-            config.put("reranker",     "cross-encoder/ms-marco-MiniLM-L-6-v2");
-            config.putPOJO("fields",   new String[]{"title", "abstract"});
-
-            // 4. Save evaluation metrics to a progressively named file
+            // 3. Save evaluation metrics to a progressively named file
             String basePath = "results/evaluation_results_reranked";
             File file = new File(basePath + ".json");
             int counter = 1;
             while (file.exists()) {
                 file = new File(basePath + "_" + counter++ + ".json");
             }
-            Evaluator.evaluate(results, queries, config, file.getPath());
+            Evaluator.evaluate(results, queries, file.getPath());
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

@@ -1,5 +1,3 @@
-package unipd.se;
-
 import org.apache.lucene.document.Document;
 import org.apache.lucene.queryparser.simple.SimpleQueryParser;
 import org.apache.lucene.search.similarities.BM25Similarity;

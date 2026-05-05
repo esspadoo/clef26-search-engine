@@ -52,7 +52,6 @@ public final class Evaluator {
      * @param results the retrieval results, mapping each query identifier to
      *                the ranked list of retrieved document identifiers
      * @param queries the list of queries to evaluate
-     * @param config the configuration information to include in the JSON output
      * @param outputFilePath the path of the JSON file where evaluation results
      *                       will be saved
      * @throws IOException if the evaluation is interrupted, fails during
@@ -61,7 +60,6 @@ public final class Evaluator {
     public static void evaluate(
             Map<String, List<String>> results,
             List<? extends QueryDoc> queries,
-            ObjectNode config,
             String outputFilePath
     ) throws IOException {
 
@@ -199,7 +197,6 @@ public final class Evaluator {
         // JSON output
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode root = mapper.createObjectNode();
-        root.set("config", config);
 
         ObjectNode metrics = mapper.createObjectNode();
         metrics.put("queries",        total);
