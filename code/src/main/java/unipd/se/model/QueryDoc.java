@@ -2,7 +2,7 @@ package unipd.se.model;
 
 /**
  * Represents a basic query loaded from the dataset.
- * A query contains an identifier, its text, and the identifier of the
+ * A query contains an identifier, its text and the identifier of the
  * relevant scientific paper.
  *
  * @author RETRIX
