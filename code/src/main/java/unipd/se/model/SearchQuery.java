@@ -2,8 +2,8 @@ package unipd.se.model;
 
 /**
  * Represents a generic query used in the retrieval pipeline.
- * Implementations provide the query identifier, the expected relevant
- * document identifier, and the text to be used during search.
+ * Implementations provide the query identifier, the identifier of the
+ * relevant document, and the text to be used during retrieval.
  *
  * @author RETRIX
  * @version 1.0

@@ -24,6 +24,7 @@ public class ExpandedQueryDoc extends QueryDoc {
      * Keywords extracted from the original query.
      */
     public String keywords;
+
     /**
      * Sparse-optimized query representation.
      */
@@ -45,7 +46,7 @@ public class ExpandedQueryDoc extends QueryDoc {
     public String language;
 
     /**
-     * Backward-compatible alias for the sparse representation.
+     * Backward-compatible alias for the expanded sparse representation.
      */
     public String expanded;
 
@@ -60,6 +61,8 @@ public class ExpandedQueryDoc extends QueryDoc {
 
     /**
      * Returns the expanded query text.
+     * If the legacy {@code expanded} field is empty, the sparse
+     * representation is returned instead.
      *
      * @return the expanded query text
      */
@@ -72,6 +75,8 @@ public class ExpandedQueryDoc extends QueryDoc {
 
     /**
      * Returns the sparse-optimized query text.
+     * If the dedicated sparse field is empty, the legacy expanded value is
+     * used as a fallback.
      *
      * @return the sparse query text
      */
@@ -84,6 +89,8 @@ public class ExpandedQueryDoc extends QueryDoc {
 
     /**
      * Returns the dense-embedding-optimized query text.
+     * If no dense representation is available, the sparse query text is
+     * returned instead.
      *
      * @return the dense query text
      */
@@ -96,6 +103,8 @@ public class ExpandedQueryDoc extends QueryDoc {
 
     /**
      * Returns the ColBERT-optimized query text.
+     * If no ColBERT representation is available, the dense representation is
+     * returned instead.
      *
      * @return the ColBERT query text
      */
@@ -118,11 +127,12 @@ public class ExpandedQueryDoc extends QueryDoc {
     /**
      * Returns the text that must be used by the search engine.
      * <p>
-     * In this implementation, the search text corresponds to the
-     * {@code expanded} query.
+     * In this implementation, the search text corresponds to the sparse
+     * query representation, with fallback to the backward-compatible
+     * expanded value when needed.
      * </p>
      *
-     * @return the expanded query text used for retrieval
+     * @return the query text used for retrieval
      */
     @Override
     public String getSearchText() {

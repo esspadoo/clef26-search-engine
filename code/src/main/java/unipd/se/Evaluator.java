@@ -10,27 +10,13 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.DoubleAdder;
 
-/*
- * Evaluator for IR results.
- * Computes:
- *   - Recall@k        (k = 1, 5, 10, 100)
- *   - Precision@k     (k = 1, 5, 10)
- *   - F1@k            (k = 1)
- *   - MRR@5
- *   - MAP
- *   - nDCG@k          (k = 5, 10, 100)
- *   - Per-query stats (min, max, median for MRR@5 and nDCG@10)
- *
- * Supports QueryDoc and subclasses (e.g., ExpandedQueryDoc).
- * Le metriche per-query vengono calcolate in parallelo con DoubleAdder thread-safe.
- */
-
 /**
- * Utility class that evaluates information retrieval results produced by the
- * search pipeline.
+ * Utility class that evaluates ranked information retrieval results.
  * It computes aggregate metrics such as Recall@k, Precision@k, F1@1, MRR@5,
  * MAP, and nDCG@k, and also derives per-query statistics for selected metrics.
- * The evaluation supports {@link QueryDoc} objects and subclasses.
+ * The evaluation supports {@link QueryDoc} objects and subclasses, accepts
+ * ranked results regardless of how they were produced, and parallelizes
+ * per-query metric accumulation through thread-safe adders.
  *
  * @author RETRIX
  * @version 1.0
@@ -65,7 +51,7 @@ public final class Evaluator {
 
         int total = queries.size();
 
-        // Accumulatori thread-safe per somme parallele
+        // Thread-safe accumulators used for parallel aggregation.
         DoubleAdder hitAt1   = new DoubleAdder(), hitAt5  = new DoubleAdder();
         DoubleAdder hitAt10  = new DoubleAdder(), hitAt100 = new DoubleAdder();
         DoubleAdder precAt1  = new DoubleAdder(), precAt5 = new DoubleAdder();
@@ -74,15 +60,15 @@ public final class Evaluator {
         DoubleAdder mapAcc   = new DoubleAdder();
         DoubleAdder ndcg5Acc = new DoubleAdder(), ndcg10Acc = new DoubleAdder(), ndcg100Acc = new DoubleAdder();
 
-        // Array per statistiche per-query (accesso per indice, thread-safe perché indici distinti)
+        // Arrays storing per-query statistics; each thread writes to a distinct index.
         double[] perQueryMrrArr    = new double[total];
         double[] perQueryNdcg10Arr = new double[total];
 
-        // Calcolo parallelo per-query
+        // Parallel per-query evaluation.
         int cores = Runtime.getRuntime().availableProcessors();
         try (ForkJoinPool pool = new ForkJoinPool(cores)) {
             pool.submit(() ->
-                // Parallel con indice esplicito tramite IntStream
+                // Parallel iteration with explicit indexing through IntStream.
                 java.util.stream.IntStream.range(0, total).parallel().forEach(idx -> {
                     QueryDoc q = queries.get(idx);
                     String qid = q.index;
@@ -93,7 +79,7 @@ public final class Evaluator {
                     List<String> ranked = results.getOrDefault(qid, Collections.emptyList());
                     int relCount = goldSet.size();
 
-                    // Prima posizione rilevante (1-based, -1 se assente)
+                    // First relevant rank (1-based, -1 if absent).
                     int rank = -1;
                     for (int i = 0; i < ranked.size(); i++) {
                         if (goldSet.contains(ranked.get(i))) { rank = i + 1; break; }
@@ -143,7 +129,7 @@ public final class Evaluator {
             throw new IOException("Evaluation failed", e.getCause());
         }
 
-        // Converti array in liste per calcolo statistiche
+        // Convert arrays to lists for statistics computation.
         List<Double> perQueryMrr    = new ArrayList<>(total);
         List<Double> perQueryNdcg10 = new ArrayList<>(total);
         for (int i = 0; i < total; i++) {
