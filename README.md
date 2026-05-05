@@ -31,10 +31,14 @@ The repository is organised as follows:
 
 ## Virtual environments
 This project had been run on Python 3.12.13, with two different virtual environments for the execution of python code. 
-The one called "venv312" (the one used for translate_queries.py and evaluate_nemotronLora.py) contains:
+- The one called "venv312" (used for translate_queries.py and evaluate_nemotronLora.py)
 
-The one called "venv312FlagEmb" (the one used for Bi_encoder.py and for QueryExpansorBGE-large.py) contains:
+- The one called "venv312FlagEmb" (used for Bi_encoder.py and for QueryExpansorBGE-large.py)
 
+To create the desired environment go to `/code/environment/{venv312 || venv312FlagEmb}` and run the command:
+`python -m venv .`
+
+After the creation, activate it and install the required dependencioes provided in the respective requirements files, running the command: `python3 -m pip install -r requirements_{VENV_NAME}.txt`
 
 ## Execution of the code ##
 **Advice**: the following code has the only scope to provide a simple but comprehensive guide to use and the right order of execution of the programs developed in this project. The paths can vary based on where the files are saved, especially for the JSON files.
@@ -44,13 +48,13 @@ The one called "venv312FlagEmb" (the one used for Bi_encoder.py and for QueryExp
 export HF_TOKEN="hf_XXXXXXXXXXXXX"
 
 #VENV PYTHON 3.12
-source /home/{$USER$}/seupd2526-retrix/code/src/main/java/unipd/se/py/venv312/bin/activate
+source seupd2526-retrix/code/environment/venv312/bin/activate
 
 #VENV PYTHON 3.12 BUT WITH FLAG EMBEDDINGS
-#source /home/{$USER}/seupd2526-retrix/code/src/main/java/unipd/se/py/venv312FlagEmb/bin/activate
+#source seupd2526-retrix/code/environment/venv312FlagEmb/bin/activate
 
 
-cd /home/{$USER}/seupd2526-retrix/code/py/
+cd seupd2526-retrix/code/py/
 
 python3 translate_queries.py --input final_fr_test.json --lang fr \
     --output final_fr_TRADOTTOen_test.json
