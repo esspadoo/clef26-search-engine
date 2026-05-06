@@ -27,8 +27,8 @@ public class SearcherV1 {
 
     /**
      * Search the index with a configurable title boost.
-     * Le query vengono elaborate in parallelo su un ForkJoinPool dedicato.
-     * IndexSearcher è thread-safe per letture concorrenti (Lucene garantisce questo).
+     * Queries are processed in parallel on a dedicated ForkJoinPool.
+     * IndexSearcher is thread-safe for concurrent reads (as guaranteed by Lucene).
      *
      * @param dir        the Lucene index directory
      * @param queries    list of queries (QueryDoc or subclasses)
