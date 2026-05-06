@@ -1,3 +1,17 @@
+"""Run dense or BGE-M3 hybrid retrieval over the Retrix corpus.
+
+This script loads query and corpus JSON files, encodes text with either
+SentenceTransformers or FlagEmbedding's BGE-M3 implementation, builds a FAISS
+inner-product index over corpus dense vectors, and writes `{qid: [pubkey, ...]}`
+rankings for the Java evaluator. Hybrid mode combines dense, sparse lexical,
+and ColBERT-style multi-vector scores for BGE-M3 candidates.
+
+The implementation is designed for large local runs: it detects CPU,
+single-GPU, and multi-GPU environments, adapts batch size after CUDA OOM errors,
+and can optionally precompute BGE-M3 sparse/ColBERT corpus features when enough
+system memory is available.
+"""
+
 import argparse
 from dataclasses import dataclass
 from importlib.metadata import PackageNotFoundError, version
@@ -32,6 +46,7 @@ DEFAULT_LOG_EVERY_QUERIES = 100
 DEFAULT_CPU_THREADS = 6
 
 SCRIPT_PATH = Path(__file__).resolve()
+# These relative parents match the repository layout used by the coursework.
 CODE_ROOT = SCRIPT_PATH.parents[6] 
 REPO_ROOT = SCRIPT_PATH.parents[7]
 
@@ -41,6 +56,7 @@ DEFAULT_OUTPUT = REPO_ROOT / "results" / "bi_encoder_results_bge_large_frDEVen_t
 
 
 def parse_args() -> argparse.Namespace:
+    """Parse command-line arguments for retrieval and resource configuration."""
     parser = argparse.ArgumentParser(
         description="Encode queries and corpus with a bi-encoder and run dense retrieval."
     )
@@ -164,11 +180,24 @@ def parse_args() -> argparse.Namespace:
 
 
 def load_json(path: Path) -> Any:
+    """Load a UTF-8 JSON file.
+
+    Args:
+        path: JSON file path.
+
+    Returns:
+        The decoded JSON object.
+
+    Raises:
+        OSError: If the file cannot be read.
+        json.JSONDecodeError: If the content is not valid JSON.
+    """
     with path.open("r", encoding="utf-8") as handle:
         return json.load(handle)
 
 
 def get_installed_version(package_name: str) -> str | None:
+    """Return the installed package version, or `None` when absent."""
     try:
         return version(package_name)
     except PackageNotFoundError:
@@ -176,9 +205,12 @@ def get_installed_version(package_name: str) -> str | None:
 
 
 def patch_transformers_flash_attn_compat() -> None:
-    """
-    FlagEmbedding may import reranker modules that expect newer transformers
-    helper names even when we only need BGEM3FlagModel.
+    """Patch a missing transformers helper expected by some FlagEmbedding builds.
+
+    Side effects:
+        Adds `is_flash_attn_greater_or_equal_2_10` to `transformers.utils` when
+        an older compatible helper is present. No patch is applied if
+        transformers is unavailable or already exposes the helper.
     """
     try:
         import transformers.utils as transformers_utils
@@ -193,6 +225,7 @@ def patch_transformers_flash_attn_compat() -> None:
         return
 
     def _is_flash_attn_greater_or_equal_2_10() -> bool:
+        """Compatibility shim for FlagEmbedding imports."""
         try:
             return bool(legacy_checker("2.1.0"))
         except Exception:
@@ -202,6 +235,7 @@ def patch_transformers_flash_attn_compat() -> None:
 
 
 def resolve_retrieval_mode(model_name: str, requested_mode: str) -> str:
+    """Resolve CLI retrieval mode aliases and model-specific defaults."""
     if requested_mode == "multivector":
         return "hybrid"
     if requested_mode != "auto":
@@ -212,11 +246,12 @@ def resolve_retrieval_mode(model_name: str, requested_mode: str) -> str:
 
 
 def resolve_execution_mode() -> tuple[str, list[str]]:
-    """
-    Automatically select execution mode based on visible CUDA devices:
-    - 0 GPUs -> CPU
-    - 1 GPU  -> single-GPU
-    - 2+ GPUs -> multi-GPU
+    """Select CPU, single-GPU, or multi-GPU execution from visible CUDA devices.
+
+    Returns:
+        A tuple of execution mode and target device strings. Multi-GPU mode
+        returns one `cuda:N` entry per visible GPU; CPU and single-GPU modes
+        return an empty device list because downstream libraries use defaults.
     """
     if not torch.cuda.is_available():
         return "cpu", []
@@ -230,6 +265,21 @@ def resolve_execution_mode() -> tuple[str, list[str]]:
 
 
 def build_bge_m3_model(model_name: str, execution_mode: str, target_devices: list[str]) -> Any:
+    """Instantiate a BGE-M3 FlagEmbedding model for the current hardware.
+
+    Args:
+        model_name: Hugging Face model ID or local path.
+        execution_mode: One of `cpu`, `cuda`, or `multi-gpu`.
+        target_devices: Device IDs used only for multi-GPU initialization.
+
+    Returns:
+        A `BGEM3FlagModel` instance.
+
+    Raises:
+        ImportError: If FlagEmbedding is missing or incompatible.
+        TypeError: If none of the supported initialization keyword variants
+            match the installed FlagEmbedding version.
+    """
     patch_transformers_flash_attn_compat()
     try:
         from FlagEmbedding import BGEM3FlagModel
@@ -304,6 +354,15 @@ def build_bge_m3_model(model_name: str, execution_mode: str, target_devices: lis
 
 
 def infer_query_prefix(model_name: str, provided_prefix: str | None) -> str:
+    """Infer the query encoding prefix for BGE-family dense models.
+
+    Args:
+        model_name: Model ID used for encoding.
+        provided_prefix: Explicit CLI prefix, if any.
+
+    Returns:
+        The prefix that should be prepended to each query before dense encoding.
+    """
     if provided_prefix is not None:
         return provided_prefix
     if model_name.lower().startswith("baai/bge-m3"):
@@ -314,6 +373,18 @@ def infer_query_prefix(model_name: str, provided_prefix: str | None) -> str:
 
 
 def resolve_effective_max_length(model_name: str, provided_max_length: int | None) -> int | None:
+    """Resolve the encoder max length from CLI input and model defaults.
+
+    Args:
+        model_name: Model ID used for encoding.
+        provided_max_length: Optional CLI max-length value.
+
+    Returns:
+        A positive max length, or `None` to keep the model/library default.
+
+    Raises:
+        ValueError: If an explicit max length is not positive.
+    """
     if provided_max_length is not None:
         if provided_max_length <= 0:
             raise ValueError("--max-length must be greater than 0 when provided.")
@@ -326,18 +397,21 @@ def resolve_effective_max_length(model_name: str, provided_max_length: int | Non
 
 
 def is_cuda_oom(error: Exception) -> bool:
+    """Return whether an exception represents a CUDA out-of-memory failure."""
     if isinstance(error, torch.OutOfMemoryError):
         return True
     return "out of memory" in str(error).lower()
 
 
 def score_to_float(score: Any) -> float:
+    """Convert tensor-like or scalar scores to plain Python floats."""
     if hasattr(score, "item"):
         return float(score.item())
     return float(score)
 
 
 def format_bytes(num_bytes: int) -> str:
+    """Format a byte count using binary units for progress messages."""
     value = float(num_bytes)
     for unit in ("B", "KB", "MB", "GB", "TB"):
         if value < 1024.0 or unit == "TB":
@@ -347,6 +421,7 @@ def format_bytes(num_bytes: int) -> str:
 
 
 def format_duration(seconds: float) -> str:
+    """Format elapsed seconds as a compact human-readable duration."""
     if not np.isfinite(seconds) or seconds < 0:
         return "unknown"
     total_seconds = int(seconds)
@@ -360,6 +435,18 @@ def format_duration(seconds: float) -> str:
 
 
 def configure_cpu_threads(cpu_threads: int | None) -> None:
+    """Configure FAISS and PyTorch CPU thread counts.
+
+    Args:
+        cpu_threads: Desired CPU thread count. `None` leaves library defaults.
+
+    Raises:
+        ValueError: If `cpu_threads` is provided but not positive.
+
+    Side effects:
+        Updates FAISS OpenMP threads and PyTorch intra/inter-op thread settings
+        when supported, then prints the active configuration.
+    """
     if cpu_threads is None:
         detected = os.cpu_count()
         print(
@@ -390,6 +477,7 @@ def configure_cpu_threads(cpu_threads: int | None) -> None:
 
 
 def get_colbert_score_device() -> torch.device:
+    """Return the device used for local ColBERT score reductions."""
     if torch.cuda.is_available():
         return torch.device("cuda:0")
     return torch.device("cpu")
@@ -400,6 +488,20 @@ def compute_colbert_scores_batched(
     candidate_colbert: list[np.ndarray],
     batch_size: int,
 ) -> np.ndarray:
+    """Compute ColBERT-style late-interaction scores for candidate documents.
+
+    Args:
+        query_colbert: Query token representations with shape `(query_tokens, dim)`.
+        candidate_colbert: Candidate document token representations.
+        batch_size: Number of candidate documents scored per tensor batch.
+
+    Returns:
+        A float32 score array aligned with `candidate_colbert`.
+
+    Raises:
+        ValueError: If `batch_size` is not positive.
+        Exception: Re-raises non-OOM tensor failures.
+    """
     current_batch_size = batch_size
     if current_batch_size <= 0:
         raise ValueError("--colbert-score-batch-size must be greater than 0.")
@@ -429,6 +531,8 @@ def compute_colbert_scores_batched(
                     score_chunks.append(batch_scores)
                     continue
 
+                # Pack variable-length document token vectors into a padded
+                # tensor so the late-interaction reduction can run in one pass.
                 max_doc_tokens = max(doc.shape[0] for doc in non_empty_docs)
                 embedding_dim = q_reps.shape[1]
                 doc_tensor = torch.zeros(
@@ -448,6 +552,8 @@ def compute_colbert_scores_batched(
                     doc_tensor[tensor_row, :doc_length] = doc_reps
                     doc_mask[tensor_row, :doc_length] = True
 
+                # ColBERT scoring keeps the best document-token match for each
+                # query token, then averages the summed matches by query length.
                 token_scores = torch.einsum("qd,bkd->bqk", q_reps, doc_tensor)
                 token_scores = token_scores.masked_fill(~doc_mask.unsqueeze(1), float("-inf"))
                 max_scores = token_scores.max(dim=-1).values
@@ -481,6 +587,24 @@ def precompute_corpus_hybrid_features(
     max_length: int,
     colbert_storage_dtype: str,
 ) -> tuple[list[dict[str, float]], list[np.ndarray]]:
+    """Precompute BGE-M3 sparse and ColBERT corpus features.
+
+    Args:
+        model: BGE-M3 model exposing `encode`.
+        corpus_texts: Corpus documents to encode.
+        batch_size: Encoding batch size.
+        max_length: Maximum token length for sparse/ColBERT features.
+        colbert_storage_dtype: Storage dtype name for ColBERT vectors.
+
+    Returns:
+        Sparse lexical weights and ColBERT vectors aligned with `corpus_texts`.
+
+    Raises:
+        KeyError: If an unsupported dtype name is supplied.
+
+    Side effects:
+        Encodes the full corpus and prints memory-use information.
+    """
     dtype_map = {
         "float16": np.float16,
         "float32": np.float32,
@@ -524,6 +648,24 @@ def encode_bge_m3(
     return_sparse: bool,
     return_colbert_vecs: bool,
 ) -> dict[str, Any]:
+    """Encode text batches with BGE-M3, adapting after CUDA OOM.
+
+    Args:
+        model: BGE-M3 model exposing FlagEmbedding's `encode` API.
+        texts: Text inputs to encode.
+        batch_size: Preferred encode batch size.
+        label: Human-readable label used in progress messages.
+        max_length: Optional maximum token length.
+        return_dense: Whether to include dense vectors.
+        return_sparse: Whether to include lexical weights.
+        return_colbert_vecs: Whether to include ColBERT token vectors.
+
+    Returns:
+        A dictionary containing the requested BGE-M3 outputs.
+
+    Raises:
+        Exception: Re-raises non-OOM encoding failures.
+    """
     current_batch_size = batch_size
     while True:
         try:
@@ -589,6 +731,15 @@ def encode_bge_m3(
 
 
 def pick_query_text(item: dict[str, Any], query_field: str) -> str:
+    """Select the query text field from a query record.
+
+    Args:
+        item: Query record dictionary.
+        query_field: Explicit field name or `auto`.
+
+    Returns:
+        The selected stripped query text, or an empty string if none is usable.
+    """
     if query_field != "auto":
         value = item.get(query_field, "")
         return value.strip() if isinstance(value, str) else ""
@@ -602,6 +753,16 @@ def pick_query_text(item: dict[str, Any], query_field: str) -> str:
 
 
 def iter_query_records(raw_queries: Any) -> Iterable[tuple[str, dict[str, Any]]]:
+    """Yield normalized `(qid, item)` pairs from supported query JSON shapes.
+
+    Args:
+        raw_queries: Either a list of query dictionaries or a mapping from qid
+            to query dictionaries/strings.
+
+    Yields:
+        Query IDs and dictionary records. String values are wrapped as
+        `{"text": value}`.
+    """
     if isinstance(raw_queries, list):
         for position, item in enumerate(raw_queries):
             if isinstance(item, dict):
@@ -621,6 +782,20 @@ def load_queries(
     max_queries: int | None,
     query_prefix: str,
 ) -> tuple[list[str], list[str]]:
+    """Load, normalize, and optionally limit query records.
+
+    Args:
+        path: Query JSON path.
+        query_field: Explicit field to read, or `auto`.
+        max_queries: Optional maximum number of valid queries to load.
+        query_prefix: Optional prefix prepended before encoding.
+
+    Returns:
+        Query IDs and query texts aligned by index.
+
+    Raises:
+        ValueError: If no valid query text is loaded.
+    """
     raw_queries = load_json(path)
 
     query_ids: list[str] = []
@@ -650,6 +825,7 @@ def load_queries(
 
 
 def build_document_text(item: dict[str, Any]) -> str:
+    """Build the retrievable document text from title and abstract fields."""
     parts = [
         str(item.get("title", "")).strip(),
         str(item.get("abstract", "")).strip(),
@@ -659,12 +835,26 @@ def build_document_text(item: dict[str, Any]) -> str:
 
 @dataclass
 class FaissIndexHandle:
+    """Container for a FAISS index and optional GPU resource owner."""
+
     index: Any
     device: str
     gpu_resources: Any | None = None
 
 
 def load_corpus(path: Path) -> tuple[list[str], list[str]]:
+    """Load corpus documents and normalize IDs/text for retrieval.
+
+    Args:
+        path: Corpus JSON path. The file must contain a list of document
+            dictionaries.
+
+    Returns:
+        Pubkeys and document texts aligned by index.
+
+    Raises:
+        ValueError: If the corpus shape is invalid or no usable documents load.
+    """
     raw_corpus = load_json(path)
     if not isinstance(raw_corpus, list):
         raise ValueError("Corpus JSON must be a list of documents.")
@@ -713,6 +903,20 @@ def encode_texts(
     batch_size: int,
     label: str,
 ) -> np.ndarray:
+    """Encode texts with SentenceTransformers on CPU or one GPU.
+
+    Args:
+        model: SentenceTransformer model instance.
+        texts: Texts to encode.
+        batch_size: Preferred batch size.
+        label: Human-readable label used in progress messages.
+
+    Returns:
+        L2-normalized float32 embeddings.
+
+    Raises:
+        Exception: Re-raises non-OOM encoding failures.
+    """
     current_batch_size = batch_size
     while True:
         print(f"Encoding {label} ({len(texts)} items), batch_size={current_batch_size}...")
@@ -745,6 +949,21 @@ def encode_texts_multi_gpu(
     label: str,
     pool: Any,
 ) -> np.ndarray:
+    """Encode texts with SentenceTransformers' multi-process GPU pool.
+
+    Args:
+        model: SentenceTransformer model that owns the process pool.
+        texts: Texts to encode.
+        batch_size: Preferred batch size.
+        label: Human-readable label used in progress messages.
+        pool: Pool returned by `start_multi_process_pool`.
+
+    Returns:
+        L2-normalized float32 embeddings.
+
+    Raises:
+        Exception: Re-raises non-OOM encoding failures.
+    """
     current_batch_size = batch_size
     while True:
         print(
@@ -775,6 +994,15 @@ def encode_texts_multi_gpu(
 
 
 def build_faiss_index(corpus_embeddings: np.ndarray) -> FaissIndexHandle:
+    """Build an inner-product FAISS index over corpus embeddings.
+
+    Args:
+        corpus_embeddings: Float32 L2-normalized corpus embedding matrix.
+
+    Returns:
+        A FAISS index handle using GPU resources when available and supported,
+        otherwise a CPU index.
+    """
     dimension = corpus_embeddings.shape[1]
     cpu_index = faiss.IndexFlatIP(dimension)
     cpu_index.add(corpus_embeddings)
@@ -812,6 +1040,18 @@ def dense_search(
     index_handle: FaissIndexHandle,
     top_k: int,
 ) -> dict[str, list[str]]:
+    """Run dense nearest-neighbor search for all queries.
+
+    Args:
+        query_ids: Query IDs aligned with `query_embeddings`.
+        query_embeddings: Query embedding matrix.
+        corpus_pubkeys: Corpus IDs aligned with the FAISS index rows.
+        index_handle: FAISS index wrapper.
+        top_k: Maximum number of documents returned per query.
+
+    Returns:
+        Query-to-ranked-pubkeys mapping.
+    """
     effective_top_k = min(top_k, len(corpus_pubkeys))
     _, indices = index_handle.index.search(query_embeddings, effective_top_k)
 
@@ -847,6 +1087,37 @@ def hybrid_search(
     corpus_colbert_cache: list[np.ndarray] | None = None,
     query_log_interval: int = DEFAULT_LOG_EVERY_QUERIES,
 ) -> dict[str, list[str]]:
+    """Run BGE-M3 hybrid retrieval over dense candidates.
+
+    Dense FAISS search first selects an expanded candidate pool. Each candidate
+    is then rescored with weighted dense, sparse lexical, and ColBERT-style
+    late-interaction scores.
+
+    Args:
+        model: BGE-M3 model exposing dense, lexical, and ColBERT outputs.
+        query_ids: Query IDs aligned with `query_texts`.
+        query_texts: Query texts to encode for hybrid scoring.
+        corpus_pubkeys: Corpus IDs aligned with `corpus_texts` and the FAISS index.
+        corpus_texts: Corpus document texts.
+        index_handle: Dense FAISS candidate index.
+        top_k: Number of final documents returned per query.
+        candidate_multiplier: Multiplier used to size the dense candidate pool.
+        batch_size: Preferred BGE-M3 encoding batch size.
+        hybrid_max_length: Token length for sparse and ColBERT representations.
+        colbert_score_batch_size: Candidate batch size for tensor scoring.
+        dense_weight: Dense score contribution.
+        sparse_weight: Sparse lexical score contribution.
+        colbert_weight: ColBERT score contribution.
+        corpus_sparse_cache: Optional precomputed sparse corpus features.
+        corpus_colbert_cache: Optional precomputed ColBERT corpus features.
+        query_log_interval: Number of queries between progress logs.
+
+    Returns:
+        Query-to-ranked-pubkeys mapping.
+
+    Raises:
+        ValueError: If any required numeric parameter is invalid.
+    """
     if candidate_multiplier <= 0:
         raise ValueError("--candidate-multiplier must be greater than 0.")
     if hybrid_max_length <= 0:
@@ -925,6 +1196,7 @@ def hybrid_search(
             batch_size=colbert_score_batch_size,
         )
         dense_scores_row = np.asarray(dense_scores[row][: len(candidate_doc_indices)], dtype=np.float32)
+        # All score families are already aligned with `candidate_doc_indices`.
         final_scores = (
             dense_weight * dense_scores_row
             + sparse_weight * sparse_scores
@@ -953,6 +1225,15 @@ def hybrid_search(
 
 
 def save_results(path: Path, results: dict[str, list[str]]) -> None:
+    """Write retrieval results as Evaluator.java-compatible JSON.
+
+    Args:
+        path: Output JSON path.
+        results: Query-to-ranked-pubkeys mapping.
+
+    Side effects:
+        Creates the parent directory when needed and writes the JSON file.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as handle:
         json.dump(results, handle, indent=2, ensure_ascii=False)
@@ -960,6 +1241,18 @@ def save_results(path: Path, results: dict[str, list[str]]) -> None:
 
 
 def main() -> None:
+    """Execute the configured retrieval pipeline.
+
+    Side effects:
+        Reads query and corpus files, loads neural retrieval models, may allocate
+        substantial GPU/CPU memory, builds a FAISS index, and writes rankings to
+        the configured output path.
+
+    Raises:
+        ValueError: If CLI options are inconsistent or input files contain no
+            usable records.
+        ImportError: If the requested retrieval backend is unavailable.
+    """
     args = parse_args()
 
     if args.top_k <= 0:

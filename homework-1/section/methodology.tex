@@ -4,62 +4,88 @@
 We started from a lexical baseline based on Apache Lucene BM25 and progressively moved to a multi-stage neural pipeline.
 Early experiments focused on analyzer choices, stopword lists, and BM25 variants; these runs were useful to establish a stable
 baseline, but they also showed that lexical overlap alone is insufficient for this task.
-
-We therefore adopted a three-stage architecture that separates high-recall candidate generation from expensive neural ranking.
 \newline
-We implemented a three-stage pipeline (Figure~\ref{fig:pipeline}) for our information retrieval system, consisting of:
+We adopted a four-stage pipeline (Figure~\ref{fig:pipeline}) for our information retrieval system, consisting of:
 \begin{itemize}
-    \item \textbf{Query expansion}: We expanded the original query with additional context to bridge the gap between informal and scientific language.
-    \item \textbf{Retrieval}: We retrieved relevant documents from the corpus using the expanded query.
-    \item \textbf{Reranking}: We reranked the retrieved documents based on their relevance to the original query.
+    \item \textbf{Query Translation}: queries in French or German are first translated into English.
+    \item \textbf{Query expansion}: we expanded the English query with additional context to bridge the gap between informal and domain specific language.
+    \item \textbf{Retrieval}: we retrieved relevant documents from the corpus using the expanded query.
+    \item \textbf{Reranking}: we reranked the retrieved documents based on their relevance to the original query.
 \end{itemize}
 For each of these stages, we experimented with different models, chosing the ones that performed better in relation to the others.
 
 \begin{figure}
     \centering
-    \includegraphics[width=1\linewidth]{figure/pipeline}
+    \includegraphics[width=0.8\linewidth]{figure/pipeline.drawio}
     \caption{Three-stage pipeline for information retrieval.}
     \label{fig:pipeline}
 \end{figure}
 
+\subsection{Query translation} \label{sub:querytransl}
+In the preliminary stage of out pipeline non-English queries (French and German) are translated into English. This is done query by query using the model \texttt{utter-project/EuroLLM-9B-Instruct-2512} with the following prompt:
+\begin{promptbox}
+    \textit{
+        system: You are a professional translator.\\
+        Translate the user's text to English.\\
+        Output ONLY the English translation.\\
+        Do not include the original text, explanations, labels, or any other content.\\
+        \\
+        user: Translate this \{\textbf{French/German}\} text to English.\\
+        Output only the English translation, nothing else.\\
+        \\
+        \{\textbf{Query original text}\}
+    }
+\end{promptbox}
+
+The resulting English queries are then fed into the following step of our pipeline. 
+
 \subsection{Query Expansion} \label{sub:queryexp}
-The first step in our pipeline is query expansion: given the original query, we generate extra terms and tokens related to it.
-This serves two purposes: to increase the number of available tokens for a match, and to bridge the gap between the original
-informal query and the formal academic language used in the document corpus.\newline
-
-Originally, we experimented with PRF-style expansion using semantic retrieval with \texttt{BAAI/bge-large-en-v1.5}.
-We then explored different methods for expansion,
-including Pseudo-Relevance Feedback (PRF) and similarity with static word embeddings using Word2Vec,
-testing these on both the original and the preliminary expanded queries.\newline
-
-In the final architecture, we used a multilingual LLM-based expansion script (\texttt{query\_expansion\_multilingual.py},
-default model \texttt{meta-llama/Llama-3.2-1B}) to generate multiple retrieval-oriented views of each query.
-The model is prompted to produce distinct representations,
-tailored to our multi-stage retrieval needs:
+Following the translation phase, the English queries undergo a semantic and lexical expansion process. This stage is designed to bridge the vocabulary gap between the user's informal query and the formal academic language present in the scientific document corpus. Unlike previous iterations that relied on generative LLM re-phrasings, the current architecture utilizes a hybrid expansion strategy, combining deep semantic retrieval with linguistic analysis. The expansion process follows three main technical steps:
 \begin{itemize}
-    \item \textit{sparse}: A list of domain-specific keywords and technical synonyms (e.g., scientific nomenclature)
-    designed to maximize lexical overlap and mitigate the vocabulary mismatch in BM25-based retrieval.
-    \item \textit{dense}: A semantically enriched re-phrasing of the claim that provides a broader context, allowing the
-    bi-encoder in the next step of the architecture to produce more robust embeddings in the high-dimensional vector space.
-    \item \textit{ColBERT}: A structured, formal version of the claim (e.g., ``Serum levels and ICU admission'') that provides coherent
-    token sequences for fine-grained late-interaction scoring.
+    \item \textbf{Keyword Extraction}: We use the \texttt{spaCy} library (\texttt{en\_core\_web\_sm}) to perform Part-of-Speech (POS) tagging on the translated query. We specifically extract nouns (\texttt{NOUN}) and proper nouns (\texttt{PROPN}), which represent the core technical entities of the claim.
+    \item \textbf{Semantic Neighbor Retrieval}: The query is embedded using the \texttt{BAAI/bge-large-en-v1.5} model. We retrieve the top-5 most similar documents from the corpus to act as a source of domain-specific terminology. To ensure high-quality embeddings, we apply the BGE-specific instruction prefix: \textit{"Represent this sentence for searching relevant passages:"}.
+    \item \textbf{Term Frequency Selection}: Candidate expansion terms are extracted from the retrieved neighbors and weighted based on their frequency and the original semantic similarity score.
 \end{itemize}
 
-This multi-view expansion ensures that the downstream hybrid retriever can leverage both high-precision lexical matches
-and broad semantic overlaps. By generating these representations simultaneously within a single inference step of
-the same LLM,
-we maintain a coherent relationship between the different query ``views'', effectively providing a unified but multi-faceted
-context for the retrieval pipeline.\newline
+The final expanded query is constructed by concatenating the original translated text, the extracted POS keywords, and the top-15 most relevant expansion terms. This creates a high-density representation that maximizes the probability of overlap during the hybrid retrieval stage, ensuring that both specific technical nomenclature and broader semantic contexts are represented. The resulting JSON object preserves the original query metadata while adding an \texttt{expanded} field for the downstream retrieval framework.
 
-The resulting expanded queries are then fed into the multi-stage retrieval framework described next.
+% After the translation (if needed), the queries undergo expansion: given the original query, we generate extra terms and tokens related to it.
+% This serves two purposes: to increase the number of available tokens for a match, and to bridge the gap between the original
+% informal query and the formal academic language used in the document corpus.\newline
+
+% Originally, we experimented with PRF-style expansion using semantic retrieval with \texttt{BAAI/bge-large-en-v1.5}.
+% We then explored different methods for expansion,
+% including Pseudo-Relevance Feedback (PRF) and similarity with static word embeddings using Word2Vec,
+% testing these on both the original and the preliminary expanded queries.\newline
+
+% In the final architecture, we used a multilingual LLM-based expansion script (\texttt{query\_expansion\_multilingual.py},
+% default model \texttt{meta-llama/Llama-3.2-1B}) to generate multiple retrieval-oriented views of each query.
+% The model is prompted to produce distinct representations,
+% tailored to our multi-stage retrieval needs:
+% \begin{itemize}
+%     \item \textit{sparse}: A list of domain-specific keywords and technical synonyms (e.g., scientific nomenclature)
+%     designed to maximize lexical overlap and mitigate the vocabulary mismatch in BM25-based retrieval.
+%     \item \textit{dense}: A semantically enriched re-phrasing of the claim that provides a broader context, allowing the
+%     bi-encoder in the next step of the architecture to produce more robust embeddings in the high-dimensional vector space.
+%     \item \textit{ColBERT}: A structured, formal version of the claim (e.g., ``Serum levels and ICU admission'') that provides coherent
+%     token sequences for fine-grained late-interaction scoring.
+% \end{itemize}
+
+% This multi-view expansion ensures that the downstream hybrid retriever can leverage both high-precision lexical matches
+% and broad semantic overlaps. By generating these representations simultaneously within a single inference step of
+% the same LLM,
+% we maintain a coherent relationship between the different query ``views'', effectively providing a unified but multi-faceted
+% context for the retrieval pipeline.\newline
+
+% The resulting expanded queries are then fed into the multi-stage retrieval framework described next.
 
 \subsection{Retrieval} \label{sub:retrieval}
 The retrieval stage is designed as a high-recall candidate generator between query expansion and neural reranking. Its objective is not to make the final relevance decision, but to ensure that the true source paper is included in a sufficiently large candidate set for the subsequent, more expensive cross-encoder stage. For this reason, after experimenting with a Lucene BM25 baseline, BGE-M3 only on dense vectors, the final pipeline uses the hybrid BGE-M3 retriever.\\ 
 This choice reflects the nature of the task: social media claims often contain informal paraphrases, hashtags, named entities, numbers, and fragments of scientific terminology, so relying only on exact lexical overlap or only on dense semantic similarity would discard useful evidence.
 
-The retriever searches the fixed paper collection provided by the task organizers and named\\ \texttt{collection\_data.json}.\\ Each paper is represented at document level by the concatenation of its title and abstract, and the retrieved unit is always the paper \texttt{pubkey}. We did not split papers into smaller chunks because the task requires identifying the source publication rather than retrieving an evidence passage, and using one representation per paper avoids an additional chunk-to-document aggregation step. Although the collection also contains metadata such as venue and authors, the hybrid retriever uses only title and abstract, which are the fields consistently encoded for all documents.
+The retriever searches the fixed paper collection provided by the task organizers. Each paper is represented at document level by the concatenation of its title and abstract, and the retrieved unit is always the paper \texttt{pubkey}. We did not split papers into smaller chunks because the task requires identifying the source publication rather than retrieving an evidence passage, and using one representation per paper avoids an additional chunk-to-document aggregation step. Although the collection also contains metadata such as venue and authors, the hybrid retriever uses only title and abstract, which are the fields consistently encoded for all documents.
 
-The input queries are the multilingual expanded queries stored in \texttt{expanded\_queries\_multilingual\_merged.json},
+The input queries are the multilingual expanded queries stored in!!!!!!!!!!!!!!!!!!!!!!!! \texttt{expanded\_queries\_multilingual\_merged.json},
 produced by the expansion stage described above.
 
 The expansion step provides three views of the same information need: an \texttt{embedding} view for semantic matching, a \texttt{sparse} view for lexical and terminology-based evidence, and a \texttt{colbert} view for fine-grained token interaction. BGE-M3 is well suited to this setting because it can produce dense vectors, sparse lexical weights, and ColBERT-style multi-vector representations from the same multilingual encoder. Thus, the retriever can combine broad semantic matching with exact term evidence and token-level matching without switching between unrelated encoders.

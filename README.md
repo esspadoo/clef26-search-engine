@@ -22,35 +22,51 @@ The homeworks are carried out by groups of students and consists in participatin
 
 The repository is organised as follows:
 
-* `code`: this folder contains the source code of the developed system. See dedicated section below for more details.
-* `runs`: this folder contains the runs produced by the developed system.
-* `results`: this folder contains the performance scores of the runs.
+* `code`: this folder contains the source code of the developed system and all the previous attempts and tries.
+* `Analisi_Run.ods`: this file contains the details and some notes of the runs produced by the developed system. We chose this over other evaluation systems for the freedom and flexibility that it gives on noting and writing custom measures and notes
+* `results`: this folder contains the performance scores of the runs, fine-tuned models (and the code that brought to them) and some official/custom scripts to be able to score and upload our results on CLEF's systems.
 * `homework-1`: this folder contains the report describing the techniques applied and insights gained.
 * `homework-2`: this folder contains the final paper submitted to CLEF.
 * `slides`: this folder contains the slides used for presenting the conducted project.
 
+## Virtual environments
+This project had been run on Python 3.12.13, with two different virtual environments for the execution of python code. 
+
+- The one called "venv312" (used for translate_queries.py and evaluate_nemotronLora.py)
+
+- The one called "venv312FlagEmb" (used for Bi_encoder.py and for QueryExpansorBGE-large.py)
+
+To create the desired environment go to `/code/environment/{venv312 || venv312FlagEmb}` and run the command:
+`python -m venv .`
+
+After the creation, activate it and install the required dependencies provided in the respective requirements files, running the command: `python3 -m pip install -r requirements_{VENV_NAME}.txt`
+
 ## Execution of the code ##
+**Advice**: the following code has the only scope to provide a simple but comprehensive guide to use and the right order of execution of the programs developed in this project. The paths of programs' flags and absolute paths can vary based on where the files are saved and your personal configurations,especially for the JSON files. This project is meant for people who have at least a basic comprehension of search engines, information retrieval, python and Linux-based systems, not for the absolute beginner.
 ```
 #!/bin/bash
 #TOKEN OF HUGGING FACE TO DOWNLOAD MODELS
 export HF_TOKEN="hf_XXXXXXXXXXXXX"
 
 #VENV PYTHON 3.12
-source /home/baldanfabi/seupd2526-retrix/code/src/main/java/unipd/se/py/venv312/bin/activate
+source seupd2526-retrix/code/environment/venv312/bin/activate
 
-#VENV PYTHON 3.12 MA PER FLAG EMBEDDINGS
-#source /home/baldanfabi/seupd2526-retrix/code/src/main/java/unipd/se/py/venv312FlagEmb/bin/activate
+#VENV PYTHON 3.12 BUT WITH FLAG EMBEDDINGS
+#source seupd2526-retrix/code/environment/venv312FlagEmb/bin/activate
 
 
-cd /home/baldanfabi/seupd2526-retrix/code/py/
+cd seupd2526-retrix/code/py/
 
+# Remember to change the path of the right files to be able to compile them with this commands
 python3 translate_queries.py --input final_fr_test.json --lang fr \
     --output final_fr_TRADOTTOen_test.json
+
 
 python3 translate_queries.py --input final_de_test.json --lang de \
     --output final_de_TRADOTTOen_test.json
 
-# Remember to change the path in the program to the translated queries files
+
+# Remember to check the paths inside the programs to be sure that you are expanding or evaluation the right files
 python3 QueryExpansorBGE-large.py
 
 
@@ -59,7 +75,7 @@ python3 QueryExpansorBGE-large.py
 
 # Example to create the reranked results file for the english test set of CLEF 2026 CheckThat! task 1 
 python3 evaluate_nemotronLora.py \
---model_dir    models/reranker-nemotron-1bAarsen20252026/best \
+--model_dir    results/fineTuned_models/fineTune_nemotron/nemotronFT_Train2026-All2025/ \
 --base_model   nvidia/llama-nemotron-rerank-1b-v2 \
 --topics       final_en_test.json \
 --corpus       collection_data.json \

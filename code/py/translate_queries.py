@@ -1,25 +1,27 @@
 #!/usr/bin/env python3
 """
-translate_queries.py
-Traduce query multilingue (FR/DE) in inglese usando EuroLLM-9B-Instruct-2512.
-Usa HuggingFace pipeline per applicare correttamente il chat template,
-più un layer di pulizia per rimuovere artefatti nel testo generato.
+Translate multilingual CLEF queries from French or German into English.
 
-Licenza modello: Apache 2.0 — usabile senza restrizioni per CLEF.
+The script uses EuroLLM through the Hugging Face text-generation pipeline so the
+model's chat template is applied consistently. Generated text is post-processed
+to remove prompt echoes and common assistant-label artifacts before it is saved
+as a JSON query file.
 
-Uso:
+Model license: Apache 2.0.
+
+Usage:
   python translate_queries.py --input fr_train.json --lang fr --output fr_train_en.json
   python translate_queries.py --input de_train.json --lang de --output de_train_en.json
 
-Opzioni:
-  --input          Path al JSON delle query sorgente
-  --lang           Lingua sorgente: 'fr' oppure 'de'
-  --output         Path del JSON di output (query tradotte in EN)
-  --model          Modello HuggingFace (default: utter-project/EuroLLM-9B-Instruct-2512)
-  --batch_size     Query per batch (default: 8, sicuro per 9B su 24-48GB VRAM)
-  --max_new_tokens Token massimi per la traduzione (default: 256)
-  --cache_dir      Directory cache HuggingFace
-  --keep_original  Aggiunge 'text_original' con testo sorgente per verifica
+Options:
+  --input          Source query JSON path
+  --lang           Source language: 'fr' or 'de'
+  --output         Output JSON path with English translations
+  --model          Hugging Face model ID
+  --batch_size     Queries per generation batch
+  --max_new_tokens Maximum generated tokens per translation
+  --cache_dir      Hugging Face cache directory
+  --keep_original  Preserve the source text in `text_original`
 """
 
 import argparse
@@ -54,41 +56,55 @@ SYSTEM_PROMPT = (
     "Do not include the original text, explanations, labels, or any other content."
 )
 
-# Pattern di pulizia da applicare in ordine sull'output grezzo del modello.
-# Coprono tutti gli artefatti osservati nell'output di EuroLLM:
+# Cleanup patterns are applied in order to the raw model output. They cover
+# common EuroLLM artifacts observed during batched chat-template generation:
 #   - "English: \n assistant\n..."
 #   - "assistant\n..."
 #   - "English:\n..."
-#   - testo sorgente rimasto prima della traduzione
+#   - repeated prompt text before the translation
 CLEANUP_PATTERNS = [
-    # Rimuovi tutto fino a "assistant" (incluso) se presente
+    # Drop any echoed conversation prefix up to the assistant marker.
     (r"(?s)^.*?\bassistant\b\s*", ""),
-    # Rimuovi prefissi tipo "English:", "EN:", "Translation:", "Traduction:" ecc.
+    # Drop language and translation labels that should not reach Lucene.
     (r"(?i)^(english|en|translation|traduction|übersetzung)\s*:\s*", ""),
-    # Rimuovi il prompt che il modello ha ripetuto verbatim
+    # Drop the instruction phrase when the model repeats the prompt verbatim.
     (r"(?s)^.*?nothing else\.\s*", ""),
-    # Rimuovi righe che contengono ancora testo nella lingua sorgente
-    # (heuristic: righe con caratteri tedeschi/francesi tipici dopo la traduzione)
-    # — non applicato automaticamente, troppo aggressivo; gestito dal layer sopra
+    # Source-language line filters were intentionally left out because they were
+    # too aggressive for short multilingual queries.
 ]
 
 
 def clean_translation(raw: str) -> str:
-    """
-    Pulisce l'output grezzo del modello rimuovendo artefatti del prompt
-    e testo residuo nella lingua sorgente.
+    """Normalize a generated translation by removing known prompt artifacts.
+
+    Args:
+        raw: Raw assistant output returned by the generation pipeline.
+
+    Returns:
+        The cleaned English translation with empty lines removed.
     """
     text = raw.strip()
     for pattern, replacement in CLEANUP_PATTERNS:
         text = re.sub(pattern, replacement, text)
         text = text.strip()
-    # Rimuovi eventuali righe vuote iniziali
+    # Empty generated lines can otherwise become whitespace-only Lucene terms.
     text = "\n".join(line for line in text.splitlines() if line.strip())
     return text.strip()
 
 
 def build_messages(text: str, src_lang: str) -> list[dict]:
-    """Costruisce la lista di messaggi nel formato ChatML per EuroLLM."""
+    """Build the chat-template messages sent to EuroLLM.
+
+    Args:
+        text: Source-language query text.
+        src_lang: Two-letter source language code present in `LANG_NAMES`.
+
+    Returns:
+        A system/user message list compatible with the Hugging Face pipeline.
+
+    Raises:
+        KeyError: If `src_lang` is not configured in `LANG_NAMES`.
+    """
     lang_name = LANG_NAMES[src_lang]
     return [
         {"role": "system", "content": SYSTEM_PROMPT},
@@ -104,6 +120,17 @@ def build_messages(text: str, src_lang: str) -> list[dict]:
 
 
 def load_pipeline(model_name: str, cache_dir: str | None, device: str):
+    """Load the EuroLLM generation pipeline and configure tokenizer padding.
+
+    Args:
+        model_name: Hugging Face model identifier or local model path.
+        cache_dir: Optional Hugging Face cache directory.
+        device: Requested execution device; actual placement is delegated to
+            `device_map="auto"` for large-model loading.
+
+    Returns:
+        A configured text-generation pipeline.
+    """
     log.info(f"Caricamento pipeline: {model_name}")
     pipe = pipeline(
         "text-generation",
@@ -114,7 +141,7 @@ def load_pipeline(model_name: str, cache_dir: str | None, device: str):
         },
         device_map="auto",
     )
-    # Necessario per batch generation con decoder-only
+    # Decoder-only models require left padding for stable batched generation.
     pipe.tokenizer.padding_side = "left"
     if pipe.tokenizer.pad_token is None:
         pipe.tokenizer.pad_token = pipe.tokenizer.eos_token
@@ -134,13 +161,30 @@ def translate_all(
         max_new_tokens: int,
         keep_original: bool,
 ) -> list[dict]:
+    """Translate every query record and preserve the input JSON schema.
+
+    Args:
+        queries: Query dictionaries containing at least `index` and `text`.
+        src_lang: Two-letter source language code supported by `LANG_NAMES`.
+        pipe: Hugging Face text-generation pipeline.
+        batch_size: Number of queries sent to the pipeline per batch.
+        max_new_tokens: Maximum generated tokens per query.
+        keep_original: Whether to add `text_original` to each output record.
+
+    Returns:
+        Query dictionaries with translated `text` values and optional metadata.
+
+    Raises:
+        KeyError: If an input query lacks required keys or `src_lang` is invalid.
+    """
     total = len(queries)
     log.info(
         f"Inizio traduzione: {total} query | batch_size={batch_size} | "
         f"{LANG_NAMES[src_lang]} -> English"
     )
 
-    # Prepara tutti i messaggi
+    # Build messages up front so batching does not interleave prompt creation
+    # with model execution.
     all_messages = [build_messages(q["text"], src_lang) for q in queries]
 
     translated_texts = []
@@ -160,14 +204,13 @@ def translate_all(
         )
 
         for out in outputs:
-            # pipeline restituisce lista di dict; l'ultimo messaggio è la risposta
+            # The pipeline returns the chat history; the last message is the
+            # assistant answer when chat-template output is structured.
             raw = out[0]["generated_text"]
-            # generated_text include l'intero storico messaggi come lista o stringa
             if isinstance(raw, list):
-                # Formato lista: l'ultimo elemento è il messaggio dell'assistant
                 assistant_content = raw[-1]["content"]
             else:
-                # Formato stringa: estrai solo la parte dopo l'ultimo "assistant"
+                # String output is cleaned by the regex layer above.
                 assistant_content = raw
 
             cleaned = clean_translation(assistant_content)
@@ -199,6 +242,13 @@ def translate_all(
 
 
 def main():
+    """Parse CLI arguments, translate the input queries, and write JSON output.
+
+    Side effects:
+        Loads a large Hugging Face model, reads the input JSON file, creates the
+        output directory if needed, writes the translated JSON file, and logs a
+        small qualitative sample.
+    """
     parser = argparse.ArgumentParser(
         description="Traduce query FR/DE -> EN con EuroLLM-9B-Instruct (Apache 2.0)"
     )
@@ -247,7 +297,7 @@ def main():
         json.dump(translated, f, ensure_ascii=False, indent=2)
     log.info(f"Output salvato: {output_path}")
 
-    # Verifica qualitativa su un campione
+    # Log a small sample for manual quality checks without changing output data.
     log.info("--- Campione di traduzioni (prime 5) ---")
     for i in range(min(5, len(queries))):
         log.info(f"[idx={queries[i]['index']}]")

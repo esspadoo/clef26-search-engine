@@ -7,29 +7,37 @@ Neural retrieval methods have been proposed to mitigate the lexical mismatch bet
 
 Between initial retrieval and final ranking, many modern systems adopt multi-stage pipelines that trade off efficiency and effectiveness. Late-interaction models such as ColBERT preserve fine-grained token-level matching while remaining substantially more scalable than fully pairwise neural scoring over the whole collection \citep{KhattabZaharia2020}. Likewise, transformer-based rerankers have become a common second-stage component for refining an initial candidate set with stronger query-document interactions \citep{NogueiraEtAl2020}. These approaches motivate retrieval architectures that first generate a manageable set of candidates and then apply more expensive relevance estimation only where it is most useful.
 
-
-
-???????????????????????????
-???????????????????????????
-???????????????????????????
-???????????????????????????
-Se fine tuning va bene è da aggiungere parte su hard negatives e ricerca embedding incrociati usate:
-https://arxiv.org/html/2505.18366v1
-https://huggingface.co/blog/train-reranker
-
 ???????????????????????????
 ???????????????????????????
 ???????????????????????????
 ???????????????????????????
 
+% TODO: enable only if the fine-tuned reranker yields positive results:
 
+% Recent work on domain-specific retrieval argues that rerankers benefit from hard
+% negatives that are semantically close to the query but still contextually distinct
+% from the true positive, because they force the model to learn finer relevance
+% boundaries than those induced by random or purely lexical negatives
+% \citep{MeghwaniEtAl2025HardNegatives}.// In particular, Meghwani et al. propose
+% selecting hard negatives by combining multiple bi-encoder embedding spaces and
+% dimensionality reduction, with the goal of improving the semantic quality of the
+% negatives presented during reranker training.
+%
+% This perspective is consistent with recent practical guidance for training
+% cross-encoder rerankers with Sentence Transformers
+% \citep{Aarsen2025TrainReranker}; in that setting, fast embedding-based retrieval
+% is used to build a candidate pool, while the cross-encoder jointly scores
+% query-document pairs and benefits from negatives mined from nearby embedding
+% neighborhoods rather than from trivial mismatches.
+%
+% This setup closely matches our pipeline, where an embedding-based retriever first
+% produces a candidate set and a cross-encoder reranker then reorders it and for this reason
+% we experimented with fine-tuning the reranker on hard negatives mined from the retriever’s
+% semantically similar but non-relevant candidates.
 
-
-
-
-
-
-
-
+???????????????????????????
+???????????????????????????
+???????????????????????????
+???????????????????????????
 
 Our work is also related to the broader literature on automatic claim verification and, more specifically, to the CheckThat! shared tasks, which have addressed the detection, verification, and analysis of claims in social media across several editions \citep{ElsayedEtAl2019,BarronCedenoEtAl2020,NakovEtAl2021}; however, source retrieval for scientific web claims differs from standard verification tasks in an important way: the system is not asked to classify a claim as true or false, but to recover the original scientific paper implicitly referenced in the post and for this reason, the task is closely connected to evidence retrieval, while also requiring robust matching between informal multilingual posts and formal scientific documents.

@@ -4,7 +4,7 @@
 The dataset used in this work is organized as a document retrieval task: given a short social-media post
 that implicitly refers to a scientific result, the system must identify the corresponding paper from a
 fixed candidate pool. In the version available in our project, the data are divided into a shared document
-collection (\texttt{code/data/collection\_data.json}) and language-specific query files for English,
+collection (\path{code/data/collection_data.json}) and language-specific query files for English,
 German, and French; this setting is inherently multilingual on the query side, while the candidate pool
 is shared across all languages.
 
@@ -15,8 +15,8 @@ compact but informative document view for both retrieval and reranking. The coll
 language, so all queries, regardless of their language, must be matched against the same set of candidate
 papers.
 
-The raw query set is organized into multiple JSON files under \texttt{code/data/Train\_set/},
-\texttt{code/data/Dev\_set/}, and \texttt{code/data/Test\_set/}, each containing the text of the social
+The raw query set is organized into multiple JSON files under \path{code/data/Train_set/},
+\path{code/data/Dev_set/}, and \path{code/data/Test_set/}, each containing the text of the social
 media post together with its identifier (\texttt{index}); in the training and development portions of
 the dataset, each query is further paired with the gold \texttt{pubkey} of the scientific paper
 implicitly referenced in the post, which enables supervised model development and internal evaluation.

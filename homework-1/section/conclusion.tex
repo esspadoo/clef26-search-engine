@@ -1,4 +1,13 @@
 \section{Conclusions and Future Work}
 \label{sec:conclusion}
 
-Our experiments show that the strongest improvement comes from neural reranking, especially when a hybrid retriever is followed by \texttt{nvidia/llama-nemotron-rerank-1b-v2} and then refined by a second reranking stage based on fine-tuned ModernBERT. In contrast, analyzer tuning and other lexical adjustments produced only limited gains when compared with the impact of hybrid retrieval and multi-stage reranking. Future work will focus on improving the multilingual side of the pipeline and on further refining the second-stage reranker.
+This project explored a practical, reproducible pipeline for document retrieval built around three complementary stages: (1) query expansion (LLM-based and PRF-style), (2) high-recall candidate generation via a hybrid BGE-M3 retriever that fuses dense, sparse and ColBERT-like signals, and (3) cascaded neural reranking where a cross-encoder (\texttt{nvidia/llama-nemotron-rerank-1b-v2}) is applied first and a second, more specialized reranker refines the top candidates.
+
+Our empirical findings and practical experience can be summarized as follows:
+
+- Neural reranking yields the largest single improvement in ranked quality: applying a cross-encoder to a high-recall candidate set substantially increases MRR@5 and precision at small cutoffs compared to lexical baselines alone.
+- A hybrid retrieval approach (dense + sparse + ColBERT) produces a robust candidate set that improves downstream reranker performance; careful weighting of the signals and the use of a candidate multiplier were important to maintain recall.
+- Query expansion (both multilingual LLM-based expansion and PRF-style expansion with BGE) improved recall in many cases, but gains depend on the quality of expansions and on downstream reranker robustness to noisy terms.
+- Traditional analyzer and BM25 tuning remain valuable: they provide a competitive, computationally cheap baseline and act as a useful fallback when GPU resources are limited.
+
+Limitations.  The experiments reported in this repository are exploratory and optimized for research reproducibility rather than for production latency. Some components (several reranker variants, PRF prototypes) remain in the codebase for further study and are not tuned exhaustively. Multilingual evaluation is supported by expanded query files, but full per-language ablation and larger-scale fine-tuning are left for future work.
