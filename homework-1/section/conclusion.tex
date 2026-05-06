@@ -1,13 +1,34 @@
 \section{Conclusions and Future Work}
 \label{sec:conclusion}
 
-This project explored a practical, reproducible pipeline for document retrieval built around three complementary stages: (1) query expansion (LLM-based and PRF-style), (2) high-recall candidate generation via a hybrid BGE-M3 retriever that fuses dense, sparse and ColBERT-like signals, and (3) cascaded neural reranking where a cross-encoder (\texttt{nvidia/llama-nemotron-rerank-1b-v2}) is applied first and a second, more specialized reranker refines the top candidates.
+This project explored a practical, reproducible pipeline for document retrieval built around three complementary stages:
+\begin{enumerate}
+    \item Query expansion: LLM-based and PRF-style;
+    \item High-recall candidate generation via a hybrid BGE-M3 retriever that fuses dense, sparse and ColBERT-like signals; 
+    \item Neural reranking where a cross-encoder (a fine-tuned version of \texttt{nvidia/llama-nemotron-rerank-1b-v2}) is applied to refine the top candidates.
+\end{enumerate}
 
 Our empirical findings and practical experience can be summarized as follows:
+\begin{itemize}
+    \item Neural reranking yields the largest single improvement in ranked quality: applying a cross-encoder to a high-recall candidate set substantially increases MRR@5 and precision at small cutoffs compared to lexical baselines alone. This improvement is even more noticeable if the re-ranking model is fine-tuned.
+    \item A hybrid retrieval approach (dense + sparse + ColBERT) produces a robust candidate set that improves downstream re-ranker performance, reducing significantly the inference time to produce the re-ranked results while maintaining good averall performance. Careful weighting of the signals and the use of a candidate multiplier were important to maintain recall.
 
-- Neural reranking yields the largest single improvement in ranked quality: applying a cross-encoder to a high-recall candidate set substantially increases MRR@5 and precision at small cutoffs compared to lexical baselines alone.
-- A hybrid retrieval approach (dense + sparse + ColBERT) produces a robust candidate set that improves downstream reranker performance; careful weighting of the signals and the use of a candidate multiplier were important to maintain recall.
-- Query expansion (both multilingual LLM-based expansion and PRF-style expansion with BGE) improved recall in many cases, but gains depend on the quality of expansions and on downstream reranker robustness to noisy terms.
-- Traditional analyzer and BM25 tuning remain valuable: they provide a competitive, computationally cheap baseline and act as a useful fallback when GPU resources are limited.
 
-Limitations.  The experiments reported in this repository are exploratory and optimized for research reproducibility rather than for production latency. Some components (several reranker variants, PRF prototypes) remain in the codebase for further study and are not tuned exhaustively. Multilingual evaluation is supported by expanded query files, but full per-language ablation and larger-scale fine-tuning are left for future work.
+
+    ?????????????????FINIRE CON RISULTATIIIII SU RUN
+        ?????????????????FINIRE CON RISULTATIIIII
+            ?????????????????FINIRE CON RISULTATIIIII
+                ?????????????????FINIRE CON RISULTATIIIII
+                    ?????????????????FINIRE CON RISULTATIIIII
+    \item Hybrid retrieval approach is a valuable resource and even re-ranking on a large number of the first top-k elements doesn't enhance MRR@5 by a significant value while inference time grows significantly. Here comes into play the quality of the retrieval model to discern noise from important documents. For example for Alibaba-NLP/gte-reranker-modernbert-base \cite{tongyi_lab_gte_reranker_modernbert_base_2023} (0.1B parameters) this value is around 130 (+0.012 and +0.002 MRR@5 compared to the run with top-k=100 from experimental tries in our system) while for nvidia/llama-nemotron-rerank-1b-v2\cite{nvidia_llama_nemotron_rerank_1b_v2_2026} this value is around 2000 (+0.015 Recall@100 and +0.004 MRR@5 if compared to the run with top-k=100 but passed from 5:30:00 hours to generate the re-ranked results for the topk=100 to more than 48 hours for topk ). If you tried to go over this values the MRR@5 began to decrease.
+    \item Traditional analyzer and BM25 tuning remain valuable: they provide a competitive, computationally cheap baseline and act as a useful fallback when GPU resources are limited.
+\end{itemize}
+
+
+\subsection{Limitations and future work}
+The experiments reported in this repository are exploratory and optimized for research reproducibility rather than for production latency. The lack of suitable hardware components has hindered the project's development, imposing time constraints and limitations on the size of the models used. Looking ahead there are several areas for future development. First of all a first fine-tuning of the embedding model used and a better one for the re-ranker model would certainly increase the performance of the system. The opportunity to have the datasets of the last year CLEF \cite{checkthat_lab_clef2025} that were very similar to the ones of this year avoided us to use techniques as data augmentation but it would be interesting to discover if they could have improve our system's performance. A more in-depth studying of hard-negatives techniques for the fine-tuning of the re-ranker would also be interesting such as "Hard Negative Mining for Domain-Specific Retrieval in Enterprise Systems"\cite{meghwani2025hardnegativeminingdomainspecific} and others.
+
+
+\section {Declaration on Generative AI}
+During the writing of this paper the authors used Grammarly and DeepL
+for grammar and spelling checks and Claude Sonnet 4.6 for writing-style improvement, citation management and formatting assistance. After using these tools, the authors reviewed and edited the content as needed and take full responsibility for the publication’s content.
