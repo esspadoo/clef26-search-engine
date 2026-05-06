@@ -74,16 +74,7 @@ email=marco.tessari.8@studenti.unipd.it
 %% The abstract is a short summary of the work to be presented in the
 %% article.
 \begin{abstract}
-We present the results of the retrix group for the CheckThat! 2026 - Task 1, in which the goal is to identify the scientific paper implicitly referenced in a social media post. The input consists of short, noisy and usually informal posts that mention scientific findings without providing explicit links or explicit citations.
-
-\setlength{\leftskip}{30pt}        % nessun rientro aggiuntivo per l'elenco
-\setlength{\parindent}{30pt} 
-Our approach is a three-stage pipeline: 
-\begin{enumerate}
-    \item For non-English posts a translation to English is performed using \texttt{utter-project/EuroLLM-9B-Instruct-2512}. Then the queries are expanded using BAAI/bge-large-en-v1.5 and the terms of the top 5 documents (ranked by similarity);
-    \item Hybrid retrieval with \texttt{BAAI/bge-m3}, combining dense FAISS search with sparse lexical matching and ColBERT multi-vector scoring ($s = 0.5\,s_\text{dense} + 0.15\,s_\text{sparse} + 0.35\,s_\text{colbert}$); 
-    \item Cross-encoder neural reranking with a fine-tuned version of \texttt{nvidia/llama-nemotron-rerank-1b-v2} trained on hard negatives mined from Clef CheckThat!Task 4b of 2025 and on the english training set of the Clef CheckThat! Task 1 of 2026. On the development set our best system achieves an average MRR@5 of 0.71 (second place in the official dashboard).
-\end{enumerate}
+We present the results of the retrix group for the CheckThat! 2026 - Task 1, in which the goal is to identify the scientific paper implicitly referenced in a social media post. The input consists of short, noisy and usually informal posts that mention scientific findings without providing explicit links or explicit citations. In our pipeline, first we translate the non-English posts, then we expand them using an embedding model and the terms of the top 5 documents (ranked by similarity). After that, the first research is an hybrid retrieval system that combines dense FAISS search with sparse lexical matching and ColBERT multi-vector scoring ($s = 0.5\,s_\text{dense} + 0.15\,s_\text{sparse} + 0.35\,s_\text{colbert}$). Finally a neural re-ranking with a fine-tuned cross-encoder model is performed. On the development set our best system achieves an average MRR@5 of 0.71 (second place in the official dashboard).
 \end{abstract}
 
 %%
@@ -117,8 +108,6 @@ Our approach is a three-stage pipeline:
 
 
 \section{Misc [TO BE REMOVED]}
-INTRODUCTION.TEX E RELATED.TEX SONO DA FINIRE QUANDO AVREMO I RISULTATI COMPLETI (VEROSIMILMENTE QUALCHE GIORNO PRIMA DELLA CONSEGNA) NON CANCELLARE QUESTA FRASE E NON MODIFICARE QUEI FILE (SE NON PER AGGIUNGERE COSE UTILI) SENNÒ MI DIMENTICO DI FARLO E PRENDIAMO 5/20 GRAZIE :) <3
-
 
 
 % \subsection{Tex Files}
