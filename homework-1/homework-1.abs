@@ -1,8 +1,1 @@
-We present the results of the retrix group for the CheckThat! 2026 - Task 1, in which the goal is to identify the scientific paper implicitly referenced in a social media post. The input consists of short, noisy and usually informal posts that mention scientific findings without providing explicit links or explicit citations.
-
-Our approach is designed to operate in a multilingual setting, as the dataset includes posts in English, German, and French. To handle this, we used multi-lingual language models.
-
-DA FINIRE CON PIPELINE FINALEEEEEE
-DA FINIRE CON PIPELINE FINALEEEEEE
-DA FINIRE CON PIPELINE FINALEEEEEE
-DA FINIRE CON PIPELINE FINALEEEEEE
+We present the results of the retrix group for the CheckThat! 2026 - Task 1, in which the goal is to identify the scientific paper implicitly referenced in a social media post. The input consists of short, noisy and usually informal posts that mention scientific findings without providing explicit links or explicit citations. In our pipeline, first we translate the non-English posts, then we expand them using an embedding model and the terms of the top 5 documents (ranked by similarity). After that, the first research is an hybrid retrieval system that combines dense FAISS search with sparse lexical matching and ColBERT multi-vector scoring ($s = 0.5\,s_\text{dense} + 0.15\,s_\text{sparse} + 0.35\,s_\text{colbert}$). Finally a neural re-ranking with a fine-tuned cross-encoder model is performed. On the development set our best system achieves an average MRR@5 of 0.71 (second place in the official dashboard).

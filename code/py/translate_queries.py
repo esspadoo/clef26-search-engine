@@ -131,7 +131,7 @@ def load_pipeline(model_name: str, cache_dir: str | None, device: str):
     Returns:
         A configured text-generation pipeline.
     """
-    log.info(f"Caricamento pipeline: {model_name}")
+    log.info(f"Loading pipeline: {model_name}")
     pipe = pipeline(
         "text-generation",
         model=model_name,
@@ -149,7 +149,7 @@ def load_pipeline(model_name: str, cache_dir: str | None, device: str):
     if torch.cuda.is_available():
         mem = torch.cuda.get_device_properties(0).total_memory / 1e9
         log.info(f"GPU: {torch.cuda.get_device_name(0)} ({mem:.0f}GB VRAM)")
-    log.info("Pipeline caricata | bfloat16 | device_map=auto")
+    log.info("Pipeline loaded | bfloat16 | device_map=auto")
     return pipe
 
 
@@ -179,7 +179,7 @@ def translate_all(
     """
     total = len(queries)
     log.info(
-        f"Inizio traduzione: {total} query | batch_size={batch_size} | "
+        f"Beginning translation: {total} query | batch_size={batch_size} | "
         f"{LANG_NAMES[src_lang]} -> English"
     )
 
@@ -224,7 +224,7 @@ def translate_all(
 
     elapsed_total = time.time() - t0
     log.info(
-        f"Completato: {total} query in {elapsed_total:.1f}s "
+        f"Completed: {total} queries in {elapsed_total:.1f}s "
         f"({total / elapsed_total:.1f} q/s)"
     )
 
@@ -250,38 +250,38 @@ def main():
         small qualitative sample.
     """
     parser = argparse.ArgumentParser(
-        description="Traduce query FR/DE -> EN con EuroLLM-9B-Instruct (Apache 2.0)"
+        description="Translates query FR/DE -> EN with EuroLLM-9B-Instruct (Apache 2.0)"
     )
-    parser.add_argument("--input",    required=True,  help="Path JSON query sorgente")
-    parser.add_argument("--lang",     required=True,  choices=["fr", "de"], help="Lingua sorgente")
-    parser.add_argument("--output",   required=True,  help="Path JSON output (EN)")
+    parser.add_argument("--input",    required=True,  help="Source path of the queries in JSON format")
+    parser.add_argument("--lang",     required=True,  choices=["fr", "de"], help="Source language")
+    parser.add_argument("--output",   required=True,  help="Output path of the queries in JSON format (EN)")
     parser.add_argument("--model",    default=DEFAULT_MODEL)
     parser.add_argument(
         "--batch_size", type=int, default=8,
-        help="Query per batch (default: 8 — sicuro per 9B bfloat16 su 24GB VRAM)",
+        help="Queries per batch (default: 8 — safe for 9B bfloat16 on 24GB VRAM)",
     )
     parser.add_argument(
         "--max_new_tokens", type=int, default=256,
-        help="Token massimi generati per traduzione (default: 256)",
+        help="Max generated tokens per translation (default: 256)",
     )
     parser.add_argument("--cache_dir", default=None)
     parser.add_argument(
         "--keep_original", action="store_true",
-        help="Aggiunge 'text_original' per verifica qualità",
+        help="Adds 'text_original' for quality check",
     )
     args = parser.parse_args()
 
     if not torch.cuda.is_available():
-        log.warning("CUDA non disponibile — inferenza su CPU sara' molto lenta")
+        log.warning("CUDA not available — CPU inference will be very slow")
 
     input_path = Path(args.input)
     if not input_path.exists():
-        log.error(f"File non trovato: {input_path}")
+        log.error(f"File not found: {input_path}")
         sys.exit(1)
 
     with open(input_path, encoding="utf-8") as f:
         queries = json.load(f)
-    log.info(f"Caricate {len(queries)} query da {input_path}")
+    log.info(f"Loaded {len(queries)} queries from {input_path}")
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     pipe = load_pipeline(args.model, args.cache_dir, device)
@@ -295,10 +295,10 @@ def main():
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         json.dump(translated, f, ensure_ascii=False, indent=2)
-    log.info(f"Output salvato: {output_path}")
+    log.info(f"Output saved: {output_path}")
 
     # Log a small sample for manual quality checks without changing output data.
-    log.info("--- Campione di traduzioni (prime 5) ---")
+    log.info("--- Translation sample (first 5) ---")
     for i in range(min(5, len(queries))):
         log.info(f"[idx={queries[i]['index']}]")
         if args.keep_original:

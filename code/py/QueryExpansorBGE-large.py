@@ -155,9 +155,9 @@ if DEVICE == "cuda":
     try:
         model.half()
         print("fp16 enabled")
-        print(f"VRAM stimata corpus encode: ~{(1024 * 4 * CORPUS_BATCH_SIZE) / 1024**2:.0f} MB/batch")
+        print(f"exstimated VRAM for corpus encode: ~{(1024 * 4 * CORPUS_BATCH_SIZE) / 1024**2:.0f} MB/batch")
     except Exception as e:
-        print(f"fp16 non disponibile ({e}), uso fp32")
+        print(f"fp16 not available ({e}), using fp32")
 
 # ──────────────────────────────────────────────────────────────
 # Load data

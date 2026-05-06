@@ -125,16 +125,16 @@ def load_model_and_tokenizer(model_dir: str, base_model_id: str):
     lora_mode = is_lora_adapter(model_dir)
 
     if lora_mode:
-        logger.info(f"Rilevato adapter LoRA in: {model_dir}")
+        logger.info(f"LoRA adapter detected in: {model_dir}")
         logger.info(f"Base model: {base_model_id}")
     else:
-        logger.info(f"Pesi completi rilevati, caricamento diretto da: {model_dir}")
+        logger.info(f"Full weights detected, loading directly from: {model_dir}")
         base_model_id = model_dir  # Use model_dir as the direct checkpoint source.
 
     # ------------------------------------------------------------------
     # Tokenizer: LoRA adapters do not change the base tokenizer vocabulary.
     # ------------------------------------------------------------------
-    logger.info("Caricamento tokenizer...")
+    logger.info("Loading tokenizer...")
     tokenizer = AutoTokenizer.from_pretrained(
         base_model_id,
         trust_remote_code=True,
@@ -147,7 +147,7 @@ def load_model_and_tokenizer(model_dir: str, base_model_id: str):
     # Config: set pad_token_id explicitly to avoid classification-head padding
     # ambiguities across transformers versions.
     # ------------------------------------------------------------------
-    logger.info("Caricamento config...")
+    logger.info("Loading config...")
     config = AutoConfig.from_pretrained(
         base_model_id,
         trust_remote_code=True,
@@ -158,7 +158,7 @@ def load_model_and_tokenizer(model_dir: str, base_model_id: str):
     # ------------------------------------------------------------------
     # Base model.
     # ------------------------------------------------------------------
-    logger.info("Caricamento modello base...")
+    logger.info("Loading base model...")
     base_model = AutoModelForSequenceClassification.from_pretrained(
         base_model_id,
         config=config,
@@ -174,15 +174,15 @@ def load_model_and_tokenizer(model_dir: str, base_model_id: str):
     if lora_mode:
         from peft import PeftModel
 
-        logger.info("Caricamento e fusione adapter LoRA...")
+        logger.info("Loading and merging LoRA adapter...")
         peft_model = PeftModel.from_pretrained(
             base_model,
             model_dir,
             torch_dtype=torch.bfloat16,
         )
-        logger.info("Esecuzione merge_and_unload()...")
+        logger.info("Executing merge_and_unload()...")
         model = peft_model.merge_and_unload()
-        logger.info("Fusione completata — modello pronto per inferenza")
+        logger.info("Merge completed — model ready for inference")
     else:
         model = base_model
 
@@ -240,7 +240,7 @@ def batch_score(
             scores.extend(batch_scores)
         except RuntimeError as e:
             if "out of memory" in str(e).lower():
-                logger.warning(f"OOM nel batch {i//batch_size} → fallback a score 0.5")
+                logger.warning(f"OOM in batch {i//batch_size} → fallback to score 0.5")
                 torch.cuda.empty_cache()
                 scores.extend([0.5] * len(batch))
             else:
@@ -261,26 +261,26 @@ def main():
         optional local metrics.
     """
     parser = argparse.ArgumentParser(
-        description="Valuta Nemotron fine-tunato (LoRA o pesi completi)"
+        description="Evaluate fine-tuned Nemotron (LoRA or full weights)"
     )
     parser.add_argument("--model_dir",    required=True,
-                        help="Directory con adapter LoRA o pesi completi")
+                        help="Directory with LoRA adapter or full weights")
     parser.add_argument("--base_model",   type=str, default=BASE_MODEL_ID,
-                        help="HF model ID del base model (usato solo se model_dir è un adapter LoRA)")
+                        help="HF model ID of base model (only used if model_dir is a new LoRA adapter)")
     parser.add_argument("--topics",       required=True)
     parser.add_argument("--corpus",       required=True)
     parser.add_argument("--bm25_results", required=True,
-                        help="JSON {qid: [pubkey, ...]} dal primo stage BM25")
+                        help="JSON {qid: [pubkey, ...]} from the first BM25 stage")
     parser.add_argument("--output",       required=True,
-                        help="JSON output per Evaluator.java")
+                        help="JSON output for Evaluator.java")
     parser.add_argument("--top_k",        type=int, default=100,
-                        help="Quanti candidati BM25 il reranker vede per query")
+                        help="How many BM25 candidates the reranker sees per query")
     parser.add_argument("--rerank_top",   type=int, default=20,
-                        help="Quanti pubkey scrivere nel JSON finale per query")
+                        help="How many pubkeys to write in the final JSON per query")
     parser.add_argument("--batch_size",   type=int, default=32)
     parser.add_argument("--max_length",   type=int, default=512)
     parser.add_argument("--qrels",        type=str, default=None,
-                        help="qrels.json per metriche locali (opzionale, richiede ranx)")
+                        help="qrels.json for local metrics (optional, requires ranx)")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -294,7 +294,7 @@ def main():
     # ------------------------------------------------------------------
     # Data loading.
     # ------------------------------------------------------------------
-    logger.info("Caricamento topics e corpus...")
+    logger.info("Loading topics and corpus...")
     topics       = load_json(args.topics)
     corpus_list  = load_json(args.corpus)
     bm25_results = load_json(args.bm25_results)
@@ -302,7 +302,7 @@ def main():
     pubkey_to_text = {str(item["pubkey"]): doc_to_text(item) for item in corpus_list}
     qid_to_text    = {str(t["index"]): t.get("text", "") for t in topics}
 
-    logger.info(f"Corpus: {len(pubkey_to_text)} documenti | Topics: {len(qid_to_text)} query")
+    logger.info(f"Corpus: {len(pubkey_to_text)} documents | Topics: {len(qid_to_text)} queries")
 
     # ------------------------------------------------------------------
     # Reranking.
@@ -344,7 +344,7 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(final_results, f, indent=2)
-    logger.info(f"Risultati salvati in: {out_path}")
+    logger.info(f"Results saved in: {out_path}")
 
     # ------------------------------------------------------------------
     # Optional local metrics; ranx is intentionally not a hard dependency.
@@ -365,13 +365,13 @@ def main():
 
             metrics = evaluate(Qrels(qrels_dict), Run(run_dict), ["mrr@5", "map", "ndcg@10"])
             logger.info("=" * 50)
-            logger.info("METRICHE LOCALI (ranx)")
+            logger.info("LOCAL METRICS (ranx)")
             for m, v in metrics.items():
                 logger.info(f"  {m:15s}: {v:.4f}")
             logger.info("=" * 50)
 
         except ImportError:
-            logger.warning("ranx non installato → pip install ranx")
+            logger.warning("ranx not installed → pip install ranx")
 
 
 if __name__ == "__main__":
