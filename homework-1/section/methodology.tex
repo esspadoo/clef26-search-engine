@@ -4,26 +4,41 @@
 We started from a lexical baseline based on Apache Lucene BM25 and progressively moved to a multi-stage neural pipeline.
 Early experiments focused on analyzer choices, stopword lists, and BM25 variants; these runs were useful to establish a stable
 baseline, but they also showed that lexical overlap alone is insufficient for this task.
-
-We therefore adopted a three-stage architecture that separates high-recall candidate generation from expensive neural ranking.
 \newline
-We implemented a three-stage pipeline (Figure~\ref{fig:pipeline}) for our information retrieval system, consisting of:
+We adopted a four-stage pipeline (Figure~\ref{fig:pipeline}) for our information retrieval system, consisting of:
 \begin{itemize}
-    \item \textbf{Query expansion}: We expanded the original query with additional context to bridge the gap between informal and scientific language.
-    \item \textbf{Retrieval}: We retrieved relevant documents from the corpus using the expanded query.
-    \item \textbf{Reranking}: We reranked the retrieved documents based on their relevance to the original query.
+    \item \textbf{Query Translation}: queries in French or German are first translated into English.
+    \item \textbf{Query expansion}: we expanded the English query with additional context to bridge the gap between informal and domain specific language.
+    \item \textbf{Retrieval}: we retrieved relevant documents from the corpus using the expanded query.
+    \item \textbf{Reranking}: we reranked the retrieved documents based on their relevance to the original query.
 \end{itemize}
 For each of these stages, we experimented with different models, chosing the ones that performed better in relation to the others.
 
 \begin{figure}
     \centering
-    \includegraphics[width=1\linewidth]{figure/pipeline}
+    \includegraphics[width=0.8\linewidth]{figure/pipeline.drawio}
     \caption{Three-stage pipeline for information retrieval.}
     \label{fig:pipeline}
 \end{figure}
 
+\subsection{Query translation} \label{sub:querytransl}
+In the preliminary stage of out pipeline non-English queries (French and German) are translated into English. This is done query by query using the model \texttt{utter-project/EuroLLM-9B-Instruct-2512} with the following prompt:
+\begin{promptbox}
+    \textit{
+        system: You are a professional translator.\newline
+        Translate the user's text to English.\newline
+        Output ONLY the English translation.\newline
+        Do not include the original text, explanations, labels, or any other content.\newline\newline
+        user: Translate this \{\textbf{French/German}\} text to English.\newline
+        Output only the English translation, nothing else.\newline\newline
+        \{\textbf{Query original text}\}
+    }
+\end{promptbox}
+
+The resulting English queries are then fed into the following step of our pipeline. 
+
 \subsection{Query Expansion} \label{sub:queryexp}
-The first step in our pipeline is query expansion: given the original query, we generate extra terms and tokens related to it.
+Given the original query, we generate extra terms and tokens related to it.
 This serves two purposes: to increase the number of available tokens for a match, and to bridge the gap between the original
 informal query and the formal academic language used in the document corpus.\newline
 
