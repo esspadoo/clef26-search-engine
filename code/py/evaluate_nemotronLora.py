@@ -78,16 +78,20 @@ def doc_to_text(item: dict) -> str:
     """Build the passage text used by the cross-encoder.
 
     Args:
-        item: Corpus record that may contain `title`, `abstract`, or `text`.
+        item: Corpus record that may contain `title`, `abstract` and `authors`.
 
     Returns:
         A non-normalized passage string assembled from available fields.
     """
     title    = item.get("title", "").strip()
     abstract = item.get("abstract", "").strip()
-    if title and abstract:
-        return f"{title}. {abstract}"
-    return title or abstract or item.get("text", "")
+    authors  = item.get("authors", "").strip()
+    
+    body = f"{title}. {abstract}" if title and abstract else title or abstract
+    if authors:
+        body = f"{body} Authors: {authors}"
+    return body or item.get("text", "")
+
 
 
 def make_prompt(query: str, passage: str) -> str:
