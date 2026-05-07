@@ -23,6 +23,11 @@ import java.util.concurrent.*;
 public class Main {
 
     /**
+     * Creates the application entry-point holder.
+     */
+    private Main() {}
+
+    /**
      * Runs the retrieval evaluation workflow.
      * The paper collection and query set are always loaded. If a third
      * argument is provided, it is interpreted as the path to a JSON file
