@@ -1,38 +1,36 @@
-# --- ANALISI RISULTATI TUNING ---
+# --- TUNING RESULTS ANALYSIS ---
 ```{r}
 
-# 1. Caricamento dati
+# 1. Loading data
 data <- read.csv("tuning_results.csv")
 
-# Pulizia: rimuoviamo i trial falliti (Recall = 0) per non sporcare la statistica
+# Removal of failed trials (Recall = 0)
 clean_data <- data[data$recall100 > 0, ]
 
-cat("Analisi su", nrow(clean_data), "trial validi.\n")
+cat("Analysis on", nrow(clean_data), "valid trials.\n")
 
-# 2. Correlazioni
-# Vediamo quali parametri si muovono insieme alla Recall
+# 2. Correlations
 correlations <- cor(clean_data)
-cat("\n--- Correlazione con Recall@100 ---\n")
+cat("\n--- Correlation with Recall@100 ---\n")
 print(correlations[,"recall100"])
 
-# 3. Modello Lineare (Il "cuore" dell'analisi)
-# Questo ci dice quanto ogni parametro influisce sulla Recall tenendo fissi gli altri
+# 3. Linear model
+# Parameter influence on result (keeping the others fixed)
 model <- lm(recall100 ~ threshold + max_terms + w1 + w2 + w3, data = clean_data)
 
-cat("\n--- Significatività dei Parametri ---\n")
+cat("\n--- Parameter significance ---\n")
 summary_model <- summary(model)
 print(summary_model$coefficients)
 
-# 4. Visualizzazione Rapida
-par(mfrow=c(2,3)) # Griglia 2x3 per i grafici
+# 4. Quick view
+par(mfrow=c(2,3))
 
-# Scatter plots per ogni variabile vs Recall
+# Scatter plots for variables vs recall
 plot(clean_data$threshold, clean_data$recall100, main="Threshold vs Recall", col="blue", pch=20)
 plot(clean_data$max_terms, clean_data$recall100, main="Max Terms vs Recall", col="red", pch=20)
 plot(clean_data$w1, clean_data$recall100, main="W1 vs Recall", col="darkgreen", pch=20)
 plot(clean_data$w2, clean_data$recall100, main="W2 vs Recall", col="orange", pch=20)
 plot(clean_data$w3, clean_data$recall100, main="W3 vs Recall", col="purple", pch=20)
 
-# Reset del layout
 par(mfrow=c(1,1))
 ```
