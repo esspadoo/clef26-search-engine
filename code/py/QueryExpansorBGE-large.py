@@ -21,6 +21,7 @@ from sentence_transformers import SentenceTransformer, util
 from collections import Counter
 import unicodedata
 import emoji
+from pathlib import Path
 
 # ──────────────────────────────────────────────────────────────
 # Config
@@ -31,7 +32,10 @@ QUERY_BATCH_SIZE  = 32
 TOP_K_DOCS        = 5
 TOP_K_TERMS       = 15
 SPACY_BATCH_SIZE  = 128
-DATA_BASE         = "../../../../../../data"
+SCRIPT_PATH = Path(__file__).resolve()
+CODE_ROOT = SCRIPT_PATH.parents[1] 
+REPO_ROOT = SCRIPT_PATH.parents[2]
+DATA_BASE = CODE_ROOT / "data"
 
 MODEL_NAME = "BAAI/bge-large-en-v1.5"
 

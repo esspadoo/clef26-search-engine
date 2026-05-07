@@ -47,8 +47,8 @@ DEFAULT_CPU_THREADS = 6
 
 SCRIPT_PATH = Path(__file__).resolve()
 # These relative parents match the repository layout used by the coursework.
-CODE_ROOT = SCRIPT_PATH.parents[6] 
-REPO_ROOT = SCRIPT_PATH.parents[7]
+CODE_ROOT = SCRIPT_PATH.parents[1] 
+REPO_ROOT = SCRIPT_PATH.parents[2]
 
 DEFAULT_QUERIES = CODE_ROOT / "data" / "expanded_queries_bge_large_frDEV_en.json"
 DEFAULT_CORPUS = CODE_ROOT / "data" / "collection_data.json"

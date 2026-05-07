@@ -37,7 +37,7 @@ public class Main {
      *             path, and {@code args[2]} is the optional path to a JSON
      *             file containing re-ranked results required for evaluation
      */
-    static void main(String[] args) {
+    public static void main(String[] args) {
         int cores = Runtime.getRuntime().availableProcessors();
         System.out.println("Starting evaluation [cores=" + cores + "]");
 
