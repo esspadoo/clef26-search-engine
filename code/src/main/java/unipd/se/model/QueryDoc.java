@@ -12,11 +12,6 @@ package unipd.se.model;
 public class QueryDoc implements SearchQuery {
 
     /**
-     * Creates an empty query record.
-     */
-    public QueryDoc() {}
-
-    /**
      * Unique identifier of the query in the dataset.
      */
     public String index;

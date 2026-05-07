@@ -16,11 +16,6 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 public class Paper {
 
     /**
-     * Creates an empty paper record.
-     */
-    public Paper() {}
-
-    /**
      * Unique identifier of the paper in the dataset.
      */
     public String pubkey;

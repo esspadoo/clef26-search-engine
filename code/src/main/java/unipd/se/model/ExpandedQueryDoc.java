@@ -16,11 +16,6 @@ package unipd.se.model;
 public class ExpandedQueryDoc extends QueryDoc {
 
     /**
-     * Creates an empty expanded query record.
-     */
-    public ExpandedQueryDoc() {}
-
-    /**
      * Original text of the query before expansion.
      */
     public String original;
