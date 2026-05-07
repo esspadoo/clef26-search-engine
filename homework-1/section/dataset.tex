@@ -1,43 +1,61 @@
 \section{Dataset}
 \label{sec:dataset}
 
-The dataset used in this work is organized as a source-retrieval task in which, given a social-media post expressing a
-scientific claim and implicitly referring to a scientific publication without linking to it explicitly, the system is
-required to identify the corresponding paper within a fixed pool of candidate documents. The benchmark is multilingual
-on the query side, as posts are provided in English, German, and French, whereas all queries are matched against the
-same shared collection of scientific papers.
+The dataset consisted of 10,000 scientific publication that had to be paired with tweets-like posts written in three languages: German, French and English. There aren't explicit references such as URLs in any query revised but any tweet contains implicit references to a scientific paper such as mention of the authors or key-words related to the paper. The datasets files are all in JSON format. The publications' dataset contains the columns pubkey (unique identifier), title, abstract, venue / location and authors while the queries' datasets contain the columns index, pubkey (ID of the positive scientific paper that has to be matched with the query) and text.
 
-The document collection consists of 10,000 scientific publications, each identified by a unique \texttt{pubkey} and
-described through the fields \texttt{title}, \texttt{abstract}, \texttt{venue}, and \texttt{authors}; in our pipeline,
-each candidate document is represented by the concatenation of title and abstract, a choice that provides a compact yet
-informative textual representation for both retrieval and reranking, while preserving a uniform document space across
-all languages.
 
-The query data are organized by language and by split: for English, German, and French, both the training and
-development portions contain the query identifier (\texttt{index}), the post text, and the gold \texttt{pubkey} of the
-referenced paper, thus supporting supervised training as well as model selection and internal evaluation, the released
-test files, instead, include only the query identifier and the post text, without the corresponding gold document
-identifier.
+\begin{table}[htbp]
+\centering
+\caption{Dataset statistics by language}
+\label{tab:query_stats}
+\begin{tabular}{l l l r r r r r r}
+\toprule
+\multirow{2}{*}{Split} & \multirow{2}{*}{Language} & \multirow{2}{*}{File} 
+& \multicolumn{2}{c}{Queries} 
+& \multicolumn{4}{c}{Length (tokens)} \\
+\cmidrule(lr){4-5} \cmidrule(lr){6-9}
+& & & \# & \% & Min & Median & Max & Mean \\
+\midrule
 
-The Table~\ref{tab:dataset-stats} reports the size of all the data splits considered in our experiments.
+\multirow{3}{*}{Train}
+& EN & en\_train.json & 14977 & 77.8 & 2 & 33 & 57 & 31.5 \\
+& FR & fr\_train.json & 2807  & 14.6 & 2 & 33 & 57 & 31.5 \\
+& DE & de\_train.json & 1460  & 7.6  & 2 & 33 & 57 & 31.5 \\
+\textit{Total} & & & \textbf{19244} & \textbf{100} & \textbf{2} & \textbf{33} & \textbf{57} & \textbf{31.5} \\
 
-\begin{center}
-    \captionof{table}{Dataset statistics for the version used in our experiments.}
-    \label{tab:dataset-stats}
-    \begin{tabular}{lcccc}
-        \toprule
-        Split & EN & DE & FR & Total \\
-        \midrule
-        Train & 14,977 & 1,460 & 2,807 & 19,244 \\
-        Dev   & 3,905  & 386   & 702   & 4,993 \\
-        Test  & 6,076  & 876   & 1,220 & 8,172 \\
-        \bottomrule
-    \end{tabular}
-\end{center}
+\midrule
 
-This setting is particularly challenging because the queries take the form of short, noisy, and informal social-media
-posts, while the target documents are substantially longer scientific texts written in a more formal and
-information-dense style. As a result, the system must bridge a marked gap in both length and linguistic register between
-the two sides of the retrieval problem; moreover, the multilingual nature of the benchmark further increases the
-difficulty, since queries in different languages must all be matched against the same shared document collection,
-requiring the model to combine semantic matching with cross-lingual generalization.
+\multirow{3}{*}{Dev}
+& EN & en\_dev.json & 3905 & 78.2 & 5 & 33 & 60 & 31.7 \\
+& FR & fr\_dev.json & 702  & 14.1 & 5 & 33 & 60 & 31.7 \\
+& DE & de\_dev.json & 386  & 7.7  & 5 & 33 & 60 & 31.7 \\
+\textit{Total} & & & \textbf{4993} & \textbf{100} & \textbf{5} & \textbf{33} & \textbf{60} & \textbf{31.7} \\
+
+\midrule
+
+\multirow{3}{*}{Test}
+& EN & final\_en\_test.json & 6076 & 74.4 & 5 & 33 & 58 & 31.9 \\
+& FR & final\_fr\_test.json & 1220 & 14.9 & 5 & 33 & 58 & 31.9 \\
+& DE & final\_de\_test.json & 876  & 10.7 & 5 & 33 & 58 & 31.9 \\
+\textit{Total} & & & \textbf{8172} & \textbf{100} & \textbf{5} & \textbf{33} & \textbf{58} & \textbf{31.9} \\
+
+\midrule
+
+\multicolumn{3}{l}{\textbf{Overall Total}} 
+& \textbf{32409} & & \textbf{2} & \textbf{33} & \textbf{60} & \textbf{31.7} \\
+
+\bottomrule
+\end{tabular}
+
+\vspace{2mm}
+\small{Note: Percentages are computed within each type of datasets (e.g. train percentages are computed between all the training datasets and so on.}
+\end{table}
+
+Figure \ref{fig:query_token_length_distribution} compares lengths distribution of tokens across train, dev and test datasets. All three datasets share similar distributions, with the same median value and similar length value peaks. 
+
+\begin{figure}[htbp]
+  \centering
+  \includegraphics[width=1\linewidth]{figure/query_token_lengths.pdf}
+  \caption{Train, dev and test datasets' distribution of query token length. }
+   \label{fig:query_token_length_distribution}
+\end{figure}
