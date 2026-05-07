@@ -1,16 +1,16 @@
 """
 finetune_modernbert_crossencoder.py
 
-Fine-tuning di ModernBERT-large CrossEncoder, versione aggiornata
-compatibile con il dataset prodotto da prepare_data_from_nemotron.py.
+Fine-tuning of ModernBERT-large CrossEncoder, updated version
+compatible with the dataset produced by prepare_data_from_nemotron.py.
 
-Differenze rispetto a finetune_modernbert_crossencoder.py:
-  - Legge direttamente train_pairs.jsonl / dev_pairs.jsonl (già pronti)
-  - Non si occupa di costruire hard negatives (già fatto da prepare_data_from_nemotron.py)
-  - Calcola pos_weight dinamicamente dal ratio reale del dataset
-  - Evaluator costruito dal dev set (per CrossEncoderRerankingEvaluator)
+Differences compared to finetune_modernbert_crossencoder.py:
+    - Reads train_pairs.jsonl / dev_pairs.jsonl directly (already prepared)
+    - Does not handle hard negatives construction (already done by prepare_data_from_nemotron.py)
+    - Dynamically calculates pos_weight from the actual dataset ratio
+    - Evaluator built from the dev set (for CrossEncoderRerankingEvaluator)
 
-Uso:
+Usage:
   python finetune_modernbert_crossencoder.py \
     --train_jsonl training_data/train_pairs.jsonl \
     --dev_jsonl   training_data/dev_pairs.jsonl \
@@ -50,12 +50,12 @@ def load_jsonl(path: str) -> list[dict]:
             line = line.strip()
             if line:
                 rows.append(json.loads(line))
-    log.info(f"Caricato {path}: {len(rows):,} righe")
+    log.info(f"Loaded {path}: {len(rows):,} rows")
     return rows
 
 
 def rows_to_hf_dataset(rows: list[dict]) -> Dataset:
-    """Converte lista di {query, passage, label} in HuggingFace Dataset."""
+    """Convers a list of {query, passage, label} in HuggingFace Dataset."""
     return Dataset.from_dict({
         "query":   [r["query"]   for r in rows],
         "passage": [r["passage"] for r in rows],
@@ -69,14 +69,14 @@ def build_reranking_eval_samples(
         seed: int = 42,
 ) -> list[dict]:
     """
-    Costruisce samples per CrossEncoderRerankingEvaluator dal dev set.
-    Raggruppa le righe per qid e costruisce:
+    Builds samples for CrossEncoderRerankingEvaluator from the dev set.
+    Groups the rows by qid and builds:
       {"query": ..., "positive": [...], "documents": [...]}
     """
     qid_groups = defaultdict(lambda: {"positive": [], "documents": []})
 
     for row in dev_rows:
-        qid = row.get("qid", row["query"])   # fallback: usa query text come chiave
+        qid = row.get("qid", row["query"])   # fallback: uses query text as key
         qid_groups[qid]["query"] = row["query"]
         qid_groups[qid]["documents"].append(row["passage"])
         if row["label"] == 1:
@@ -102,21 +102,21 @@ def build_reranking_eval_samples(
 
 def compute_pos_weight(rows: list[dict]) -> float:
     """
-    Calcola pos_weight = n_neg / n_pos dal dataset reale.
-    Questo è il valore corretto per BinaryCrossEntropyLoss,
-    migliore del semplice num_hard_neg fisso.
+    Calculates pos_weight = n_neg / n_pos from the real dataset.
+    This is the correct value for BinaryCrossEntropyLoss,
+    better than a simple fixed num_hard_neg.
     """
     n_pos = sum(1 for r in rows if r["label"] == 1)
     n_neg = sum(1 for r in rows if r["label"] == 0)
     ratio = n_neg / max(1, n_pos)
-    log.info(f"pos_weight calcolato: {ratio:.2f} ({n_neg:,} neg / {n_pos:,} pos)")
+    log.info(f"pos_weight calculated: {ratio:.2f} ({n_neg:,} neg / {n_pos:,} pos)")
     return ratio
 
 
 def main():
     import argparse
     parser = argparse.ArgumentParser(
-        description="Fine-tuning ModernBERT-large CrossEncoder (v2 con jsonl pre-built)"
+        description="Fine-tuning ModernBERT-large CrossEncoder (v2 with pre-built jsonl)"
     )
     parser.add_argument("--train_jsonl",  required=True)
     parser.add_argument("--dev_jsonl",    required=True)
@@ -134,8 +134,8 @@ def main():
 
     random.seed(args.seed)
 
-    # ── 1. Carica dati ─────────────────────────────────────────────────────
-    log.info("Caricamento dataset...")
+    # ── 1. Loading data ─────────────────────────────────────────────────────
+    log.info("Loading dataset...")
     train_rows = load_jsonl(args.train_jsonl)
     dev_rows   = load_jsonl(args.dev_jsonl)
 
@@ -144,8 +144,8 @@ def main():
 
     log.info(f"Train: {len(train_dataset):,} | Dev: {len(dev_dataset):,}")
 
-    # ── 2. Modello ─────────────────────────────────────────────────────────
-    log.info(f"Caricamento modello: {args.model_name}")
+    # ── 2. Model ─────────────────────────────────────────────────────────
+    log.info(f"Loading model: {args.model_name}")
     model = CrossEncoder(
         args.model_name,
         max_length=args.max_length,
@@ -156,7 +156,7 @@ def main():
         ),
     )
 
-    # ── 3. Loss con pos_weight dinamico ────────────────────────────────────
+    # ── 3. Loss with dynamic pos_weight ────────────────────────────────────
     pos_weight = compute_pos_weight(train_rows)
     loss = BinaryCrossEntropyLoss(
         model=model,
@@ -164,7 +164,7 @@ def main():
     )
 
     # ── 4. Evaluator ───────────────────────────────────────────────────────
-    log.info("Costruzione evaluator reranking...")
+    log.info("Building evaluator reranking...")
     eval_samples = build_reranking_eval_samples(dev_rows, max_queries=500, seed=args.seed)
     evaluator = CrossEncoderRerankingEvaluator(
         samples=eval_samples,
@@ -174,7 +174,7 @@ def main():
     )
 
     # Baseline pre-training
-    log.info("Baseline (modello non fine-tuned):")
+    log.info("Baseline (non fine-tuned model):")
     evaluator(model)
 
     # ── 5. Training args ───────────────────────────────────────────────────
@@ -221,15 +221,15 @@ def main():
         evaluator=evaluator,
     )
 
-    log.info("Avvio training...")
+    log.info("Launching training...")
     trainer.train()
 
-    # ── 7. Valutazione finale ───────────────────────────────────────────────
-    log.info("Valutazione finale:")
+    # ── 7. Final evaluation ───────────────────────────────────────────────
+    log.info("Final evaluation:")
     final_metrics = evaluator(model)
-    log.info(f"Metriche finali: {final_metrics}")
+    log.info(f"Final metrics: {final_metrics}")
 
-    # ── 8. Salvataggio ─────────────────────────────────────────────────────
+    # ── 8. Storing ─────────────────────────────────────────────────────
     final_dir = output_dir / "final"
     final_dir.mkdir(parents=True, exist_ok=True)
     model.save_pretrained(str(final_dir))
@@ -237,9 +237,9 @@ def main():
     with open(output_dir / "final_metrics.json", "w") as f:
         json.dump(final_metrics, f, indent=2)
 
-    log.info(f"✓ Modello salvato in {final_dir}")
+    log.info(f"✓ Model stored in {final_dir}")
     log.info(
-        f"\nPer usarlo nel pipeline:\n"
+        f"\nTo use it in the pipeline pipeline:\n"
         f"  python rerank_with_crossencoder.py \\\n"
         f"    --model_dir {final_dir} \\\n"
         f"    --bm25_run  <run.txt> --corpus <corpus.tsv> --queries <queries.tsv>"

@@ -1,30 +1,30 @@
 """
 rerank_with_finetuned_crossencoder.py
 
-Reranka i risultati già rerankati da Nemotron usando il CrossEncoder ModernBERT fine-tuned.
+Reranks the results already reranked by Nemotron using the fine-tuned ModernBERT CrossEncoder.
 
 Input:
-  - models/modernbert-large-retrix-nemotron-distilled/final  (modello fine-tuned)
-  - reranked_results_nemotron_topk400.json  {query_index: [doc_id, ...]}
-  - collection_data.json                   [{pubkey, title, abstract, ...}]
-  - en_train.json                          [{index, text, pubkey}]  ← per le query
+    - models/modernbert-large-retrix-nemotron-distilled/final  (fine-tuned model)
+    - reranked_results_nemotron_topk400.json  {query_index: [doc_id, ...]}
+    - collection_data.json                   [{pubkey, title, abstract, ...}]
+    - en_train.json                          [{index, text, pubkey}]  ← for the queries
 
 Output:
-  - reranked_results_modernbert_ft_topkN.json   {query_index: [doc_id, ...]}
-    (stesso formato del Nemotron run, drop-in nel tuo pipeline)
+    - reranked_results_modernbert_ft_topkN.json   {query_index: [doc_id, ...]}
+        (same format of the Nemotron run, drop-in in the pipeline)
 
 Pipeline:
-  BM25 → Nemotron (top 400) → ModernBERT fine-tuned (top N) → Evaluator.java
+    BM25 → Nemotron (top 400) → fine-tuned ModernBERT (top N) → Evaluator.java
 
-Uso:
-  python rerank_with_finetuned_crossencoder.py \
-    --model_dir    models/modernbert-large-retrix-nemotron-distilled/final \
-    --nemotron_run reranked_results_nemotron_topk400.json \
-    --collection   collection_data.json \
-    --queries      en_train.json \
-    --output       reranked_results_modernbert_ft_top100.json \
-    --rerank_depth 100 \
-    --batch_size   64
+Usage:
+    python rerank_with_finetuned_crossencoder.py \
+        --model_dir    models/modernbert-large-retrix-nemotron-distilled/final \
+        --nemotron_run reranked_results_nemotron_topk400.json \
+        --collection   collection_data.json \
+        --queries      en_train.json \
+        --output       reranked_results_modernbert_ft_top100.json \
+        --rerank_depth 100 \
+        --batch_size   64
 """
 
 import json
@@ -54,11 +54,11 @@ def clean_tweet(text: str) -> str:
     return text
 
 
-# ── Caricamento file JSON ─────────────────────────────────────────────────────
+# ── Loading file JSON ─────────────────────────────────────────────────────
 def load_collection(path: str, max_chars: int = 2000) -> dict[str, str]:
     """
-    Carica collection_data.json.
-    Ritorna {str(pubkey): "title. abstract"}
+    Loads collection_data.json.
+    Returns {str(pubkey): "title. abstract"}
     """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
@@ -72,14 +72,14 @@ def load_collection(path: str, max_chars: int = 2000) -> dict[str, str]:
         if text:
             corpus[key] = text
 
-    log.info(f"Corpus caricato: {len(corpus):,} documenti  ← {path}")
+    log.info(f"Corpus loaded: {len(corpus):,} documents  ← {path}")
     return corpus
 
 
 def load_queries(path: str) -> dict[str, str]:
     """
-    Carica en_train.json (o qualsiasi file con {index, text, pubkey}).
-    Ritorna {str(index): query_text_cleaned}
+    Loads en_train.json (or any file with {index, text, pubkey}).
+    Returns {str(index): query_text_cleaned}
     """
     with open(path, encoding="utf-8") as f:
         data = json.load(f)
@@ -89,22 +89,22 @@ def load_queries(path: str) -> dict[str, str]:
         qid          = str(item["index"])
         queries[qid] = clean_tweet(item["text"])
 
-    log.info(f"Queries caricate: {len(queries):,}  ← {path}")
+    log.info(f"Queries loaded: {len(queries):,}  ← {path}")
     return queries
 
 
 def load_nemotron_run(path: str) -> dict[str, list[str]]:
     """
-    Carica reranked_results_nemotron_topk400.json.
-    Formato: {query_index: [doc_id_rank1, doc_id_rank2, ...]}
-    Chiavi e valori vengono normalizzati a stringa.
+    Loads reranked_results_nemotron_topk400.json.
+    Format: {query_index: [doc_id_rank1, doc_id_rank2, ...]}
+    Keys and values are normalized to string.
     """
     with open(path, encoding="utf-8") as f:
         raw = json.load(f)
 
     run = {str(k): [str(d) for d in v] for k, v in raw.items()}
     total_docs = sum(len(v) for v in run.values())
-    log.info(f"Nemotron run caricato: {len(run):,} queries, {total_docs:,} doc totali  ← {path}")
+    log.info(f"Nemotron run loaded: {len(run):,} queries, {total_docs:,} total documents  ← {path}")
     return run
 
 
@@ -118,9 +118,9 @@ def score_query(
         device:     str,
 ) -> list[tuple[str, float]]:
     """
-    Calcola score per tutti i documenti di una query.
-    Ritorna lista di (doc_id, score) NON ordinata.
-    Gestisce OOM riducendo il batch_size a metà.
+    Calculates scores for all documents of a query.
+    Returns an UNORDERED list of (doc_id, score).
+    Handles OOM by reducing the batch_size by half.
     """
     pairs  = [[query, doc] for doc in docs]
     scores = _predict_with_oom_fallback(model, pairs, batch_size)
@@ -132,7 +132,7 @@ def _predict_with_oom_fallback(
         pairs:      list[list[str]],
         batch_size: int,
 ) -> list[float]:
-    """predict() con fallback su OOM: dimezza il batch finché ce la fa."""
+    """predict() with fallback on OOM: halves the batch until it succeeds."""
     current_bs = batch_size
     while current_bs >= 1:
         try:
@@ -142,7 +142,7 @@ def _predict_with_oom_fallback(
                 show_progress_bar=False,
                 convert_to_numpy=True,
             )
-            # scores può essere array 1-D o scalare
+            # scores can be a 1D array or a scalar
             if isinstance(scores, (float, int)):
                 scores = [float(scores)]
             else:
@@ -150,20 +150,20 @@ def _predict_with_oom_fallback(
             return scores
 
         except torch.cuda.OutOfMemoryError:
-            log.warning(f"OOM con batch_size={current_bs}. Provo con {current_bs // 2}...")
+            log.warning(f"OOM with batch_size={current_bs}. Trying with {current_bs // 2}...")
             torch.cuda.empty_cache()
             gc.collect()
             current_bs //= 2
 
-    # Ultima risorsa: processo uno per uno senza autocast
-    log.error("OOM anche con batch_size=1. Restituisco score 0.0 per tutti.")
+    # Last resort
+    log.error("OOM even with batch_size=1. Returning score 0.0 for everything.")
     return [0.0] * len(pairs)
 
 
 # ── Sanity check ──────────────────────────────────────────────────────────────
 def sanity_check(results: dict, nemotron_run: dict, rerank_depth: int):
     if not results:
-        log.error("SANITY CHECK FAILED: output vuoto!")
+        log.error("SANITY CHECK FAILED: output empty!")
         return
 
     n_out   = len(results)
@@ -174,9 +174,9 @@ def sanity_check(results: dict, nemotron_run: dict, rerank_depth: int):
     log.info("── Sanity check ──────────────────────────────")
     log.info(f"  Queries in input (Nemotron): {n_in:,}")
     log.info(f"  Queries in output:           {n_out:,}  ({coverage:.1%} coverage)")
-    log.info(f"  Avg doc per query:           {avg_len:.1f}  (atteso: ≤{rerank_depth})")
+    log.info(f"  Avg doc per query:           {avg_len:.1f}  (expected: ≤{rerank_depth})")
 
-    # Campiona una query per ispezione manuale
+    # Sample a query for manual inspection
     sample_qid    = next(iter(results))
     sample_top5   = results[sample_qid][:5]
     log.info(f"  Sample qid={sample_qid} top-5:")
@@ -188,31 +188,31 @@ def sanity_check(results: dict, nemotron_run: dict, rerank_depth: int):
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser(
-        description="Reranking con CrossEncoder ModernBERT fine-tuned sui risultati Nemotron"
+        description="Reranking with fine-tuned ModernBERT CrossEncoder on Nemotron results"
     )
     parser.add_argument("--model_dir",    required=True,
-                        help="Path al modello fine-tuned (es. models/.../final)")
+                        help="Path to the fine-tuned model (e.g. models/.../final)")
     parser.add_argument("--nemotron_run", required=True,
                         help="reranked_results_nemotron_topk400.json")
     parser.add_argument("--collection",  required=True,
                         help="collection_data.json")
     parser.add_argument("--queries",     required=True,
-                        help="en_train.json (contiene index + text delle query)")
+                        help="en_train.json (cantains query's index + text)")
     parser.add_argument("--output",      required=True,
                         help="Path output JSON, es. reranked_results_modernbert_ft_top100.json")
     parser.add_argument("--rerank_depth", type=int, default=100,
-                        help="Quanti doc dal Nemotron run considerare (default: 100)")
+                        help="How many docs from the Nemotron run to consider (default: 100)")
     parser.add_argument("--batch_size",  type=int, default=64,
                         help="Batch size per CrossEncoder.predict (default: 64)")
     parser.add_argument("--max_doc_chars", type=int, default=4000,
-                        help="Troncamento testo documenti in caratteri (default: 2000)")
+                        help="Max character per document (default: 2000)")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
     log.info(f"Device: {device}")
 
-    # ── 1. Carica modello ──────────────────────────────────────────────────
-    log.info(f"Caricamento CrossEncoder da {args.model_dir} ...")
+    # ── 1. Load model ──────────────────────────────────────────────────
+    log.info(f"Loading CrossEncoder from {args.model_dir} ...")
     model = CrossEncoder(
         args.model_dir,
         device=device,
@@ -220,7 +220,7 @@ def main():
     )
     log.info(f"  max_length={model.max_length}, num_labels={model.num_labels}")
 
-    # ── 2. Carica dati ─────────────────────────────────────────────────────
+    # ── 2. Load data ─────────────────────────────────────────────────────
     corpus       = load_collection(args.collection, max_chars=args.max_doc_chars)
     queries      = load_queries(args.queries)
     nemotron_run = load_nemotron_run(args.nemotron_run)
@@ -231,17 +231,17 @@ def main():
     n_empty_docs = 0
 
     for qid, nemotron_docs in tqdm(nemotron_run.items(), desc="Reranking"):
-        # Query mancante nel file queries
+        # Missing queries in the file
         if qid not in queries:
             n_missing_q += 1
             continue
 
         query = queries[qid]
 
-        # Prendi i primi rerank_depth documenti dal Nemotron run
+        # Take the first rerank_depth documents from the Nemotron run
         candidate_ids = nemotron_docs[:args.rerank_depth]
 
-        # Filtra documenti presenti nel corpus
+        # Filter documents in the corpus
         valid_ids  = [d for d in candidate_ids if d in corpus]
         valid_docs = [corpus[d] for d in valid_ids]
 
@@ -249,7 +249,7 @@ def main():
             n_empty_docs += 1
             continue
 
-        # Scoraggio
+        # Scoring
         scored = score_query(
             model=model,
             query=query,
@@ -259,24 +259,24 @@ def main():
             device=device,
         )
 
-        # Ordina per score decrescente
+        # Sort by decreasing score
         ranked    = sorted(scored, key=lambda x: x[1], reverse=True)
         results[qid] = [doc_id for doc_id, _ in ranked]
 
-    log.info(f"Query mancanti nel file queries: {n_missing_q}")
-    log.info(f"Query senza documenti nel corpus: {n_empty_docs}")
+    log.info(f"Missing queries in the file: {n_missing_q}")
+    log.info(f"Queries without document in the corpus: {n_empty_docs}")
 
     # ── 4. Sanity check ────────────────────────────────────────────────────
     sanity_check(results, nemotron_run, args.rerank_depth)
 
-    # ── 5. Salvataggio ─────────────────────────────────────────────────────
+    # ── 5. Storing ─────────────────────────────────────────────────────
     out_path = Path(args.output)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(results, f, indent=2)
 
-    log.info(f"✓ Output salvato: {out_path}  ({len(results):,} queries)")
+    log.info(f"✓ Output saved: {out_path}  ({len(results):,} queries)")
 
 
 if __name__ == "__main__":

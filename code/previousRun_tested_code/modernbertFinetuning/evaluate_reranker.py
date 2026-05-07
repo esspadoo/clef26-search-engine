@@ -1,25 +1,25 @@
 """
 evaluate_reranker.py
 
-Valuta il reranker fine-tuned su un dev/test set.
-Calcola: MRR@5, MRR@10, NDCG@10, MAP, Precision@1
+Evaluates the fine-tuned reranker on a dev/test set.
+Computes: MRR@5, MRR@10, NDCG@10, MAP, Precision@1
 
-Può essere usato sia per:
-  1. Valutare checkpoint durante il training
-  2. Comparare il modello fine-tuned vs il baseline (es. GTE-ModernBERT o Nemotron)
+Can be used to:
+    1. Evaluate checkpoints during training
+    2. Compare the fine-tuned model vs the baseline (e.g., GTE-ModernBERT or Nemotron)
 
-Uso:
-  python evaluate_reranker.py \
-    --checkpoint ./checkpoints/modernbert-reranker/best_checkpoint \
-    --dev_file   training_data/dev_pairs.jsonl
+Usage:
+    python evaluate_reranker.py \
+        --checkpoint ./checkpoints/modernbert-reranker/best_checkpoint \
+        --dev_file   training_data/dev_pairs.jsonl
 
-  # Oppure su un intero run BM25:
-  python evaluate_reranker.py \
-    --checkpoint ./checkpoints/modernbert-reranker/best_checkpoint \
-    --corpus     corpus.tsv \
-    --queries    queries.tsv \
-    --qrels      qrels.txt \
-    --bm25_run   bm25_run.txt \
+    # Or on a complete BM25 run:
+    python evaluate_reranker.py \
+        --checkpoint ./checkpoints/modernbert-reranker/best_checkpoint \
+        --corpus     corpus.tsv \
+        --queries    queries.tsv \
+        --qrels      qrels.txt \
+        --bm25_run   bm25_run.txt \
     --rerank_depth 100
 """
 
@@ -42,14 +42,14 @@ log = logging.getLogger(__name__)
 
 def load_peft_model(checkpoint_path: str, device):
     """
-    Carica un modello fine-tuned con PEFT/LoRA.
-    Gestisce sia checkpoint PEFT che modelli merged.
+    Load a fine-tuned model with PEFT/LoRA.
+    Handles both PEFT checkpoint and merged models.
     """
     checkpoint_path = Path(checkpoint_path)
 
-    # Controlla se è un checkpoint PEFT (ha adapter_config.json)
+    # Check if it is a PEFT checkpoint (has adapter_config.json)
     if (checkpoint_path / "adapter_config.json").exists():
-        log.info(f"Caricamento modello PEFT da {checkpoint_path}")
+        log.info(f"Loadign PEFT model from {checkpoint_path}")
         peft_config  = PeftConfig.from_pretrained(str(checkpoint_path))
         base_model   = AutoModelForSequenceClassification.from_pretrained(
             peft_config.base_model_name_or_path,
@@ -60,7 +60,7 @@ def load_peft_model(checkpoint_path: str, device):
         model = PeftModel.from_pretrained(base_model, str(checkpoint_path))
         tokenizer = AutoTokenizer.from_pretrained(str(checkpoint_path))
     else:
-        log.info(f"Caricamento modello merged da {checkpoint_path}")
+        log.info(f"Loading merged model from {checkpoint_path}")
         model     = AutoModelForSequenceClassification.from_pretrained(
             str(checkpoint_path), num_labels=1, torch_dtype=torch.bfloat16
         )
@@ -92,7 +92,7 @@ def score_pairs(
         batch_size: int = 32,
         device=None,
 ) -> list[float]:
-    """Calcola score per una query e lista di documenti."""
+    """Computes the score for a query and a document list."""
     scores = []
 
     for i in range(0, len(docs), batch_size):
@@ -123,7 +123,7 @@ def compute_metrics(
         cutoffs: list[int] = [5, 10],
 ) -> dict:
     """
-    qid_to_results: {qid: [(score, relevance), ...]} già ordinati per score desc
+    qid_to_results: {qid: [(score, relevance), ...]} already sorted by decreasing score
     """
     mrr_scores   = {k: [] for k in cutoffs}
     ndcg_scores  = {k: [] for k in cutoffs}
@@ -182,7 +182,7 @@ def evaluate_on_run(
         corpus_path, queries_path, qrels_path, bm25_run_path,
         rerank_depth: int = 100, max_length: int = 512, batch_size: int = 32,
 ):
-    """Valuta su un BM25 run completo."""
+    """VEvaluate on a complete BM25 run"""
     from prepare_training_data import load_corpus, load_queries, load_qrels, load_run, clean_tweet
 
     corpus  = load_corpus(corpus_path)
@@ -192,7 +192,7 @@ def evaluate_on_run(
 
     qid_to_results = {}
 
-    for qid, query_text in tqdm(queries.items(), desc="Valutazione"):
+    for qid, query_text in tqdm(queries.items(), desc="Evaluation"):
         if qid not in bm25:
             continue
 
@@ -215,7 +215,7 @@ def evaluate_on_run(
 
 def evaluate_on_pairs(model, tokenizer, device, dev_file: str,
                       max_length: int = 512, batch_size: int = 32):
-    """Valuta su dev_pairs.jsonl."""
+    """Evaluate on dev_pairs.jsonl."""
     qid_to_results = defaultdict(list)
 
     with open(dev_file, encoding="utf-8") as f:
@@ -237,7 +237,7 @@ def evaluate_on_pairs(model, tokenizer, device, dev_file: str,
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Valuta reranker fine-tuned")
+    parser = argparse.ArgumentParser(description="evaluate fine-tuned reranker")
     parser.add_argument("--checkpoint",  required=True)
     parser.add_argument("--dev_file",    default=None, help="dev_pairs.jsonl")
     parser.add_argument("--corpus",      default=None)
@@ -253,21 +253,21 @@ def main():
     model, tokenizer = load_peft_model(args.checkpoint, device)
 
     if args.dev_file:
-        log.info("Valutazione su dev_pairs.jsonl")
+        log.info("Evaluation on dev_pairs.jsonl")
         metrics = evaluate_on_pairs(model, tokenizer, device,
                                     args.dev_file, args.max_length, args.batch_size)
     elif args.bm25_run:
-        log.info("Valutazione su BM25 run")
+        log.info("Evaluation on BM25 run")
         metrics = evaluate_on_run(
             model, tokenizer, device,
             args.corpus, args.queries, args.qrels, args.bm25_run,
             args.rerank_depth, args.max_length, args.batch_size,
         )
     else:
-        parser.error("Specifica --dev_file oppure --bm25_run")
+        parser.error("Specify --dev_file or --bm25_run")
 
     print("\n" + "="*50)
-    print("RISULTATI VALUTAZIONE")
+    print("EVALUATION RESULTS")
     print("="*50)
     for k, v in metrics.items():
         if isinstance(v, float):
