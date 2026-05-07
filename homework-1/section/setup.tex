@@ -1,21 +1,5 @@
 \section{Experimental Setup}
 \label{sec:setup}
+All experiments were conducted on our machines, utilizing a computer with an AMD Ryzen 9 5900X, 32 GB RAM and NVIDIA RTX 3090 GPU (10496 CUDA Cores, boost clock 1.70 GHz, 24 GB of GDDR6X memory, 35.58 TFlops) for resource-intensive workload and our laptops for standard workloads and refining of the programs. We have four laptops, the two most powerful are a MacBook Air M3 and one with no dedicated GPU, 16 RAM and a Intel core i7-13700H. 
+For reproducibility, all the environment settings have been documented and are freely available or easily obtained by following the instructions in this paper.
 
-We use the official CheckThat! 2026 Task 1 collection format: social-media claims as queries and a fixed paper corpus in
-\texttt{code/data/collection\_data.json}. Query files are handled in JSON format (English, German, and French) and expanded
-versions are generated in \texttt{code/data/expanded\_queries\_multilingual\_merged.json}. Retrieved outputs are always ranked
-lists of paper \texttt{pubkey}s.
-
-Our primary evaluation measure is MRR@5, consistent with the task objective and the official scorer used in
-\texttt{results/scoring\_official/}. During development, we also monitor Recall@100 and additional internal metrics from
-the Java evaluator (Recall@k, Precision@k, MAP, nDCG@k) to analyze recall/precision trade-offs across retrieval and
-reranking configurations.
-
-The implementation is organized into: (i) Java components for indexing, baseline retrieval, and evaluation
-(\texttt{code/src/main/java/unipd/se/}); (ii) Python components for multilingual query expansion, hybrid BGE-M3 retrieval,
-and neural reranking (\texttt{code/src/main/java/unipd/se/py/}); and (iii) run outputs and metrics under \texttt{results/}.
-The project repository is available at \url{https://bitbucket.org/upd-dei-stud-prj/seupd2526-retrix.git}.
-
-In terms of execution environment, lightweight preprocessing and analysis can run on CPU, while the neural stages
-(LLM-based expansion, hybrid BGE-M3 encoding, and cross-encoder reranking) are configured to use CUDA GPUs when available,
-with automatic CPU fallback paths implemented in the code.
