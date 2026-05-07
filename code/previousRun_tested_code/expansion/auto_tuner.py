@@ -101,14 +101,14 @@ def main():
 
     file_exists = os.path.isfile(OUTPUT_LOG)
 
-    # Carica trial passati se il file esiste per evitare duplicati tra diverse esecuzioni
+    # Loads past trials if the file exists to avoid duplicates between different executions
     if file_exists:
         with open(OUTPUT_LOG, "r", encoding='utf-8') as f:
             reader = csv.reader(f)
             next(reader, None) # Salta header
             for row in reader:
                 if len(row) >= 5:
-                    # Salva come tupla (thr, max, w1, w2, w3) convertiti correttamente
+                    # Saves as a tuple (thr, max, w1, w2, w3) correctly converted
                     seen_configs.add((float(row[0]), int(row[1]), float(row[2]), float(row[3]), float(row[4])))
 
     with open(OUTPUT_LOG, "a", newline='') as f:
@@ -119,7 +119,7 @@ def main():
     for i in range(NUM_ATTEMPTS):
         print(f"\n--- Trial {i+1}/{NUM_ATTEMPTS} ---")
 
-        # Loop per generare parametri unici
+        # Loop to generate unique parameters
         while True:
             t = round(random.uniform(0.6, 1), 2)
             m = random.randint(1, 10)

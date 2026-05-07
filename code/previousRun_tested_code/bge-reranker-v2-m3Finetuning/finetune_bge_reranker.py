@@ -17,7 +17,7 @@ Key parameters (from official doc for encoder_only):
 Installation:
     pip install FlagEmbedding
 
-Uso:
+Usage:
     python finetune_bge_reranker.py \
         --train_file       training_data/train_groups.jsonl \
         --dev_file         training_data/dev_groups.jsonl \
