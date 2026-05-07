@@ -205,7 +205,7 @@ The largest weight is assigned to the dense score because it provides the main s
 The reranking stage receives the candidate list produced by the hybrid retriever and reorders it using cross-encoder models. Its goal is to improve early precision, especially MRR@5, while preserving as much recall as possible from the first stage.
 
 \subsubsection*{Cross-encoder scoring}
-Our strongest single-stage reranker is \texttt{nvidia/llama-nemotron-rerank-1b-v2}, a 1B-parameter LLaMA-based model fine-tuned as a sequence classifier. For each query--document pair, we build an input sequence using the official NVIDIA prompt template:
+Our strongest single-stage reranker is \texttt{nvidia/llama-nemotron-rerank-1b-v2}, a 1B-parameter LLaMA-based model fine-tuned as a sequence classifier. For each query-document pair, we build an input sequence using the official NVIDIA prompt template:
 \begin{promptbox}
 \small\ttfamily
 question:\{query\} \textbackslash n \textbackslash n passage:\{passage\}
@@ -215,7 +215,7 @@ The model computes a scalar logit $z \in \mathbb{R}$ through a linear classifica
   s(q, d) = \sigma(z) = \frac{1}{1 + e^{-z}}
 \]
 Documents are then sorted in descending order of $s(q, d)$.
-In practice, reranking deeper candidate pools (500--2500 documents) consistently produced better final results than shallower pools, confirming the importance of high recall at the retrieval stage to compensate for miss-labeling from weaker previous retrieval-stages.
+In practice, reranking deeper candidate pools (500--2500 documents) consistently produced better final results than shallower pools, confirming the importance of high recall at the retrieval stage to compensate for miss-labeling from weaker previous retrieval-stages. At this stage, queries are evaluated against the corpus of the documents taking into account their title, abstract and author.
 
 We also evaluated alternative rerankers, including Qwen3 and GTE-ModernBERT variants
 
