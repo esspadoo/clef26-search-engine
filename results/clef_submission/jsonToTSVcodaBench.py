@@ -1,21 +1,21 @@
 import json
 
-# Carica il file JSON da convertire in TSV pronto per la submit in codaBench
+# Load the JSON file to convert to TSV format for submission to codaBench
 with open('reranked_results_nemotronFTAarsen20252026_Lora_topk1000_onbiEncoderTopk1000.json', 'r', encoding='utf-8') as f:
     data = json.load(f)
 
-# Crea il file TSV
+# Create the TSV file
 with open('en_predictions.tsv', 'w', encoding='utf-8') as f:
-    # Scrivi l'intestazione
+    # Write the header
     f.write('index\tpreds\n')
     
-    # Per ogni documento (chiave = indice del post, valore = lista di predizioni)
+    # For each document (key = post index, value = list of predictions)
     for index, predictions in data.items():
-        # Prendi solo i primi 5 valori
+        # Take only the first 5 values
         top5 = predictions[:5]
         
-        # Converti la lista in stringa nel formato [pred1, pred2, ...]
+        # Convert the list to string in the format [pred1, pred2, ...]
         preds_string = '[' + ', '.join(top5) + ']'
         
-        # Scrivi la riga
+        # Write the row
         f.write(f'{index}\t{preds_string}\n')
