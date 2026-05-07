@@ -2,7 +2,7 @@
 
 This repository contains the Retrix system for the Search Engines course project
 at the University of Padua. The project participates in CLEF 2026 CheckThat!
-Task 1, Source Retrieval for Scientific Web Claims.
+Task 1, Source Retrieval for Scientific Web Claims. **Note that this README has the only purpose of showing the right order of use of our retrieval system, paths can vary.**
 
 *Search Engines* is a course of the
 
