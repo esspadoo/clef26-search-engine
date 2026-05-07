@@ -1,26 +1,26 @@
 """
-Reranker_qwen3.py — Qwen3-Reranker-0.6B re-ranking dei risultati BM25
-======================================================================
-Qwen3-Reranker-0.6B è un modello GENERATIVO (AutoModelForCausalLM), non un
-classificatore. NON usare CrossEncoder di sentence-transformers.
+Reranker_qwen3.py — Qwen3-Reranker-0.6B re-ranking of BM25 results
+===================================================================
+Qwen3-Reranker-0.6B is a GENERATIVE model (AutoModelForCausalLM), not a
+classifier. Do NOT use sentence-transformers CrossEncoder.
 
-Meccanismo ufficiale (da HuggingFace Qwen/Qwen3-Reranker-0.6B):
-  1. Costruire il prompt con prefix/suffix di sistema + <Instruct>/<Query>/<Document>
-  2. Forward pass → logits[:, -1, :]  (ultimo token generato)
-  3. Estrarre i logit per i token "yes" e "no"
-  4. log_softmax sui due logit → exp del logit "yes" = score in [0, 1]
+Official mechanism (from HuggingFace Qwen/Qwen3-Reranker-0.6B):
+  1. Build prompt with fixed system prefix/suffix + <Instruct>/<Query>/<Document>
+  2. Forward pass -> logits[:, -1, :]  (last generated token)
+  3. Extract logits for token "yes" and token "no"
+  4. log_softmax over those two logits -> exp(logit "yes") = score in [0, 1]
 
-Richiede: transformers >= 4.51.0
+Requires: transformers >= 4.51.0
 
-Legge:
-  - data/expanded_queries_*.json   (query, campo "original")
+Reads:
+  - data/expanded_queries_*.json   (queries, "original" field)
   - data/collection_data.json      (corpus, title+abstract)
-  - results/bm25_results.json      (output Java: { qid → [pubkey, ...] })
+  - results/bm25_results.json      (Java output: { qid -> [pubkey, ...] })
 
-Scrive:
-  - results/reranked_results.json  (stesso formato: { qid → [pubkey, ...] })
+Writes:
+  - results/reranked_results.json  (same format: { qid -> [pubkey, ...] })
 
-Uso:
+Usage:
   python Reranker_qwen3.py
   python Reranker_qwen3.py --top_k 100 --batch 8 --query_chunk 8
 """
@@ -43,30 +43,30 @@ parser.add_argument("--papers",      default="../../../../../../data/collection_
 parser.add_argument("--bm25",        default="../../../../../../../results/bm25_results.json")
 parser.add_argument("--output",      default = f"../../../../../../../results/reranked_results_{MODEL_NAME.split("/")[-1]}.json")
 parser.add_argument("--top_k",       type=int, default=100,
-                    help="Candidati BM25 da passare al re-ranker (default: 100)")
+                    help="BM25 candidates to pass to the re-ranker (default: 100)")
 parser.add_argument("--batch",       type=int, default=32,
-                    help="Coppie per forward pass GPU (default: 8). "
+                    help="Pairs per GPU forward pass (default: 8). "
                          "Qwen3-0.6B fp16 ≈ 1.2 GB VRAM. "
-                         "Su RTX 3090 24GB con max_length=512 puoi alzare fino a 32.")
+                         "On RTX 3090 24GB with max_length=512 you can increase up to 32.")
 parser.add_argument("--query_chunk", type=int, default=8,
-                    help="Query per chunk (default: 8).")
+                    help="Queries per chunk (default: 8).")
 parser.add_argument("--max_length",  type=int, default=512,
-                    help="Lunghezza massima token per coppia (default: 512). "
-                         "Il modello supporta 32k ma 512 è sufficiente per titolo+abstract.")
+                    help="Maximum token length per pair (default: 512). "
+                         "The model supports 32k, but 512 is enough for title+abstract.")
 
 
-# Instruction task-specific per paper scientifici
-# Usare un'instruction pertinente migliora le metriche del 1-5%% (da docs ufficiali)
+# Task-specific instruction for scientific papers
+# Using a relevant instruction usually improves metrics by 1-5% (official docs)
 TASK_INSTRUCTION = (
     "Given a short user query (like a tweet) and a formal academic paper, judge how relevant the paper is to the query."
     "Return a higher score for relevant papers, and a lower score for irrelevant papers."
 )
 
 # ──────────────────────────────────────────────────────────────
-# Formattazione prompt — API ufficiale Qwen3-Reranker
+# Prompt formatting - official Qwen3-Reranker API
 # ──────────────────────────────────────────────────────────────
-# Il prefix e suffix sono fissi e definiti dalla doc ufficiale.
-# Vengono tokenizzati una sola volta al caricamento del modello.
+# Prefix and suffix are fixed and defined by official docs.
+# They are tokenized once when loading the model.
 PREFIX = (
     "<|im_start|>system\n"
     "Judge whether the Document meets the requirements based on the Query and "
@@ -78,8 +78,8 @@ SUFFIX = "<|im_end|>\n<|im_start|>assistant\n<think>\n\n</think>\n\n"
 
 def format_pair(query: str, doc: str, instruction: str = TASK_INSTRUCTION) -> str:
     """
-    Formatta una coppia (query, doc) nel formato atteso da Qwen3-Reranker.
-    Il template è: <Instruct>: ...\n<Query>: ...\n<Document>: ...
+    Format a (query, doc) pair in the Qwen3-Reranker expected format.
+    Template: <Instruct>: ...\n<Query>: ...\n<Document>: ...
     """
     return (
         f"<Instruct>: {instruction}\n"
@@ -93,9 +93,9 @@ def format_pair(query: str, doc: str, instruction: str = TASK_INSTRUCTION) -> st
 # ──────────────────────────────────────────────────────────────
 def sanity_check_scores(score_fn) -> bool:
     """
-    Verifica che il modello produca score discriminativi.
-    Un documento rilevante deve avere score significativamente più alto
-    di uno irrilevante.
+    Verify that the model produces discriminative scores.
+    A relevant document should have a significantly higher score
+    than an irrelevant one.
     """
     test_pairs = [
         ("neural network classification",
@@ -107,14 +107,14 @@ def sanity_check_scores(score_fn) -> bool:
         scores = score_fn(test_pairs)
         s0, s1 = float(scores[0]), float(scores[1])
         diff = abs(s0 - s1)
-        print(f"\n  [Sanity check] Score rilevante={s0:.4f} | Score irrilevante={s1:.4f} | Δ={diff:.4f}")
+        print(f"\n  [Sanity check] Relevant score={s0:.4f} | Irrelevant score={s1:.4f} | Delta={diff:.4f}")
         if diff < 0.05:
-            print("  WARNING: score quasi identici — controlla il modello/tokenizer!")
+            print("  WARNING: scores are almost identical - check model/tokenizer!")
             return False
         print("  [Sanity check] OK.")
         return True
     except Exception as e:
-        print(f"  WARNING: sanity check fallito: {e}")
+        print(f"  WARNING: sanity check failed: {e}")
         return False
 
 
@@ -123,11 +123,11 @@ def sanity_check_scores(score_fn) -> bool:
 # ──────────────────────────────────────────────────────────────
 def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
     """
-    Costruisce le coppie (query_text, doc_text) per un chunk di query.
-    Ritorna:
-      all_pairs : lista piatta di (str, str)
+    Build (query_text, doc_text) pairs for a query chunk.
+    Returns:
+      all_pairs : flat list of (str, str)
       meta      : [(qid, valid_keys, n_pairs, fallback_candidates), ...]
-      missing   : n° doc non trovati nel corpus
+      missing   : number of docs not found in corpus
     """
     all_pairs = []
     meta      = []
@@ -138,7 +138,7 @@ def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
         candidates = candidate_pubkeys[:top_k]
 
         if not query_text:
-            print(f"  WARNING: query text non trovato per qid={qid}, uso ordine BM25", flush=True)
+            print(f"  WARNING: query text not found for qid={qid}, using BM25 order", flush=True)
             meta.append((qid, [], 0, candidates))
             continue
 
@@ -160,7 +160,7 @@ def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
 
 def scores_to_results(meta, scores_flat):
     """
-    Ricostruisce qid→[pubkey] dallo score array piatto.
+    Rebuild qid->[pubkey] from the flat score array.
     """
     results = {}
     offset  = 0
@@ -176,16 +176,16 @@ def scores_to_results(meta, scores_flat):
 
 
 # ──────────────────────────────────────────────────────────────
-# Caricamento modello — AutoModelForCausalLM ufficiale
+# Model loading - official AutoModelForCausalLM
 # ──────────────────────────────────────────────────────────────
 def load_qwen3_reranker(device: str, max_length: int):
     """
-    Carica Qwen3-Reranker-0.6B tramite AutoModelForCausalLM.
+    Load Qwen3-Reranker-0.6B with AutoModelForCausalLM.
 
-    Questo modello è GENERATIVO: produce uno score estraendo il logit
-    dell'ultimo token per i token "yes" e "no", NON tramite una testa
+    This model is GENERATIVE: it produces a score by extracting the last-token logit
+    for tokens "yes" and "no", NOT through a classification head.
     di classificazione. Usare CrossEncoder o AutoModelForSequenceClassification
-    produrrebbe score errati (o errori di compatibilità).
+    would produce wrong scores (or compatibility errors).
 
     Richiede transformers >= 4.51.0.
     """
@@ -194,7 +194,7 @@ def load_qwen3_reranker(device: str, max_length: int):
     print(f"  Loading tokenizer: {MODEL_NAME}", flush=True)
     tokenizer = AutoTokenizer.from_pretrained(
         MODEL_NAME,
-        padding_side="left",   # CRITICO: padding a sinistra per modelli causali
+        padding_side="left",   # CRITICAL: left padding for causal models
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
@@ -207,21 +207,21 @@ def load_qwen3_reranker(device: str, max_length: int):
     )
     model.eval()
 
-    # Token ID per "yes" e "no" — fissi per il vocabolario Qwen3
+    # Token IDs for "yes" and "no" - fixed in the Qwen3 vocabulary
     token_true_id  = tokenizer.convert_tokens_to_ids("yes")
     token_false_id = tokenizer.convert_tokens_to_ids("no")
     print(f"  Token IDs — yes: {token_true_id}, no: {token_false_id}", flush=True)
     if token_true_id == tokenizer.unk_token_id or token_false_id == tokenizer.unk_token_id:
         raise ValueError(
-            "Token 'yes' o 'no' non trovati nel vocabolario. "
-            "Controlla che il tokenizer sia corretto per Qwen3-Reranker-0.6B."
+            "Token 'yes' or 'no' not found in vocabulary. "
+            "Check that the tokenizer is correct for Qwen3-Reranker-0.6B."
         )
 
-    # Pre-tokenizza prefix e suffix (costanti per tutte le coppie)
+    # Pre-tokenize prefix and suffix (constant for all pairs)
     prefix_tokens = tokenizer.encode(PREFIX, add_special_tokens=False)
     suffix_tokens = tokenizer.encode(SUFFIX, add_special_tokens=False)
     overhead = len(prefix_tokens) + len(suffix_tokens)
-    # max_length per il contenuto (query+doc), escludendo prefix/suffix
+    # max_length for content (query+doc), excluding prefix/suffix
     content_max_length = max_length - overhead
 
     print(f"  Prefix tokens: {len(prefix_tokens)}, Suffix tokens: {len(suffix_tokens)}, "
@@ -229,17 +229,17 @@ def load_qwen3_reranker(device: str, max_length: int):
 
     def score_pairs(pairs: list) -> list:
         """
-        Closure che incapsula modello, tokenizer e token IDs.
-        Accetta lista di (query, doc) e ritorna lista di float in [0,1].
+        Closure wrapping model, tokenizer, and token IDs.
+        Accepts a list of (query, doc) and returns list of floats in [0,1].
 
-        Logica ufficiale Qwen3-Reranker:
-          logits[:, -1, :]              → logit dell'ultimo token (position da predire)
-          log_softmax([false, true])    → log-probabilità normalizzata su yes/no
+        Official Qwen3-Reranker logic:
+          logits[:, -1, :]              -> last-token logits (next token position)
+          log_softmax([false, true])    -> normalized log-probability over yes/no
           exp(log_p_yes)                → score in [0, 1]
         """
         formatted = [format_pair(q, d) for q, d in pairs]
 
-        # Tokenizza il contenuto (query+doc) con troncamento
+        # Tokenize content (query+doc) with truncation
         inputs = tokenizer(
             formatted,
             padding=False,
@@ -249,11 +249,11 @@ def load_qwen3_reranker(device: str, max_length: int):
             add_special_tokens=False,
         )
 
-        # Aggiunge prefix e suffix a ogni sequenza
+        # Add prefix and suffix to each sequence
         for i, ids in enumerate(inputs["input_ids"]):
             inputs["input_ids"][i] = prefix_tokens + ids + suffix_tokens
 
-        # Padding batch (left-padding, già configurato nel tokenizer)
+        # Batch padding (left-padding, already configured in tokenizer)
         inputs = tokenizer.pad(
             inputs,
             padding=True,
@@ -266,16 +266,16 @@ def load_qwen3_reranker(device: str, max_length: int):
         with torch.no_grad():
             logits = model(**inputs).logits  # [B, seq_len, vocab_size]
 
-        # Logit dell'ultimo token: quello che il modello "produrrebbe" dopo il suffix
+        # Last-token logit: what the model would "produce" after suffix
         last_logits = logits[:, -1, :]  # [B, vocab_size]
 
         true_vec  = last_logits[:, token_true_id]   # [B]
         false_vec = last_logits[:, token_false_id]  # [B]
 
-        # log_softmax su [false, true] → exp del logit "true" = P(yes)
+        # log_softmax on [false, true] -> exp of "true" logit = P(yes)
         stacked = torch.stack([false_vec, true_vec], dim=1)  # [B, 2]
         log_probs = torch.nn.functional.log_softmax(stacked, dim=1)
-        scores = log_probs[:, 1].exp().tolist()  # P(yes) per ogni coppia
+        scores = log_probs[:, 1].exp().tolist()  # P(yes) for each pair
 
         return scores if isinstance(scores, list) else [scores]
 
@@ -283,14 +283,14 @@ def load_qwen3_reranker(device: str, max_length: int):
 
 
 # ──────────────────────────────────────────────────────────────
-# Inferenza con gestione OOM
+# Inference with OOM handling
 # ──────────────────────────────────────────────────────────────
 def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
     """
-    Itera le coppie a batch, chiama score_fn e aggrega i risultati.
+    Iterate pairs by batch, call score_fn, and aggregate results.
 
-    current_batch è locale: un OOM su questo chunk non abbassa il batch
-    per i chunk successivi.
+    current_batch is local: an OOM on this chunk does not lower the
+    batch size for following chunks.
     """
     all_scores    = []
     current_batch = batch_size
@@ -302,7 +302,7 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
             scores = score_fn(batch)
             all_scores.extend(scores)
             i += current_batch
-            current_batch = batch_size  # ripristina dopo successo
+            current_batch = batch_size  # restore after success
 
         except (torch.OutOfMemoryError, RuntimeError) as e:
             is_oom = isinstance(e, torch.OutOfMemoryError) or "out of memory" in str(e).lower()
@@ -311,8 +311,8 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
             torch.cuda.empty_cache()
             if current_batch <= 1:
                 print(
-                    f"  WARNING: OOM anche con batch=1 su {len(batch)} coppie. "
-                    f"Score=0 come fallback (ordine BM25 mantenuto).",
+                    f"  WARNING: OOM even with batch=1 on {len(batch)} pairs. "
+                    f"Score=0 as fallback (BM25 order preserved).",
                     flush=True,
                 )
                 all_scores.extend([0.0] * len(batch))
@@ -320,13 +320,13 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
                 current_batch = batch_size
             else:
                 current_batch = max(1, current_batch // 2)
-                print(f"  OOM → riduco batch a {current_batch} per questo chunk", flush=True)
+                print(f"  OOM -> reducing batch to {current_batch} for this chunk", flush=True)
 
     return all_scores
 
 
 # ──────────────────────────────────────────────────────────────
-# Worker per-GPU (path multi-GPU)
+# Per-GPU worker (multi-GPU path)
 # ──────────────────────────────────────────────────────────────
 def rerank_worker(
         gpu_id: int,
@@ -339,14 +339,14 @@ def rerank_worker(
         max_length: int,
         result_queue: mp.Queue,
 ) -> None:
-    # CRITICO: isola la GPU prima di qualsiasi import CUDA
+    # CRITICAL: isolate GPU before any CUDA import
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
     import torch
 
     device = "cuda:0"
-    print(f"[GPU {gpu_id}] {torch.cuda.get_device_name(0)} — caricamento modello...", flush=True)
+    print(f"[GPU {gpu_id}] {torch.cuda.get_device_name(0)} - loading model...", flush=True)
 
     score_fn = load_qwen3_reranker(device, max_length)
 
@@ -391,14 +391,14 @@ if __name__ == "__main__":
     NUM_GPUS = torch.cuda.device_count()
     if NUM_GPUS == 0:
         DEVICE = "cpu"
-        print("Device: cpu (nessuna GPU CUDA trovata)")
+        print("Device: cpu (no CUDA GPU found)")
     else:
         DEVICE = "cuda:0"
-        print(f"Device: cuda — {NUM_GPUS} GPU disponibili:")
+        print(f"Device: cuda - {NUM_GPUS} GPUs available:")
         for i in range(NUM_GPUS):
             print(f"  [{i}] {torch.cuda.get_device_name(i)}")
 
-    # ── Carica dati ────────────────────────────────────────────
+    # -- Load data --
     print("\nLoading data...")
 
     with open(args.queries, "r", encoding="utf-8") as f:
@@ -420,8 +420,8 @@ if __name__ == "__main__":
         for q in queries_raw
     }
 
-    # ── Sanity check sui dati ──────────────────────────────────
-    print(f"\nCorpus: {len(paper_texts)} documenti | "
+    # -- Data sanity checks --
+    print(f"\nCorpus: {len(paper_texts)} documents | "
           f"Queries: {len(query_texts)} | "
           f"BM25 results: {len(bm25_results)}")
 
@@ -429,29 +429,29 @@ if __name__ == "__main__":
     sample_candidates = bm25_results[sample_qid][:5]
     hits = sum(1 for pk in sample_candidates if str(pk) in paper_texts)
     print(f"Sanity check corpus — query '{sample_qid}': "
-          f"{hits}/{len(sample_candidates)} candidati trovati nel corpus")
+          f"{hits}/{len(sample_candidates)} candidates found in corpus")
     if hits == 0:
-        print("ERRORE CRITICO: 0 candidati trovati. "
-              f"Tipo pubkey bm25={type(sample_candidates[0])}, "
-              f"tipo chiave corpus=str")
+        print("CRITICAL ERROR: 0 candidates found. "
+              f"bm25 pubkey type={type(sample_candidates[0])}, "
+              f"corpus key type=str")
 
     sample_qt = query_texts.get(str(sample_qid), "")
     print(f"Sanity check queries — qid='{sample_qid}': '{sample_qt[:80]}...'")
     if not sample_qt:
-        print("WARNING: query text vuoto. Controlla campo 'original'/'text' nel JSON query.")
+        print("WARNING: empty query text. Check 'original'/'text' field in query JSON.")
 
     all_query_items = list(bm25_results.items())
     print(f"\nRe-ranking {len(bm25_results)} queries "
           f"(top_k={args.top_k}, batch={args.batch}, "
           f"query_chunk={args.query_chunk}, max_length={args.max_length})...")
 
-    # ── Singola GPU / CPU ───────────────────────────────────────
+    # -- Single GPU / CPU --
     if NUM_GPUS <= 1:
         score_fn = load_qwen3_reranker(DEVICE, args.max_length)
 
         ok = sanity_check_scores(score_fn)
         if not ok:
-            print("\nWARNING: sanity check fallito. Procedo comunque.\n")
+            print("\nWARNING: sanity check failed. Proceeding anyway.\n")
 
         reranked_results: dict = {}
         missing_docs  = 0
@@ -477,7 +477,7 @@ if __name__ == "__main__":
             scores_flat  = predict_scores(score_fn, all_pairs, args.batch)
             reranked_results.update(scores_to_results(meta, scores_flat))
 
-    # ── Multi-GPU ───────────────────────────────────────────────
+    # -- Multi-GPU --
     else:
         partitions = [[] for _ in range(NUM_GPUS)]
         for i, item in enumerate(all_query_items):
@@ -521,22 +521,22 @@ if __name__ == "__main__":
         for p in processes:
             p.join()
 
-        # Ripristina ordine originale
+        # Restore original order
         reranked_results = {
             qid: reranked_results[qid]
             for qid in bm25_results
             if qid in reranked_results
         }
 
-    # ── Report finale ──────────────────────────────────────────
+    # -- Final report --
     print(f"\nTotal pairs scored : {total_pairs}")
     print(f"Queries re-ranked  : {len(reranked_results)}")
     if missing_docs:
-        print(f"Pubkey non trovati : {missing_docs} (ordine BM25 mantenuto)")
+        print(f"Pubkeys not found : {missing_docs} (BM25 order preserved)")
     coverage = len(reranked_results) / len(bm25_results) * 100
     print(f"Coverage           : {coverage:.1f}% ({len(reranked_results)}/{len(bm25_results)})")
 
-    # ── Salva ──────────────────────────────────────────────────
+    # -- Save --
     out_dir = os.path.dirname(args.output)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
@@ -544,5 +544,5 @@ if __name__ == "__main__":
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(reranked_results, f, indent=2, ensure_ascii=False)
 
-    print(f"\nSalvato → {args.output}")
-    print("Done. Ora esegui il Java evaluator puntando a reranked_results.json.")
+    print(f"\nSaved -> {args.output}")
+    print("Done. Now run the Java evaluator pointing to reranked_results.json.")

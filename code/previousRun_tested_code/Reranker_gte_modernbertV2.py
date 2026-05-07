@@ -1,47 +1,47 @@
 """
-RISPETTO A V1
+CHANGES COMPARED TO V1
 1. model = AutoModelForSequenceClassification.from_pretrained(
     MODEL_NAME,
-    torch_dtype=torch.float16, ----> LEVATO E LASCIATO IL DEFAULT FP32
+    torch_dtype=torch.float16, ----> REMOVED, KEPT DEFAULT FP32
     device_map=device,
 )
 
 2. Sigmoid:
-scores = torch.sigmoid(logits.view(-1)) ---> SOSTITUITO CON ---> scores = logits.view(-1).cpu().tolist()
+scores = torch.sigmoid(logits.view(-1)) ---> REPLACED WITH ---> scores = logits.view(-1).cpu().tolist()
 
-3.max_length=512 -----> MESSA A 1024
+3. max_length=512 -----> SET TO 1024
 
 
 
-Reranker_gte_modernbertV2.py — GTE-Reranker-ModernBERT-Base re-ranking dei risultati BM25
+Reranker_gte_modernbertV2.py — GTE-Reranker-ModernBERT-Base re-ranking of BM25 results
 =========================================================================================
-Alibaba-NLP/gte-reranker-modernbert-base è un cross-encoder encoder-only basato su
+Alibaba-NLP/gte-reranker-modernbert-base is an encoder-only cross-encoder based on
 ModernBERT (AutoModelForSequenceClassification).
 
-Meccanismo (da HuggingFace Alibaba-NLP/gte-reranker-modernbert-base):
-  1. Tokenizzare la coppia come pair: tokenizer([query, doc], ...)
-  2. Forward pass → model(**inputs).logits  shape [B, 1]
-  3. sigmoid(logits.view(-1)) → score in (0, 1), sempre positivo
-     - score alto (~1) = documento rilevante
-     - score basso (~0) = documento irrilevante
+Mechanism (from HuggingFace Alibaba-NLP/gte-reranker-modernbert-base):
+  1. Tokenize query/document as a pair: tokenizer([query, doc], ...)
+  2. Forward pass -> model(**inputs).logits, shape [B, 1]
+  3. sigmoid(logits.view(-1)) -> score in (0, 1), always positive
+     - high score (~1) = relevant document
+     - low score (~0) = irrelevant document
   4. Ranking: sorted(..., reverse=True)
 
-Differenze rispetto a Nemotron:
-  - Architettura encoder-only (ModernBERT), NON decoder
-  - Input come pair al tokenizer: tokenizer([[q, d], ...]) — nessun template manuale
-  - Nessun trust_remote_code necessario
-  - padding_side default ("right") — encoder bidirezionale
-  - Richiede transformers >= 4.48.0
+Differences vs Nemotron:
+  - Encoder-only architecture (ModernBERT), NOT decoder
+  - Pair input to tokenizer: tokenizer([[q, d], ...]) - no manual template
+  - No trust_remote_code needed
+  - Default padding_side ("right") - bidirectional encoder
+  - Requires transformers >= 4.48.0
 
-Legge:
-  - data/expanded_queries_*.json   (query, campo "original")
+Reads:
+  - data/expanded_queries_*.json   (queries, "original" field)
   - data/collection_data.json      (corpus, title+abstract)
-  - results/bm25_results.json      (output Java: { qid → [pubkey, ...] })
+  - results/bm25_results.json      (Java output: { qid -> [pubkey, ...] })
 
-Scrive:
-  - results/reranked_results_gte_modernbert.json  (stesso formato: { qid → [pubkey, ...] })
+Writes:
+  - results/reranked_results_gte_modernbert.json  (same format: { qid -> [pubkey, ...] })
 
-Uso:
+Usage:
   python Reranker_gte_modernbert.py
   python Reranker_gte_modernbert.py --top_k 100 --batch 64 --query_chunk 8
 """
@@ -65,17 +65,17 @@ parser.add_argument("--bm25",        default="../../../../../../data/bi_encoder_
 #parser.add_argument("--bm25",        default="../../../../../../../results/bm25_results.json")
 parser.add_argument("--output",      default="../../../../../../../results/reranked_results_gte_modernbert.json")
 parser.add_argument("--top_k",       type=int, default=100,
-                    help="Candidati BM25 da passare al re-ranker (default: 100)")
+                    help="BM25 candidates to pass to the re-ranker (default: 100)")
 parser.add_argument("--batch",       type=int, default=64,
-                    help="Coppie per forward pass GPU (default: 64). "
-                         "ModernBERT-base fp16 è molto leggero (~280MB VRAM). "
-                         "Su L40S puoi alzare fino a 128 con max_length=512.")
+                    help="Pairs per GPU forward pass (default: 64). "
+                         "ModernBERT-base fp16 is very lightweight (~280MB VRAM). "
+                         "On L40S you can increase up to 128 with max_length=512.")
 parser.add_argument("--query_chunk", type=int, default=8,
-                    help="Query per chunk (default: 8).")
+                    help="Queries per chunk (default: 8).")
 parser.add_argument("--max_length",  type=int, default=1024,
-                    help="Lunghezza massima token per coppia (default: 512). "
-                         "Il modello supporta contesti lunghi ma 512 è sufficiente "
-                         "per titolo+abstract.")
+                    help="Maximum token length per pair (default: 512). "
+                         "The model supports long contexts, but 512 is enough "
+                         "for title+abstract.")
 
 MODEL_NAME = "Alibaba-NLP/gte-reranker-modernbert-base"
 
@@ -85,8 +85,8 @@ MODEL_NAME = "Alibaba-NLP/gte-reranker-modernbert-base"
 # ──────────────────────────────────────────────────────────────
 def sanity_check_scores(score_fn) -> bool:
     """
-    Verifica che il modello produca score discriminativi.
-    Dopo sigmoid: rilevante → vicino a 1, irrilevante → vicino a 0.
+    Verify that the model produces discriminative scores.
+    After sigmoid: relevant -> close to 1, irrelevant -> close to 0.
     """
     test_pairs = [
         ("neural network classification",
@@ -98,14 +98,14 @@ def sanity_check_scores(score_fn) -> bool:
         scores = score_fn(test_pairs)
         s0, s1 = float(scores[0]), float(scores[1])
         diff = abs(s0 - s1)
-        print(f"\n  [Sanity check] Score rilevante={s0:.4f} | Score irrilevante={s1:.4f} | Δ={diff:.4f}")
+        print(f"\n  [Sanity check] Relevant score={s0:.4f} | Irrelevant score={s1:.4f} | Delta={diff:.4f}")
         if diff < 0.05:
-            print("  WARNING: score quasi identici — controlla il modello/tokenizer!")
+            print("  WARNING: scores are almost identical - check model/tokenizer!")
             return False
         print("  [Sanity check] OK.")
         return True
     except Exception as e:
-        print(f"  WARNING: sanity check fallito: {e}")
+        print(f"  WARNING: sanity check failed: {e}")
         return False
 
 
@@ -114,11 +114,11 @@ def sanity_check_scores(score_fn) -> bool:
 # ──────────────────────────────────────────────────────────────
 def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
     """
-    Costruisce le coppie (query_text, doc_text) per un chunk di query.
-    Ritorna:
-      all_pairs : lista piatta di (str, str)
+    Build (query_text, doc_text) pairs for a query chunk.
+    Returns:
+      all_pairs : flat list of (str, str)
       meta      : [(qid, valid_keys, n_pairs, fallback_candidates), ...]
-      missing   : n° doc non trovati nel corpus
+      missing   : number of docs not found in corpus
     """
     all_pairs = []
     meta      = []
@@ -129,7 +129,7 @@ def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
         candidates = candidate_pubkeys[:top_k]
 
         if not query_text:
-            print(f"  WARNING: query text non trovato per qid={qid}, uso ordine BM25", flush=True)
+            print(f"  WARNING: query text not found for qid={qid}, using BM25 order", flush=True)
             meta.append((qid, [], 0, candidates))
             continue
 
@@ -151,8 +151,8 @@ def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
 
 def scores_to_results(meta, scores_flat):
     """
-    Ricostruisce qid→[pubkey] dallo score array piatto.
-    Score in (0,1) dopo sigmoid: reverse=True mette i più rilevanti in cima.
+    Rebuild qid->[pubkey] from the flat score array.
+    Score in (0,1) after sigmoid: reverse=True puts most relevant items first.
     """
     results = {}
     offset  = 0
@@ -168,18 +168,18 @@ def scores_to_results(meta, scores_flat):
 
 
 # ──────────────────────────────────────────────────────────────
-# Caricamento modello
+# Model loading
 # ──────────────────────────────────────────────────────────────
 def load_gte_modernbert_reranker(device: str, max_length: int):
     """
-    Carica Alibaba-NLP/gte-reranker-modernbert-base.
+    Load Alibaba-NLP/gte-reranker-modernbert-base.
 
     Architettura encoder-only (ModernBERT) con classification head.
-    Input: pair [query, doc] passato direttamente al tokenizer.
+    Input: pair [query, doc] passed directly to the tokenizer.
     Output: logit scalare → sigmoid → score in (0, 1).
 
     Richiede transformers >= 4.48.0.
-    flash_attn opzionale ma consigliato per accelerazione.
+    flash_attn is optional but recommended for acceleration.
     """
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
@@ -195,14 +195,14 @@ def load_gte_modernbert_reranker(device: str, max_length: int):
 
     def score_pairs(pairs: list) -> list:
         """
-        Closure che incapsula modello e tokenizer.
-        Accetta lista di (query, doc) e ritorna lista di float in (0, 1).
+        Closure wrapping model and tokenizer.
+        Accepts a list of (query, doc) and returns a list of floats in (0, 1).
 
-        Il tokenizer GTE accetta direttamente la lista di pair [[q, d], ...]:
-        gestisce internamente la separazione query/doc con [SEP].
+        The GTE tokenizer directly accepts pair lists [[q, d], ...]:
+        it handles query/doc separation internally using [SEP].
         Output: sigmoid(logits.view(-1)) → score in (0,1).
         """
-        # Converti in lista di liste per il tokenizer pair-mode
+        # Convert to list-of-lists for tokenizer pair mode
         pair_list = [[q, d] for q, d in pairs]
 
         inputs = tokenizer(
@@ -225,12 +225,12 @@ def load_gte_modernbert_reranker(device: str, max_length: int):
 
 
 # ──────────────────────────────────────────────────────────────
-# Inferenza con gestione OOM
+# Inference with OOM handling
 # ──────────────────────────────────────────────────────────────
 def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
     """
-    Itera le coppie a batch, chiama score_fn e aggrega i risultati.
-    Gestisce OOM dimezzando il batch e ripristinandolo al chunk successivo.
+    Iterate pairs by batch, call score_fn, and aggregate results.
+    Handle OOM by halving batch size, then restoring it for next chunk.
     """
     all_scores    = []
     current_batch = batch_size
@@ -251,8 +251,8 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
             torch.cuda.empty_cache()
             if current_batch <= 1:
                 print(
-                    f"  WARNING: OOM anche con batch=1 su {len(batch)} coppie. "
-                    f"Score=0.5 come fallback (ordine BM25 mantenuto).",
+                    f"  WARNING: OOM even with batch=1 on {len(batch)} pairs. "
+                    f"Score=0.5 as fallback (BM25 order preserved).",
                     flush=True,
                 )
                 all_scores.extend([0.5] * len(batch))
@@ -260,13 +260,13 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
                 current_batch = batch_size
             else:
                 current_batch = max(1, current_batch // 2)
-                print(f"  OOM → riduco batch a {current_batch} per questo chunk", flush=True)
+                print(f"  OOM -> reducing batch to {current_batch} for this chunk", flush=True)
 
     return all_scores
 
 
 # ──────────────────────────────────────────────────────────────
-# Worker per-GPU (path multi-GPU)
+# Per-GPU worker (multi-GPU path)
 # ──────────────────────────────────────────────────────────────
 def rerank_worker(
         gpu_id: int,
@@ -285,7 +285,7 @@ def rerank_worker(
     import torch
 
     device = "cuda:0"
-    print(f"[GPU {gpu_id}] {torch.cuda.get_device_name(0)} — caricamento modello...", flush=True)
+    print(f"[GPU {gpu_id}] {torch.cuda.get_device_name(0)} - loading model...", flush=True)
 
     score_fn = load_gte_modernbert_reranker(device, max_length)
 
@@ -330,10 +330,10 @@ if __name__ == "__main__":
     NUM_GPUS = torch.cuda.device_count()
     if NUM_GPUS == 0:
         DEVICE = "cpu"
-        print("Device: cpu (nessuna GPU CUDA trovata)")
+        print("Device: cpu (no CUDA GPU found)")
     else:
         DEVICE = "cuda:0"
-        print(f"Device: cuda — {NUM_GPUS} GPU disponibili:")
+        print(f"Device: cuda - {NUM_GPUS} GPUs available:")
         for i in range(NUM_GPUS):
             print(f"  [{i}] {torch.cuda.get_device_name(i)}")
 
@@ -358,7 +358,7 @@ if __name__ == "__main__":
         for q in queries_raw
     }
 
-    print(f"\nCorpus: {len(paper_texts)} documenti | "
+    print(f"\nCorpus: {len(paper_texts)} documents | "
           f"Queries: {len(query_texts)} | "
           f"BM25 results: {len(bm25_results)}")
 
@@ -366,16 +366,16 @@ if __name__ == "__main__":
     sample_candidates = bm25_results[sample_qid][:5]
     hits = sum(1 for pk in sample_candidates if str(pk) in paper_texts)
     print(f"Sanity check corpus — query '{sample_qid}': "
-          f"{hits}/{len(sample_candidates)} candidati trovati nel corpus")
+          f"{hits}/{len(sample_candidates)} candidates found in corpus")
     if hits == 0:
-        print("ERRORE CRITICO: 0 candidati trovati. "
-              f"Tipo pubkey bm25={type(sample_candidates[0])}, "
-              f"tipo chiave corpus=str")
+        print("CRITICAL ERROR: 0 candidates found. "
+              f"bm25 pubkey type={type(sample_candidates[0])}, "
+              f"corpus key type=str")
 
     sample_qt = query_texts.get(str(sample_qid), "")
     print(f"Sanity check queries — qid='{sample_qid}': '{sample_qt[:80]}...'")
     if not sample_qt:
-        print("WARNING: query text vuoto. Controlla campo 'original'/'text' nel JSON query.")
+        print("WARNING: empty query text. Check 'original'/'text' field in query JSON.")
 
     all_query_items = list(bm25_results.items())
     print(f"\nRe-ranking {len(bm25_results)} queries "
@@ -387,7 +387,7 @@ if __name__ == "__main__":
 
         ok = sanity_check_scores(score_fn)
         if not ok:
-            print("\nWARNING: sanity check fallito. Procedo comunque.\n")
+            print("\nWARNING: sanity check failed. Proceeding anyway.\n")
 
         reranked_results: dict = {}
         missing_docs  = 0
@@ -465,7 +465,7 @@ if __name__ == "__main__":
     print(f"\nTotal pairs scored : {total_pairs}")
     print(f"Queries re-ranked  : {len(reranked_results)}")
     if missing_docs:
-        print(f"Pubkey non trovati : {missing_docs} (ordine BM25 mantenuto)")
+        print(f"Pubkeys not found : {missing_docs} (BM25 order preserved)")
     coverage = len(reranked_results) / len(bm25_results) * 100
     print(f"Coverage           : {coverage:.1f}% ({len(reranked_results)}/{len(bm25_results)})")
 
@@ -476,5 +476,5 @@ if __name__ == "__main__":
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(reranked_results, f, indent=2, ensure_ascii=False)
 
-    print(f"\nSalvato → {args.output}")
-    print("Done. Ora esegui il Java evaluator puntando a reranked_results_gte_modernbert.json.")
+    print(f"\nSaved -> {args.output}")
+    print("Done. Now run the Java evaluator pointing to reranked_results_gte_modernbert.json.")

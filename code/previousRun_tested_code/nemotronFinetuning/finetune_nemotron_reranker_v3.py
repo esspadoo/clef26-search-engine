@@ -1,55 +1,45 @@
 """
 finetune_nemotron_reranker_v3.py
 
-Fine-tuning di nvidia/llama-nemotron-rerank-1b-v2 con HuggingFace Trainer
-nativo + LoRA (PEFT).
+Fine-tuning for nvidia/llama-nemotron-rerank-1b-v2 with native
+HuggingFace Trainer + LoRA (PEFT).
 
-═══════════════════════════════════════════════════════════════════
-CAMBIAMENTI RISPETTO A v2 — RIEPILOGO
-═══════════════════════════════════════════════════════════════════
+===============================================================
+CHANGES COMPARED TO v2 - SUMMARY
+===============================================================
 
-[FIX 1] modules_to_save=["score"] RIMOSSO
-  → In v2 la head "score" veniva clonata e re-inizializzata da PEFT,
-    perdendo la calibrazione pre-trained. Ora la head è congelata
-    di default (solo LoRA aggiorna q/k/v/o).
+[FIX 1] Removed modules_to_save=["score"]
+  In v2, PEFT cloned and reinitialized the "score" head,
+  losing pre-trained calibration. Now the head is frozen by default
+  (only LoRA updates q/k/v/o).
 
-[FIX 2] Learning rate abbassata: 2e-4 → 5e-5
-  → Con LoRA rank=32 e alpha=64 il LR effettivo era troppo aggressivo.
-    5e-5 è più conservativo e riduce il rischio di catastrophic forgetting.
+[FIX 2] Lowered learning rate: 2e-4 -> 5e-5
+  Previous effective LR was too aggressive for LoRA setup.
 
-[FIX 3] LoRA rank abbassato: 32 → 16, dropout alzato: 0.05 → 0.1
-  → Meno parametri trainabili = meno overfitting.
-    Dropout più alto = maggiore regolarizzazione.
+[FIX 3] Lowered LoRA rank: 32 -> 16, raised dropout: 0.05 -> 0.1
+  Fewer trainable params and stronger regularization.
 
-[FIX 4] Loss: BCEWithLogitsLoss → PairwiseMarginLoss (con fallback a BCE)
-  → BCE ottimizza la calibrazione assoluta dei logit (buona per classificazione).
-    Per il ranking quello che conta è l'ORDINE relativo pos > neg.
-    La MarginRankingLoss ottimizza direttamente: score(pos) - score(neg) > margin.
-    Fallback a BCE se il batch non contiene sia pos che neg.
+[FIX 4] Loss: BCEWithLogitsLoss -> PairwiseMarginLoss (with BCE fallback)
+  Ranking needs relative order (pos > neg), not absolute calibration.
 
 [FIX 5] load_best_model_at_end=True, save_total_limit=3
-  → In v2 veniva salvato solo il modello finale (potenzialmente il peggiore).
-    Ora si salva il checkpoint con eval_loss minima.
+  Save best checkpoint by minimum eval_loss.
 
-[FIX 6] Epochs ridotte: 3 → 2, eval_steps ridotti: 500 → 200
-  → Meno epoche = meno rischio di overfitting.
-    Eval più frequente = catch tempestivo della degradazione.
+[FIX 6] Reduced epochs and eval interval
+  Fewer epochs lower overfitting risk; more frequent eval catches degradation earlier.
 
-[FIX 7] weight_decay alzato: 0.01 → 0.05
-  → Maggiore regolarizzazione L2 per limitare il drift dei pesi LoRA.
+[FIX 7] Increased weight_decay: 0.01 -> 0.05
+  Stronger L2 regularization for LoRA weights.
 
-[FIX 8] warmup_ratio alzato: 0.1 → 0.15
-  → Warm-up più lungo per stabilizzare il training nelle prime iterazioni.
+[FIX 8] Increased warmup_ratio: 0.1 -> 0.15
+  Longer warmup stabilizes early training.
 
-[FIX 9] PairDataset ora supporta hard_neg separati da soft_neg
-  → Se il JSONL ha un campo "hard_neg", quei negativi vengono campionati
-    con probabilità doppia rispetto ai negativi normali.
-    Hard negatives (es. BM25 top-k) sono molto più informativi per il ranking.
+[FIX 9] PairDataset now supports separate hard_neg and soft neg
+  hard_neg are sampled with double weight.
 
-[FIX 10] Aggiunto EarlyStoppingCallback
-  → Il training si ferma automaticamente se eval_loss non migliora
-    per patience=3 eval consecutive. Previene il sovraallenamento.
-═══════════════════════════════════════════════════════════════════
+[FIX 10] Added EarlyStoppingCallback
+  Training stops when eval_loss no longer improves for consecutive evaluations.
+===============================================================
 """
 
 import json
@@ -93,24 +83,20 @@ def load_jsonl(path: str) -> list[dict]:
             line = line.strip()
             if line:
                 rows.append(json.loads(line))
-    log.info(f"Caricato {path}: {len(rows):,} gruppi")
+    log.info(f"Loaded {path}: {len(rows):,} groups")
     return rows
 
 
 class PairDataset(TorchDataset):
     """
-    Dataset di coppie (query, passage) con label binaria.
+    Pair dataset (query, passage) with binary labels.
 
-    [FIX 9] Supporto hard_neg con campionamento pesato.
-    Il campo "hard_neg" nel JSONL (es. top-k BM25 non rilevanti)
-    viene incluso con peso doppio rispetto ai normali "neg".
-    Hard negatives sono molto più informativi perché sono simili
-    ai positivi ma non rilevanti — esattamente il caso difficile
-    che il reranker deve saper gestire.
+    [FIX 9] Supports weighted hard_neg sampling.
+    "hard_neg" entries are duplicated to give them double weight.
 
-    Formato JSONL atteso:
+    Expected JSONL format:
       {"query": "...", "pos": ["doc1", ...], "neg": ["doc2", ...]}
-      oppure con hard negatives:
+      or with hard negatives:
       {"query": "...", "pos": [...], "neg": [...], "hard_neg": [...]}
     """
 
@@ -126,15 +112,15 @@ class PairDataset(TorchDataset):
                 self.pairs.append((query, doc, 1.0))
             for doc in g.get("neg", []):
                 self.pairs.append((query, doc, 0.0))
-            # [FIX 9] Hard negatives aggiunti due volte per oversampling
+            # [FIX 9] Hard negatives added twice for oversampling
             for doc in g.get("hard_neg", []):
                 self.pairs.append((query, doc, 0.0))
-                self.pairs.append((query, doc, 0.0))  # peso doppio
+                self.pairs.append((query, doc, 0.0))  # double weight
                 n_hard += 1
 
         if n_hard > 0:
-            log.info(f"  → {n_hard:,} hard negatives inclusi (x2 oversampling)")
-        log.info(f"PairDataset: {len(self.pairs):,} coppie totali")
+            log.info(f"  -> {n_hard:,} hard negatives included (x2 oversampling)")
+        log.info(f"PairDataset: {len(self.pairs):,} total pairs")
 
     def __len__(self):
         return len(self.pairs)
@@ -146,8 +132,8 @@ class PairDataset(TorchDataset):
             passage,
             max_length=self.max_length,
             truncation=True,
-            padding=False,        # padding dinamico nel DataCollator
-            return_tensors=None,  # liste Python, non tensori
+            padding=False,        # dynamic padding in DataCollator
+            return_tensors=None,  # Python lists, not tensors
         )
         enc["labels"] = label
         return enc
@@ -271,29 +257,23 @@ def evaluate_reranking(
 
 
 # ══════════════════════════════════════════════════════════════════
-# NemotronTrainer — con PairwiseMarginLoss
+# NemotronTrainer - with PairwiseMarginLoss
 # ══════════════════════════════════════════════════════════════════
 
 class NemotronTrainer(Trainer):
     """
-    Trainer custom con Pairwise Margin Loss + fallback a BCE.
+    Custom trainer with Pairwise Margin Loss + BCE fallback.
 
-    [FIX 4] PERCHÉ MARGIN LOSS INVECE DI BCE:
-    La BCEWithLogitsLoss ottimizza la calibrazione ASSOLUTA dei logit:
-    vuole che score(pos) → +∞ e score(neg) → -∞ in termini assoluti.
-    Per il reranking quello che conta è l'ORDINE RELATIVO:
-    score(pos) > score(neg) + margin.
-    La MarginRankingLoss ottimizza direttamente questa distanza relativa,
-    ed è quindi più adatta a un task di ranking.
+    [FIX 4] WHY MARGIN LOSS INSTEAD OF BCE:
+    BCEWithLogitsLoss optimizes absolute calibration, while reranking
+    needs relative order: score(pos) > score(neg) + margin.
 
-    Implementazione:
-      Per ogni batch, costruiamo tutte le coppie (pos_i, neg_j) e
-      calcoliamo: loss = mean(max(0, margin - (score_pos - score_neg)))
-      margin=1.0 è un valore standard per questo tipo di loss.
+    Implementation:
+      For each batch, build all (pos_i, neg_j) pairs and compute
+      loss = mean(max(0, margin - (score_pos - score_neg))).
 
-    Fallback a BCE:
-      Se il batch contiene solo pos o solo neg (può capitare con batch
-      piccoli), la margin loss non è applicabile: si cade su BCE.
+    BCE fallback:
+      If batch has only pos or only neg, margin loss is not applicable.
     """
 
     def __init__(self, *args, pos_weight: float = 1.0, margin: float = 1.0, **kwargs):
@@ -312,20 +292,20 @@ class NemotronTrainer(Trainer):
         pos_mask = labels >= 1.0
         neg_mask = labels < 1.0
 
-        # [FIX 4] Pairwise margin loss se abbiamo sia pos che neg nel batch
+        # [FIX 4] Pairwise margin loss if both pos and neg are in batch
         if pos_mask.sum() > 0 and neg_mask.sum() > 0:
             pos_scores = logits[pos_mask]   # shape (n_pos,)
             neg_scores = logits[neg_mask]   # shape (n_neg,)
 
-            # Broadcast su tutte le coppie pos×neg: shape (n_pos, n_neg)
+            # Broadcast over all pos x neg pairs: shape (n_pos, n_neg)
             pos_exp = pos_scores.unsqueeze(1)
             neg_exp = neg_scores.unsqueeze(0)
 
-            # max(0, margin - (pos - neg)): vogliamo pos - neg > margin
+            # max(0, margin - (pos - neg)): we want pos - neg > margin
             pair_loss = torch.clamp(self.margin - (pos_exp - neg_exp), min=0.0)
             loss = pair_loss.mean()
         else:
-            # Fallback a BCE se il batch è mono-label
+            # BCE fallback for mono-label batches
             pw = torch.tensor(
                 self.pos_weight_value,
                 dtype=logits.dtype,
@@ -342,8 +322,8 @@ class NemotronTrainer(Trainer):
 
 class RerankingEvalCallback(TrainerCallback):
     """
-    Callback che esegue la valutazione reranking ad ogni on_evaluate.
-    Logga NDCG e MRR a più soglie k.
+    Callback that runs reranking evaluation on each on_evaluate.
+    Logs NDCG and MRR at multiple k values.
     """
 
     def __init__(
@@ -365,7 +345,7 @@ class RerankingEvalCallback(TrainerCallback):
     def on_evaluate(self, args, state, control, model=None, **kwargs):
         if model is None:
             return
-        log.info(f"[Step {state.global_step}] Valutazione reranking:")
+        log.info(f"[Step {state.global_step}] Reranking evaluation:")
         evaluate_reranking(
             model=model,
             tokenizer=self.tokenizer,
@@ -384,18 +364,14 @@ class RerankingEvalCallback(TrainerCallback):
 
 def apply_lora(model, lora_rank: int, lora_alpha: int, lora_dropout: float):
     """
-    Applica LoRA al modello.
+    Apply LoRA to model.
 
-    [FIX 1] modules_to_save=["score"] RIMOSSO.
-    In v2 PEFT clonava la head "score" e la re-inizializzava come
-    parametro separato. Questo cancellava la calibrazione pre-trained
-    della head, che è la parte più critica per il ranking.
-    Ora la head rimane congelata (usa i pesi originali) e solo
-    i moduli q/k/v/o vengono aggiornati via LoRA.
+    [FIX 1] modules_to_save=["score"] REMOVED.
+    In v2 PEFT cloned and reinitialized the "score" head, wiping out
+    pre-trained calibration. Now head weights stay frozen and only
+    q/k/v/o modules are updated by LoRA.
 
-    [FIX 3] rank abbassato (32→16 default), dropout alzato (0.05→0.1).
-    Meno parametri = meno overfitting.
-    Dropout più alto = maggiore regolarizzazione dei pesi LoRA.
+    [FIX 3] lower rank and higher dropout by default.
     """
     lora_config = LoraConfig(
         task_type=TaskType.SEQ_CLS,
@@ -403,7 +379,7 @@ def apply_lora(model, lora_rank: int, lora_alpha: int, lora_dropout: float):
         lora_alpha=lora_alpha,
         lora_dropout=lora_dropout,   # [FIX 3]
         target_modules=["q_proj", "k_proj", "v_proj", "o_proj"],
-        # modules_to_save=["score"],  # [FIX 1] RIMOSSO — head congelata
+        # modules_to_save=["score"],  # [FIX 1] REMOVED - head frozen
         bias="none",
     )
     model = get_peft_model(model, lora_config)
@@ -419,8 +395,8 @@ def apply_lora(model, lora_rank: int, lora_alpha: int, lora_dropout: float):
 @dataclass
 class PairCollator:
     """
-    DataCollator con padding dinamico e conversione label in float tensor.
-    Necessario perché DataCollatorWithPadding non gestisce le label float.
+    DataCollator with dynamic padding and float-label conversion.
+    Needed because DataCollatorWithPadding does not handle float labels.
     """
     tokenizer: Any
     pad_to_multiple_of: int | None = None
@@ -433,7 +409,7 @@ class PairCollator:
         )
         batch = base(features)
         batch["labels"] = torch.tensor(labels, dtype=torch.float32)
-        # Rimetti le label nelle features originali per non corrompere il dataset
+        # Put labels back into original features to avoid mutating dataset entries
         for f, label in zip(features, labels):
             f["labels"] = label
         return batch
@@ -447,26 +423,26 @@ def main():
     import argparse
 
     parser = argparse.ArgumentParser(
-        description="Fine-tuning llama-nemotron-rerank-1b-v2 — v3"
+        description="Fine-tuning llama-nemotron-rerank-1b-v2 - v3"
     )
     parser.add_argument("--train_file",       required=True)
     parser.add_argument("--dev_file",         required=True)
     parser.add_argument("--output_dir",       default="models/nemotron-rerank-1b-retrixV3")
     parser.add_argument("--model_name",       default="nvidia/llama-nemotron-rerank-1b-v2")
     parser.add_argument("--no_lora",          action="store_true")
-    parser.add_argument("--lora_rank",        type=int,   default=16)     # [FIX 3] era 32
-    parser.add_argument("--lora_alpha",       type=int,   default=32)     # [FIX 3] era 64
-    parser.add_argument("--lora_dropout",     type=float, default=0.1)    # [FIX 3] era 0.05
-    parser.add_argument("--margin",           type=float, default=1.0)    # [FIX 4] per margin loss
+    parser.add_argument("--lora_rank",        type=int,   default=16)     # [FIX 3] was 32
+    parser.add_argument("--lora_alpha",       type=int,   default=32)     # [FIX 3] was 64
+    parser.add_argument("--lora_dropout",     type=float, default=0.1)    # [FIX 3] was 0.05
+    parser.add_argument("--margin",           type=float, default=1.0)    # [FIX 4] for margin loss
     parser.add_argument("--batch_size",       type=int,   default=16)
     parser.add_argument("--grad_accum",       type=int,   default=4)
-    parser.add_argument("--epochs",           type=int,   default=1)      # [FIX 6] era 3
+    parser.add_argument("--epochs",           type=int,   default=1)      # [FIX 6] was 3
     parser.add_argument("--lr",               type=float, default=None)
     parser.add_argument("--max_length",       type=int,   default=1024)
-    parser.add_argument("--warmup_ratio",     type=float, default=0.1)   # [FIX 8] era 0.1
-    parser.add_argument("--weight_decay",     type=float, default=0.05)   # [FIX 7] era 0.01
-    parser.add_argument("--eval_steps",       type=int,   default=100)    # [FIX 6] era 500
-    parser.add_argument("--save_steps",       type=int,   default=100)    # [FIX 5] era 10000
+    parser.add_argument("--warmup_ratio",     type=float, default=0.1)   # [FIX 8]
+    parser.add_argument("--weight_decay",     type=float, default=0.05)   # [FIX 7] was 0.01
+    parser.add_argument("--eval_steps",       type=int,   default=100)    # [FIX 6] was 500
+    parser.add_argument("--save_steps",       type=int,   default=100)    # [FIX 5] was 10000
     parser.add_argument("--patience",         type=int,   default=3)      # [FIX 10] early stopping
     parser.add_argument("--max_eval_queries", type=int,   default=500)
     parser.add_argument("--seed",             type=int,   default=42)
@@ -474,10 +450,10 @@ def main():
 
     use_lora = not args.no_lora
     if args.lr is None:
-        # [FIX 2] LR abbassato: 2e-4 → 5e-5 per LoRA, invariato per full FT
+        # [FIX 2] LR lowered for LoRA
         args.lr = 2e-5 if use_lora else 5e-6
 
-    log.info(f"Modalità: {'LoRA' if use_lora else 'Full fine-tuning'} | LR={args.lr}")
+    log.info(f"Mode: {'LoRA' if use_lora else 'Full fine-tuning'} | LR={args.lr}")
     log.info(f"  rank={args.lora_rank}, alpha={args.lora_alpha}, dropout={args.lora_dropout}")
     log.info(f"  margin={args.margin}, epochs={args.epochs}, patience={args.patience}")
     random.seed(args.seed)
@@ -489,18 +465,18 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     log.info(f"Device: {device}")
 
-    # ── 1. Tokenizer ───────────────────────────────────────────────
-    log.info(f"Caricamento tokenizer: {args.model_name}")
+    # -- 1. Tokenizer --
+    log.info(f"Loading tokenizer: {args.model_name}")
     tokenizer = AutoTokenizer.from_pretrained(
         args.model_name,
         trust_remote_code=True,
     )
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
-        log.info("pad_token impostato a eos_token")
+        log.info("pad_token set to eos_token")
 
-    # ── 2. Modello ─────────────────────────────────────────────────
-    log.info(f"Caricamento modello: {args.model_name}")
+    # -- 2. Model --
+    log.info(f"Loading model: {args.model_name}")
     model = AutoModelForSequenceClassification.from_pretrained(
         args.model_name,
         num_labels=1,
@@ -509,12 +485,12 @@ def main():
         ignore_mismatched_sizes=True,
     )
     model.config.pad_token_id = tokenizer.pad_token_id
-    log.info(f"Parametri totali: {sum(p.numel() for p in model.parameters()):,}")
+    log.info(f"Total parameters: {sum(p.numel() for p in model.parameters()):,}")
 
-    # ── 3. LoRA ────────────────────────────────────────────────────
+    # -- 3. LoRA --
     if use_lora:
         log.info(
-            f"Applicazione LoRA: rank={args.lora_rank}, "
+            f"Applying LoRA: rank={args.lora_rank}, "
             f"alpha={args.lora_alpha}, dropout={args.lora_dropout}"
         )
         model = apply_lora(model, args.lora_rank, args.lora_alpha, args.lora_dropout)
@@ -522,25 +498,25 @@ def main():
         log.info("Full fine-tuning (no LoRA)")
         try:
             model.gradient_checkpointing_enable()
-            log.info("gradient_checkpointing abilitato")
+            log.info("gradient_checkpointing enabled")
         except Exception as e:
-            log.warning(f"gradient_checkpointing non abilitabile: {e}")
+            log.warning(f"Could not enable gradient_checkpointing: {e}")
 
-    # ── 4. Dataset ─────────────────────────────────────────────────
-    log.info("Caricamento dataset...")
+    # -- 4. Dataset --
+    log.info("Loading dataset...")
     train_groups  = load_jsonl(args.train_file)
     dev_groups    = load_jsonl(args.dev_file)
     train_dataset = PairDataset(train_groups, tokenizer, args.max_length)
     dev_dataset   = PairDataset(dev_groups,   tokenizer, args.max_length)
     pos_weight    = compute_pos_weight(train_dataset)
 
-    # ── 5. Eval samples ────────────────────────────────────────────
+    # -- 5. Eval samples --
     eval_samples = build_eval_samples(
         dev_groups, max_queries=args.max_eval_queries, seed=args.seed
     )
 
-    # ── 6. Baseline ────────────────────────────────────────────────
-    log.info("Baseline pre-training:")
+    # -- 6. Baseline --
+    log.info("Pre-training baseline:")
     model.to(device)
     baseline_metrics = evaluate_reranking(
         model=model,
@@ -552,31 +528,31 @@ def main():
         prefix="baseline_",
     )
 
-    # ── 7. Training args ───────────────────────────────────────────
+    # -- 7. Training args --
     training_args = TrainingArguments(
         output_dir=str(output_dir),
-        num_train_epochs=args.epochs,          # [FIX 6] 2 invece di 3
+        num_train_epochs=args.epochs,          # [FIX 6]
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
-        learning_rate=args.lr,                 # [FIX 2] 5e-5 invece di 2e-4
-        warmup_ratio=args.warmup_ratio,        # [FIX 8] 0.15 invece di 0.1
-        weight_decay=args.weight_decay,        # [FIX 7] 0.05 invece di 0.01
+        learning_rate=args.lr,                 # [FIX 2]
+        warmup_ratio=args.warmup_ratio,        # [FIX 8]
+        weight_decay=args.weight_decay,        # [FIX 7]
         fp16=False,
         bf16=True,
         dataloader_num_workers=3,
         eval_strategy="steps",
-        eval_steps=args.eval_steps,            # [FIX 6] 200 invece di 500
+        eval_steps=args.eval_steps,            # [FIX 6]
         save_strategy="steps",
-        save_steps=args.save_steps,            # [FIX 5] 200 invece di 10000
-        save_total_limit=1,                    # [FIX 5] era 0 (nessun salvataggio intermedio)
+        save_steps=args.save_steps,            # [FIX 5]
+        save_total_limit=1,                    # [FIX 5]
         logging_strategy="steps",
         logging_steps=100,
         logging_first_step=True,
         seed=args.seed,
         run_name="nemotron-rerank-1b-retrix-v3",
         gradient_checkpointing=not use_lora,
-        # [FIX 5] Salva il checkpoint con eval_loss minima
+        # [FIX 5] Save checkpoint with minimum eval_loss
         load_best_model_at_end=True,
         metric_for_best_model="eval_loss",
         greater_is_better=False,
@@ -584,14 +560,13 @@ def main():
         report_to="none",
     )
 
-    # ── 8. Callbacks ────────────────────────────────────────────────
+    # -- 8. Callbacks --
     callbacks = [
-        # [FIX 10] Early stopping: ferma il training se eval_loss
-        # non migliora per `patience` eval consecutive.
-        # Previene l'overfitting e risparmia tempo di compute.
+        # [FIX 10] Early stopping when eval_loss does not improve
+        # for `patience` consecutive evaluations.
         EarlyStoppingCallback(early_stopping_patience=args.patience),
 
-        # Callback di valutazione reranking (NDCG, MRR)
+        # Reranking evaluation callback (NDCG, MRR)
         RerankingEvalCallback(
             eval_samples=eval_samples,
             tokenizer=tokenizer,
@@ -601,25 +576,25 @@ def main():
         ),
     ]
 
-    # ── 9. Trainer ─────────────────────────────────────────────────
+    # -- 9. Trainer --
     trainer = NemotronTrainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
         eval_dataset=dev_dataset,
         data_collator=PairCollator(tokenizer=tokenizer),
-        pos_weight=pos_weight,     # usato solo nel fallback BCE
-        margin=args.margin,        # [FIX 4] per margin loss
+        pos_weight=pos_weight,     # used only in BCE fallback
+        margin=args.margin,        # [FIX 4] margin loss
         callbacks=callbacks,
     )
 
-    log.info("Avvio training...")
+    log.info("Starting training...")
     trainer.train()
 
-    # ── 10. Valutazione finale ─────────────────────────────────────
-    log.info("Valutazione finale (best checkpoint):")
+    # -- 10. Final evaluation --
+    log.info("Final evaluation (best checkpoint):")
     final_metrics = evaluate_reranking(
-        model=trainer.model,       # usa il best model caricato da load_best_model_at_end
+        model=trainer.model,       # uses best model loaded by load_best_model_at_end
         tokenizer=tokenizer,
         eval_samples=eval_samples,
         batch_size=args.batch_size,
@@ -630,28 +605,26 @@ def main():
 
     with open(output_dir / "final_metrics.json", "w") as f:
         json.dump({**baseline_metrics, **final_metrics}, f, indent=2)
-    log.info(f"Metriche salvate in {output_dir / 'final_metrics.json'}")
+    log.info(f"Metrics saved to {output_dir / 'final_metrics.json'}")
 
-    # ── 11. Salvataggio ────────────────────────────────────────────
+    # -- 11. Saving --
     #
-    # PERCHÉ QUESTO BLOCCO È CRITICO PER NEMOTRON:
+    # WHY THIS BLOCK IS CRITICAL FOR NEMOTRON:
     #
-    # Nemotron usa trust_remote_code=True — significa che la sua architettura
-    # è definita in file Python custom scaricati da HuggingFace Hub e cachati
-    # localmente (modeling_nemotron.py, configuration_nemotron.py, ecc.).
-    # Quando si salva con save_pretrained(), questi file NON vengono copiati
-    # automaticamente nella directory di output, causando:
+    # Nemotron uses trust_remote_code=True - its architecture is defined in
+    # custom Python files downloaded from HuggingFace Hub and cached locally
+    # (modeling_nemotron.py, configuration_nemotron.py, etc.).
+    # When saving with save_pretrained(), these files are NOT copied
+    # automatically into output directory, causing:
     #   - ValueError: Unrecognized model ... Should have a `model_type` key
-    #   - Tokenizer che non si carica perché mancano i file custom
+    #   - Tokenizer failing to load because custom files are missing
     #
-    # La soluzione è copiare esplicitamente tutti i file custom dalla cache
-    # HuggingFace nella directory finale, in modo che il modello sia
-    # completamente auto-contenuto e caricabile senza connessione internet.
+    # Solution: explicitly copy custom files from HuggingFace cache into
+    # final directory so the model is self-contained and loadable offline.
     #
-    # PROBLEMA AGGIUNTIVO con merge_and_unload() + LoRA:
-    # Dopo il merge, il modello risultante è un oggetto Python "nudo" che
-    # ha perso il riferimento alla cache HF. save_pretrained() salva i pesi
-    # ma NON i file custom dell'architettura. Bisogna copiarli a mano.
+    # ADDITIONAL ISSUE with merge_and_unload() + LoRA:
+    # After merge, resulting model may lose reference to HF cache.
+    # save_pretrained() saves weights but NOT custom architecture files.
 
     import shutil
     from huggingface_hub import snapshot_download
@@ -659,22 +632,22 @@ def main():
     final_dir = output_dir / "final"
     final_dir.mkdir(parents=True, exist_ok=True)
 
-    # Step 1: scarica/localizza i file custom del modello base nella cache HF
-    # (se già in cache non fa nessuna richiesta di rete)
-    log.info("Localizzazione file custom architettura Nemotron...")
+    # Step 1: download/locate base-model custom files in HF cache
+    # (if already cached, no network request is made)
+    log.info("Locating Nemotron architecture custom files...")
     try:
         base_model_cache = snapshot_download(
             repo_id=args.model_name,
-            local_files_only=False,   # usa cache se disponibile, scarica se no
+            local_files_only=False,   # use cache when available, download otherwise
         )
         log.info(f"  Cache base model: {base_model_cache}")
     except Exception as e:
-        log.warning(f"  snapshot_download fallito ({e}), provo cache locale...")
-        # Fallback: cerca nella cache HF standard
+        log.warning(f"  snapshot_download failed ({e}), trying local cache...")
+        # Fallback: search standard HF cache
         from huggingface_hub import hf_hub_download
         import os
         cache_dir = os.path.expanduser("~/.cache/huggingface/hub")
-        # Cerca la directory del modello nella cache
+        # Search model directory in cache
         model_cache_name = args.model_name.replace("/", "--")
         base_model_cache = None
         for root, dirs, files in os.walk(cache_dir):
@@ -682,26 +655,26 @@ def main():
                 base_model_cache = root
                 break
         if base_model_cache is None:
-            log.error("Impossibile trovare la cache del modello base. "
-                      "I file custom NON verranno copiati — il modello "
-                      "potrebbe non caricarsi con trust_remote_code=True.")
+            log.error("Could not find base model cache. "
+                      "Custom files will NOT be copied - model "
+                      "may fail to load with trust_remote_code=True.")
 
-    # Step 2: salva i pesi del modello fine-tunato
+    # Step 2: save fine-tuned model weights
     if use_lora:
-        log.info("Merging LoRA adapter nel modello base...")
+        log.info("Merging LoRA adapter into base model...")
         try:
             merged_model = trainer.model.merge_and_unload()
             merged_model.save_pretrained(str(final_dir))
-            log.info("✓ Merge completato e pesi salvati")
+            log.info("Merge completed and weights saved")
         except Exception as e:
-            log.error(f"Merge fallito: {e}. Salvo adapter separati.")
+            log.error(f"Merge failed: {e}. Saving adapters separately.")
             trainer.model.save_pretrained(str(final_dir))
     else:
         trainer.model.save_pretrained(str(final_dir))
 
-    # Step 3: salva il tokenizer dal modello base (più affidabile del tokenizer
-    # della sessione corrente, che potrebbe avere stati inconsistenti dopo PEFT)
-    log.info("Salvataggio tokenizer dal modello base...")
+    # Step 3: save tokenizer from base model (more reliable than session tokenizer
+    # which may be inconsistent after PEFT)
+    log.info("Saving tokenizer from base model...")
     try:
         from transformers import AutoTokenizer as _AutoTokenizer
         base_tokenizer = _AutoTokenizer.from_pretrained(
@@ -709,15 +682,13 @@ def main():
             trust_remote_code=True,
         )
         base_tokenizer.save_pretrained(str(final_dir))
-        log.info("✓ Tokenizer salvato dal modello base")
+        log.info("Tokenizer saved from base model")
     except Exception as e:
-        log.warning(f"Tokenizer base non disponibile ({e}), uso tokenizer sessione...")
+        log.warning(f"Base tokenizer unavailable ({e}), using session tokenizer...")
         tokenizer.save_pretrained(str(final_dir))
 
-    # Step 4: copia i file custom dell'architettura dalla cache HF
-    # Questi file sono necessari per trust_remote_code=True al momento
-    # del caricamento — senza di essi AutoModelForSequenceClassification
-    # non riconosce il model_type e crasha.
+    # Step 4: copy custom architecture files from HF cache
+    # These files are required when loading with trust_remote_code=True.
     if base_model_cache is not None:
         import os
         custom_extensions = (".py", ".json")
@@ -728,55 +699,54 @@ def main():
             dst = final_dir / fname
             if not os.path.isfile(src):
                 continue
-            # Copia tutti i .py (architettura custom) e i .json (config, tokenizer)
-            # ma NON sovrascrivere i .json che abbiamo già salvato con i pesi
-            # aggiornati (config.json ha num_labels=1, tokenizer_config.json aggiornato)
+            # Copy all .py (custom architecture) and .json (config, tokenizer)
+            # but do NOT overwrite .json files already saved with updated weights
             if fname.endswith(".py"):
                 shutil.copy2(src, dst)
                 copied.append(fname)
             elif fname.endswith(".json") and not dst.exists():
-                # Copia solo i .json mancanti (non sovrascrivere config.json salvato)
+                # Copy only missing .json files (do not overwrite saved config.json)
                 shutil.copy2(src, dst)
                 copied.append(fname)
             else:
                 skipped.append(fname)
-        log.info(f"  File custom copiati ({len(copied)}): {copied}")
+        log.info(f"  Custom files copied ({len(copied)}): {copied}")
         if skipped:
-            log.info(f"  File skippati (già esistenti): {[f for f in skipped if f.endswith('.json')]}")
+            log.info(f"  Skipped files (already existing): {[f for f in skipped if f.endswith('.json')]}")
     else:
-        log.warning("⚠  File custom architettura NON copiati. "
-                    "Per caricare il modello usa:\n"
+        log.warning("WARNING: Architecture custom files were NOT copied. "
+                    "To load the model use:\n"
                     f"  AutoModelForSequenceClassification.from_pretrained(\n"
                     f"    '{final_dir}',\n"
                     f"    trust_remote_code=True,\n"
                     f"    config=AutoConfig.from_pretrained('{args.model_name}', trust_remote_code=True)\n"
                     f"  )")
 
-    # Step 5: verifica che config.json abbia model_type
+    # Step 5: verify config.json has model_type
     config_path = final_dir / "config.json"
     if config_path.exists():
         with open(config_path) as f:
             cfg = json.load(f)
         if "model_type" not in cfg:
-            log.warning("  config.json manca di 'model_type' — patch automatica...")
-            # Carica config dal base e aggiorna con i nostri parametri
+            log.warning("  config.json missing 'model_type' - applying automatic patch...")
+            # Load base config and update with our parameters
             from transformers import AutoConfig
             base_cfg = AutoConfig.from_pretrained(args.model_name, trust_remote_code=True)
             base_cfg.num_labels = 1
             base_cfg.pad_token_id = tokenizer.pad_token_id
             base_cfg.save_pretrained(str(final_dir))
-            log.info("  ✓ config.json aggiornato con model_type corretto")
+            log.info("  config.json updated with correct model_type")
         else:
-            log.info(f"  ✓ config.json OK (model_type='{cfg['model_type']}')")
+            log.info(f"  config.json OK (model_type='{cfg['model_type']}')")
     else:
-        log.error("  config.json non trovato! Il modello non si caricherà.")
+        log.error("  config.json not found! Model will fail to load.")
 
-    log.info(f"✓ Modello finale completo salvato in {final_dir}")
-    log.info(f"  Contenuto: {sorted(f.name for f in final_dir.iterdir())}")
+    log.info(f"Final complete model saved in {final_dir}")
+    log.info(f"  Content: {sorted(f.name for f in final_dir.iterdir())}")
 
-    # ── 12. Riepilogo confronto baseline vs fine-tuned ─────────────
+    # -- 12. Baseline vs fine-tuned summary --
     log.info("\n" + "═" * 60)
-    log.info("RIEPILOGO CONFRONTO")
+    log.info("COMPARISON SUMMARY")
     log.info("═" * 60)
     for k in (5, 10):
         b_ndcg = baseline_metrics.get(f"baseline_ndcg@{k}", float("nan"))
@@ -797,7 +767,7 @@ def main():
         )
     log.info("═" * 60)
 
-    log.info("\nPer usarlo a inference:")
+    log.info("\nFor inference usage:")
     log.info("  from transformers import AutoTokenizer, AutoModelForSequenceClassification")
     log.info(f"  tokenizer = AutoTokenizer.from_pretrained('{final_dir}', trust_remote_code=True)")
     log.info(f"  model = AutoModelForSequenceClassification.from_pretrained('{final_dir}', trust_remote_code=True)")

@@ -1,31 +1,31 @@
 """
-Reranker_gte_multilingual.py — GTE-Multilingual-Reranker-Base re-ranking dei risultati BM25
-=============================================================================================
-Alibaba-NLP/gte-multilingual-reranker-base è un cross-encoder encoder-only
-(AutoModelForSequenceClassification) con supporto per 70+ lingue.
+Reranker_gte_multilingual.py — GTE-Multilingual-Reranker-Base re-ranking of BM25 results
+===========================================================================================
+Alibaba-NLP/gte-multilingual-reranker-base is an encoder-only cross-encoder
+(AutoModelForSequenceClassification) with support for 70+ languages.
 
-Il modello usa un'implementazione custom (trust_remote_code=True, da Alibaba-NLP/new-impl)
-con alcune differenze rispetto all'API HuggingFace standard:
-  - dtype=  invece di torch_dtype=  (torch_dtype è deprecato per questo modello)
-  - return_dict=  invece di use_return_dict=  (idem)
+The model uses a custom implementation (trust_remote_code=True, from Alibaba-NLP/new-impl)
+with some differences from the standard HuggingFace API:
+  - dtype=  instead of torch_dtype=  (torch_dtype is deprecated for this model)
+  - return_dict=  instead of use_return_dict=  (same reason)
 
-Meccanismo:
-  1. Tokenizzare la coppia come pair: tokenizer([[query, doc], ...], ...)
-  2. Forward pass → model(**inputs, return_dict=True).logits  shape [B, 1]
-  3. sigmoid(logits.view(-1).float()) → score in (0, 1), sempre positivo
-     - score alto (~1) = documento rilevante
-     - score basso (~0) = documento irrilevante
+Mechanism:
+  1. Tokenize query/document as pair: tokenizer([[query, doc], ...], ...)
+  2. Forward pass -> model(**inputs, return_dict=True).logits, shape [B, 1]
+  3. sigmoid(logits.view(-1).float()) -> score in (0, 1), always positive
+     - high score (~1) = relevant document
+     - low score (~0) = irrelevant document
   4. Ranking: sorted(..., reverse=True)
 
-Legge:
-  - data/expanded_queries_*.json   (query, campo "original")
+Reads:
+  - data/expanded_queries_*.json   (queries, "original" field)
   - data/collection_data.json      (corpus, title+abstract)
-  - results/bm25_results.json      (output Java: { qid → [pubkey, ...] })
+  - results/bm25_results.json      (Java output: { qid -> [pubkey, ...] })
 
-Scrive:
-  - results/reranked_results_gte_multilingual.json  (stesso formato: { qid → [pubkey, ...] })
+Writes:
+  - results/reranked_results_gte_multilingual.json  (same format: { qid -> [pubkey, ...] })
 
-Uso:
+Usage:
   python Reranker_gte_multilingual.py
   python Reranker_gte_multilingual.py --top_k 100 --batch 64 --query_chunk 8
 """
@@ -46,16 +46,16 @@ parser.add_argument("--papers",      default="../../../../../../data/collection_
 parser.add_argument("--bm25",        default="../../../../../../../results/bm25_results.json")
 parser.add_argument("--output",      default="../../../../../../../results/reranked_results_gte_multilingual.json")
 parser.add_argument("--top_k",       type=int, default=100,
-                    help="Candidati BM25 da passare al re-ranker (default: 100)")
+                    help="BM25 candidates to pass to the re-ranker (default: 100)")
 parser.add_argument("--batch",       type=int, default=64,
-                    help="Coppie per forward pass GPU (default: 64). "
-                         "GTE-multilingual-base è molto leggero. "
-                         "Su L40S puoi alzare fino a 128 con max_length=512.")
+                    help="Pairs per GPU forward pass (default: 64). "
+                         "GTE-multilingual-base is very lightweight. "
+                         "On L40S you can increase up to 128 with max_length=512.")
 parser.add_argument("--query_chunk", type=int, default=8,
-                    help="Query per chunk (default: 8).")
+                    help="Queries per chunk (default: 8).")
 parser.add_argument("--max_length",  type=int, default=512,
-                    help="Lunghezza massima token per coppia (default: 512). "
-                         "Il modello supporta fino a 8192 token.")
+                    help="Maximum token length per pair (default: 512). "
+                         "The model supports up to 8192 tokens.")
 
 MODEL_NAME = "Alibaba-NLP/gte-multilingual-reranker-base"
 
@@ -65,8 +65,8 @@ MODEL_NAME = "Alibaba-NLP/gte-multilingual-reranker-base"
 # ──────────────────────────────────────────────────────────────
 def sanity_check_scores(score_fn) -> bool:
     """
-    Verifica che il modello produca score discriminativi.
-    Dopo sigmoid: rilevante → vicino a 1, irrilevante → vicino a 0.
+    Verify that the model produces discriminative scores.
+    After sigmoid: relevant -> close to 1, irrelevant -> close to 0.
     """
     test_pairs = [
         ("neural network classification",
@@ -78,14 +78,14 @@ def sanity_check_scores(score_fn) -> bool:
         scores = score_fn(test_pairs)
         s0, s1 = float(scores[0]), float(scores[1])
         diff = abs(s0 - s1)
-        print(f"\n  [Sanity check] Score rilevante={s0:.4f} | Score irrilevante={s1:.4f} | Δ={diff:.4f}")
+        print(f"\n  [Sanity check] Relevant score={s0:.4f} | Irrelevant score={s1:.4f} | Delta={diff:.4f}")
         if diff < 0.05:
-            print("  WARNING: score quasi identici — controlla il modello/tokenizer!")
+            print("  WARNING: scores are almost identical - check model/tokenizer!")
             return False
         print("  [Sanity check] OK.")
         return True
     except Exception as e:
-        print(f"  WARNING: sanity check fallito: {e}")
+        print(f"  WARNING: sanity check failed: {e}")
         return False
 
 
@@ -102,7 +102,7 @@ def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
         candidates = candidate_pubkeys[:top_k]
 
         if not query_text:
-            print(f"  WARNING: query text non trovato per qid={qid}, uso ordine BM25", flush=True)
+            print(f"  WARNING: query text not found for qid={qid}, using BM25 order", flush=True)
             meta.append((qid, [], 0, candidates))
             continue
 
@@ -137,27 +137,26 @@ def scores_to_results(meta, scores_flat):
 
 
 # ──────────────────────────────────────────────────────────────
-# Caricamento modello
+# Model loading
 # ──────────────────────────────────────────────────────────────
 def load_gte_multilingual_reranker(device: str, max_length: int):
     """
-    Carica Alibaba-NLP/gte-multilingual-reranker-base.
+    Load Alibaba-NLP/gte-multilingual-reranker-base.
 
-    Il modello usa codice custom da Alibaba-NLP/new-impl, con due differenze
-    rispetto all'API HuggingFace standard che causano warning se ignorate:
+    The model uses custom code from Alibaba-NLP/new-impl, with two differences
+    from the standard HuggingFace API that trigger warnings if ignored:
 
-      1. dtype=torch.float16  (NON torch_dtype=): il modello custom
-         ridefinisce __init__ e usa 'dtype' come keyword argument diretto.
+      1. dtype=torch.float16  (NOT torch_dtype=): the custom model
+         overrides __init__ and uses 'dtype' as a direct keyword argument.
 
-      2. return_dict=True nel forward pass (NON use_return_dict=): stessa
-         ragione — il forward custom accetta 'return_dict', non 'use_return_dict'.
+      2. return_dict=True in forward pass (NOT use_return_dict=): same
+         reason - custom forward accepts 'return_dict', not 'use_return_dict'.
 
-    Ignorare questi dettagli non blocca l'esecuzione ma può causare il modello
-    a girare in fp32 anziché fp16, e output non strutturati (.logits inaccessibile).
+    Ignoring these details may not stop execution, but can make the model run
+    in fp32 instead of fp16 and produce unstructured outputs (.logits unavailable).
 
-    .float() prima di sigmoid: i logit fp16 hanno range limitato, il cast a fp32
-    evita saturazione agli estremi (0.0 o 1.0 esatto) su coppie molto rilevanti
-    o molto irrilevanti.
+    .float() before sigmoid: fp16 logits have limited range; fp32 casting avoids
+    saturation at extremes (exact 0.0 or 1.0) on very relevant or very irrelevant pairs.
     """
     from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
@@ -171,19 +170,19 @@ def load_gte_multilingual_reranker(device: str, max_length: int):
     model = AutoModelForSequenceClassification.from_pretrained(
         MODEL_NAME,
         trust_remote_code=True,
-        dtype=torch.float16,       # 'dtype', NON 'torch_dtype' — API custom del modello
+        dtype=torch.float16,       # 'dtype', NOT 'torch_dtype' - custom model API
         device_map=device,
     )
     model.eval()
 
     def score_pairs(pairs: list) -> list:
         """
-        Closure che incapsula modello e tokenizer.
-        Accetta lista di (query, doc) e ritorna lista di float in (0, 1).
+        Closure wrapping model and tokenizer.
+        Accepts a list of (query, doc) and returns a list of floats in (0, 1).
 
-        return_dict=True nel forward: necessario per accedere a output.logits
-        senza warning sul codice custom del modello.
-        .float() prima di sigmoid: cast fp16→fp32 per precisione numerica.
+        return_dict=True in forward: required to access output.logits
+        without warnings from the custom model code.
+        .float() before sigmoid: fp16->fp32 cast for numerical precision.
         """
         pair_list = [[q, d] for q, d in pairs]
 
@@ -197,7 +196,7 @@ def load_gte_multilingual_reranker(device: str, max_length: int):
         inputs = {k: v.to(model.device) for k, v in inputs.items()}
 
         with torch.inference_mode():
-            # return_dict=True: API custom del modello, NON use_return_dict
+            # return_dict=True: custom model API, NOT use_return_dict
             output = model(**inputs, return_dict=True)
             scores = torch.sigmoid(output.logits.view(-1).float()).cpu().tolist()
 
@@ -207,7 +206,7 @@ def load_gte_multilingual_reranker(device: str, max_length: int):
 
 
 # ──────────────────────────────────────────────────────────────
-# Inferenza con gestione OOM
+# Inference with OOM handling
 # ──────────────────────────────────────────────────────────────
 def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
     all_scores    = []
@@ -229,8 +228,8 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
             torch.cuda.empty_cache()
             if current_batch <= 1:
                 print(
-                    f"  WARNING: OOM anche con batch=1 su {len(batch)} coppie. "
-                    f"Score=0.5 come fallback (ordine BM25 mantenuto).",
+                    f"  WARNING: OOM even with batch=1 on {len(batch)} pairs. "
+                    f"Score=0.5 as fallback (BM25 order preserved).",
                     flush=True,
                 )
                 all_scores.extend([0.5] * len(batch))
@@ -238,13 +237,13 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
                 current_batch = batch_size
             else:
                 current_batch = max(1, current_batch // 2)
-                print(f"  OOM → riduco batch a {current_batch} per questo chunk", flush=True)
+                print(f"  OOM -> reducing batch to {current_batch} for this chunk", flush=True)
 
     return all_scores
 
 
 # ──────────────────────────────────────────────────────────────
-# Worker per-GPU (path multi-GPU)
+# Per-GPU worker (multi-GPU path)
 # ──────────────────────────────────────────────────────────────
 def rerank_worker(
         gpu_id: int,
@@ -263,7 +262,7 @@ def rerank_worker(
     import torch
 
     device = "cuda:0"
-    print(f"[GPU {gpu_id}] {torch.cuda.get_device_name(0)} — caricamento modello...", flush=True)
+    print(f"[GPU {gpu_id}] {torch.cuda.get_device_name(0)} - loading model...", flush=True)
 
     score_fn = load_gte_multilingual_reranker(device, max_length)
 
@@ -308,10 +307,10 @@ if __name__ == "__main__":
     NUM_GPUS = torch.cuda.device_count()
     if NUM_GPUS == 0:
         DEVICE = "cpu"
-        print("Device: cpu (nessuna GPU CUDA trovata)")
+        print("Device: cpu (no CUDA GPU found)")
     else:
         DEVICE = "cuda:0"
-        print(f"Device: cuda — {NUM_GPUS} GPU disponibili:")
+        print(f"Device: cuda - {NUM_GPUS} GPUs available:")
         for i in range(NUM_GPUS):
             print(f"  [{i}] {torch.cuda.get_device_name(i)}")
 
@@ -336,7 +335,7 @@ if __name__ == "__main__":
         for q in queries_raw
     }
 
-    print(f"\nCorpus: {len(paper_texts)} documenti | "
+    print(f"\nCorpus: {len(paper_texts)} documents | "
           f"Queries: {len(query_texts)} | "
           f"BM25 results: {len(bm25_results)}")
 
@@ -344,16 +343,16 @@ if __name__ == "__main__":
     sample_candidates = bm25_results[sample_qid][:5]
     hits = sum(1 for pk in sample_candidates if str(pk) in paper_texts)
     print(f"Sanity check corpus — query '{sample_qid}': "
-          f"{hits}/{len(sample_candidates)} candidati trovati nel corpus")
+          f"{hits}/{len(sample_candidates)} candidates found in corpus")
     if hits == 0:
-        print("ERRORE CRITICO: 0 candidati trovati. "
-              f"Tipo pubkey bm25={type(sample_candidates[0])}, "
-              f"tipo chiave corpus=str")
+        print("CRITICAL ERROR: 0 candidates found. "
+              f"bm25 pubkey type={type(sample_candidates[0])}, "
+              f"corpus key type=str")
 
     sample_qt = query_texts.get(str(sample_qid), "")
     print(f"Sanity check queries — qid='{sample_qid}': '{sample_qt[:80]}...'")
     if not sample_qt:
-        print("WARNING: query text vuoto. Controlla campo 'original'/'text' nel JSON query.")
+        print("WARNING: empty query text. Check 'original'/'text' field in query JSON.")
 
     all_query_items = list(bm25_results.items())
     print(f"\nRe-ranking {len(bm25_results)} queries "
@@ -365,7 +364,7 @@ if __name__ == "__main__":
 
         ok = sanity_check_scores(score_fn)
         if not ok:
-            print("\nWARNING: sanity check fallito. Procedo comunque.\n")
+            print("\nWARNING: sanity check failed. Proceeding anyway.\n")
 
         reranked_results: dict = {}
         missing_docs  = 0
@@ -443,7 +442,7 @@ if __name__ == "__main__":
     print(f"\nTotal pairs scored : {total_pairs}")
     print(f"Queries re-ranked  : {len(reranked_results)}")
     if missing_docs:
-        print(f"Pubkey non trovati : {missing_docs} (ordine BM25 mantenuto)")
+        print(f"Pubkeys not found : {missing_docs} (BM25 order preserved)")
     coverage = len(reranked_results) / len(bm25_results) * 100
     print(f"Coverage           : {coverage:.1f}% ({len(reranked_results)}/{len(bm25_results)})")
 
@@ -454,5 +453,5 @@ if __name__ == "__main__":
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(reranked_results, f, indent=2, ensure_ascii=False)
 
-    print(f"\nSalvato → {args.output}")
-    print("Done. Ora esegui il Java evaluator puntando a reranked_results_gte_multilingual.json.")
+    print(f"\nSaved -> {args.output}")
+    print("Done. Now run the Java evaluator pointing to reranked_results_gte_multilingual.json.")

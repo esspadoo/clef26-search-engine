@@ -1,77 +1,64 @@
 """
 prepare_data_nemotron_finetune_v2.py
 
-Prepara il dataset per fine-tuning di nvidia/llama-nemotron-rerank-1b-v2.
+Prepare the dataset for fine-tuning nvidia/llama-nemotron-rerank-1b-v2.
 
-═══════════════════════════════════════════════════════════════════
-CAMBIAMENTI RISPETTO A v1
-═══════════════════════════════════════════════════════════════════
+===============================================================
+CHANGES COMPARED TO v1
+===============================================================
 
-[FIX 1] SOFT NEGATIVES aggiunti (campo "neg" separato da "hard_neg")
-  In v1 il dataset aveva solo hard negatives (top-k di Nemotron base).
-  Avere solo hard negatives crea un training instabile: la loss parte
-  già da casi difficilissimi senza gradiente "facile" che la ancori.
-  Ora il dataset ha due tipi di negativi:
-    - "hard_neg": rank [neg_offset .. neg_offset+num_hard_neg] del run Nemotron
-      → i documenti che il modello sbaglia già, massimo segnale
+[FIX 1] Added SOFT NEGATIVES ("neg" field separated from "hard_neg")
+  In v1 the dataset had only hard negatives (top-k from base Nemotron).
+  Using only hard negatives makes training unstable: loss starts from
+  very hard cases without an easier gradient signal to anchor learning.
+  Now the dataset has two negative types:
+    - "hard_neg": rank [neg_offset .. neg_offset+num_hard_neg] in Nemotron run
+      -> documents the model already mis-ranks, strongest signal
     - "neg":      rank [soft_neg_offset .. soft_neg_offset+num_soft_neg]
-      → documenti a metà classifica, abbastanza distanti dal positivo
-        ma non triviali. Stabilizzano il training nelle prime iterazioni.
-  Il finetune_nemotron_reranker_v3.py già gestisce entrambi i campi
-  (hard_neg con oversampling x2, neg con peso normale).
+      -> mid-ranking documents, far enough from positive but non-trivial.
+         They stabilize training in early iterations.
+  finetune_nemotron_reranker_v3.py already handles both fields
+  (hard_neg oversampled x2, neg with normal weight).
 
-[FIX 2] neg_offset di default spostato: 0 → 1
-  In v1 il primo hard negative era rank=1 (il documento immediatamente
-  dopo il positivo). Se il positivo non è nel run (raro ma possibile),
-  rank=0 potrebbe essere un altro documento rilevante non annotato.
-  Partire da offset=1 aggiunge un margine di sicurezza.
-  ATTENZIONE: se usi nemotron_run con il positivo già escluso, lascia
+[FIX 2] Default neg_offset moved: 0 -> 1
+  In v1, first hard negative started from rank=1 (immediately after
+  the positive). If the positive is not in the run (rare but possible),
+  rank=0 may be another relevant but unlabeled document.
+  Starting at offset=1 adds a safety margin.
+  WARNING: if your nemotron_run already excludes the positive, keep
   neg_offset=0.
 
-[FIX 3] soft_neg_offset e num_soft_neg configurabili
+[FIX 3] soft_neg_offset and num_soft_neg are configurable
   Default: soft_neg_offset=10, num_soft_neg=5
-  → Prende i documenti in posizione 10-15 del ranking di Nemotron base.
-  Questi sono abbastanza lontani dal positivo da essere quasi sicuramente
-  non rilevanti, ma non così lontani da essere triviali (es. topic
-  completamente diverso). La posizione 10-15 è empiricamente il
-  "punto medio" più pulito per CT26 con corpus ~10k documenti.
+  -> Takes documents ranked 10-15 by base Nemotron.
+  These are far enough from positive to be likely non-relevant,
+  but not so far that they become trivial (e.g., fully different topic).
 
-[FIX 4] Verifica domain shift 2025 vs 2026
-  Aggiunta analisi statistica della lunghezza query e overlap del
-  vocabolario tra i due anni. Se il cosine overlap < 0.5, viene
-  emesso un warning esplicito che suggerisce di escludere i dati 2025.
-  Questo riflette la preoccupazione discussa: i dati 2025 potrebbero
-  introdurre distribuzione distorta se il topic è significativamente
-  diverso.
+[FIX 4] Added 2025 vs 2026 domain-shift check
+  Added statistical analysis of query length and vocabulary overlap.
+  If overlap < 0.5, explicit warning suggests excluding 2025 data.
 
-[FIX 5] Statistiche di qualità del dataset più dettagliate
-  stats.json ora include:
-    - overlap rate: quante query hanno il positivo nel run Nemotron
-      (se < 0.9 il run BM25 upstream ha un problema di recall)
-    - hard_neg_avg_rank: rank medio degli hard negatives selezionati
-      (se vicino a 1.0 il modello base è già molto calibrato)
-    - domain_shift_warning: flag booleano
-    - per_year breakdown delle statistiche
+[FIX 5] More detailed dataset quality stats
+  stats.json now includes:
+    - overlap_rate: how many queries have positive in Nemotron run
+    - hard_neg_avg_rank: average rank of selected hard negatives
+    - domain_shift_warning: boolean flag
+    - per-year quality stats breakdown
 
-[FIX 6] Shuffle stratificato per anno nel train set
-  In v1 il shuffle finale mescolava tutto casualmente. Con molti più
-  dati 2025 (15699) che 2026 (13480), nelle prime batch il modello
-  vedeva prevalentemente dati 2025. Ora si usa uno shuffle interleaved
-  che garantisce proporzione costante 2025/2026 in ogni finestra di batch.
+[FIX 6] Year-stratified shuffle in training set
+  v1 random shuffle could over-expose one year in initial batches.
+  Now an interleaved shuffle keeps a stable 2025/2026 proportion.
 
-[INVARIATO] Formato output compatibile con finetune_nemotron_reranker_v3.py
-  I campi "pos", "neg", "hard_neg" sono già gestiti dal trainer v3.
-  Nessuna modifica necessaria al trainer per usare questo dataset.
+[UNCHANGED] Output format compatible with finetune_nemotron_reranker_v3.py
+  "pos", "neg", and "hard_neg" are already supported by trainer v3.
 
-═══════════════════════════════════════════════════════════════════
-
-USO minimo (solo 2026):
+Minimal usage (2026 only):
   python prepare_data_nemotron_finetune_v2.py \
     --collection_2026     collection_data.json \
     --queries_2026        en_train.json \
     --nemotron_run_2026   reranked_results_nemotron_topk400.json
 
-USO completo con 2025:
+Full usage including 2025:
   python3 prepare_data_nemotron_finetune_v2.py \
     --collection_2026     collection_data.json \
     --queries_2026        en_train.json \
@@ -84,7 +71,7 @@ USO completo con 2025:
                           reranked_results_nemotron_topk140_tweets_dev2025_BiencoderTopk1000.json \
                           reranked_results_nemotron_topk140_tweets_test_gold2025_BiencoderTopk1000.json
 
-USO con solo dati 2026 (raccomandato se domain shift confermato):
+Usage with only 2026 data (recommended if domain shift is confirmed):
   python3 prepare_data_nemotron_finetune_v2.py \
     --collection_2026     collection_data.json \
     --queries_2026        en_train.json \
@@ -114,8 +101,8 @@ log = logging.getLogger(__name__)
 
 def clean_text(text: str) -> str:
     """
-    Pulizia allineata con il pipeline Java/Lucene.
-    Nessun prefisso — Nemotron non ne usa.
+    Cleaning aligned with Java/Lucene pipeline.
+    No prefix - Nemotron does not use one.
     """
     text = re.sub(r"http\S+|www\S+", "", text)
     text = re.sub(r"#(\w+)", r"\1", text)
@@ -148,9 +135,9 @@ def load_queries_and_gt(path: str) -> tuple[dict[str, str], dict[str, str]]:
 
 def load_corpus(path: str, max_chars: int, label: str = "") -> dict[str, str]:
     """
-    Carica corpus JSON con campo "pubkey".
-    Compatibile con collection_data.json (pubkey int)
-    e collection_data2025.json (pubkey str).
+    Load corpus JSON with "pubkey" field.
+    Compatible with collection_data.json (int pubkey)
+    and collection_data2025.json (str pubkey).
     """
     data = json.load(open(path, encoding="utf-8"))
     c = {}
@@ -159,7 +146,7 @@ def load_corpus(path: str, max_chars: int, label: str = "") -> dict[str, str]:
         text = _doc_text(d, max_chars)
         if text:
             c[key] = text
-    log.info(f"  Corpus {label} ({Path(path).name}): {len(c):,} documenti")
+    log.info(f"  Corpus {label} ({Path(path).name}): {len(c):,} documents")
     return c
 
 
@@ -178,11 +165,11 @@ def load_nemotron_run(path: str) -> dict[str, list[str]]:
 
 
 # ══════════════════════════════════════════════════════════════════
-# Analisi domain shift
+# Domain-shift analysis
 # ══════════════════════════════════════════════════════════════════
 
 def _tokenize_simple(text: str) -> set[str]:
-    """Tokenizzazione grezza per analisi vocabolario — non per training."""
+    """Lightweight tokenization for vocabulary analysis - not for training."""
     return set(re.findall(r"\b[a-z]{3,}\b", text.lower()))
 
 
@@ -192,17 +179,17 @@ def analyze_domain_shift(
         threshold: float = 0.5,
 ) -> bool:
     """
-    [FIX 4] Stima il domain shift tra le query 2025 e 2026 tramite
-    Jaccard overlap del vocabolario.
+    [FIX 4] Estimate domain shift between 2025 and 2026 queries using
+    vocabulary Jaccard overlap.
 
     Jaccard = |V_2025 ∩ V_2026| / |V_2025 ∪ V_2026|
 
-    Se Jaccard < threshold (default 0.5) → warning: i dati 2025
-    potrebbero introdurre distribuzione distorta nel training.
+    If Jaccard < threshold (default 0.5) -> warning: 2025 data may
+    introduce distribution shift into training.
 
-    Nota: il threshold 0.5 è conservativo. Per corpus biomedici sullo
-    stesso dominio (COVID) ci aspettiamo Jaccard > 0.6. Valori < 0.5
-    indicano un cambio di topic sostanziale.
+    Note: threshold 0.5 is conservative. For biomedical corpora in the
+    same domain (COVID), Jaccard is usually > 0.6. Values < 0.5 often
+    indicate substantial topic drift.
     """
     vocab_2026 = set()
     for q in queries_2026.values():
@@ -219,26 +206,26 @@ def analyze_domain_shift(
     avg_len_2026 = sum(len(q.split()) for q in queries_2026.values()) / max(1, len(queries_2026))
     avg_len_2025 = sum(len(q.split()) for q in queries_2025.values()) / max(1, len(queries_2025))
 
-    log.info("  ── Analisi domain shift 2025 vs 2026 ──")
-    log.info(f"    Vocabolario 2026: {len(vocab_2026):,} token unici")
-    log.info(f"    Vocabolario 2025: {len(vocab_2025):,} token unici")
-    log.info(f"    Jaccard overlap:  {jaccard:.3f}  (soglia={threshold})")
-    log.info(f"    Lunghezza media query — 2026: {avg_len_2026:.1f} tok | 2025: {avg_len_2025:.1f} tok")
+    log.info("  -- Domain-shift analysis 2025 vs 2026 --")
+    log.info(f"    2026 vocabulary: {len(vocab_2026):,} unique tokens")
+    log.info(f"    2025 vocabulary: {len(vocab_2025):,} unique tokens")
+    log.info(f"    Jaccard overlap: {jaccard:.3f} (threshold={threshold})")
+    log.info(f"    Average query length - 2026: {avg_len_2026:.1f} tok | 2025: {avg_len_2025:.1f} tok")
 
     if jaccard < threshold:
         log.warning(
-            f"  ⚠  DOMAIN SHIFT RILEVATO (Jaccard={jaccard:.3f} < {threshold}). "
-            "I dati 2025 potrebbero degradare le performance sul dev 2026. "
-            "Considera --no_2025 se il fine-tuning peggiora il baseline."
+            f"  WARNING: DOMAIN SHIFT DETECTED (Jaccard={jaccard:.3f} < {threshold}). "
+            "2025 data may degrade performance on 2026 dev. "
+            "Consider --no_2025 if fine-tuning worsens baseline."
         )
         return True
     else:
-        log.info(f"  ✓ Nessun domain shift significativo (Jaccard={jaccard:.3f} ≥ {threshold})")
+        log.info(f"  OK: no significant domain shift (Jaccard={jaccard:.3f} >= {threshold})")
         return False
 
 
 # ══════════════════════════════════════════════════════════════════
-# Costruzione gruppi
+# Group construction
 # ══════════════════════════════════════════════════════════════════
 
 def build_groups(
@@ -253,35 +240,29 @@ def build_groups(
         tag:             str,
 ) -> tuple[list[dict], dict]:
     """
-    Costruisce gruppi di training nel formato:
+    Build training groups in format:
       {
         "query":    str,
-        "pos":      [str],        # 1 documento positivo (ground truth)
-        "hard_neg": [str, ...],   # top-k errori di Nemotron base  [FIX 1]
-        "neg":      [str, ...],   # soft negatives a metà classifica [FIX 1]
-        "_qid":     str,          # metadata, rimosso al salvataggio
+        "pos":      [str],        # 1 positive document (ground truth)
+        "hard_neg": [str, ...],   # top-k base Nemotron errors [FIX 1]
+        "neg":      [str, ...],   # mid-rank soft negatives [FIX 1]
+        "_qid":     str,          # metadata, removed on save
         "_pos_id":  str,
       }
 
-    [FIX 1] PERCHÉ DUE LISTE SEPARATE:
-    Il trainer v3 legge "hard_neg" e li oversampla (x2) perché sono
-    i casi più informativi. I "neg" soft vengono inclusi con peso
-    normale per stabilizzare il gradiente nelle prime iterazioni.
-    Avere solo hard negatives equivale ad allenarsi sempre su esempi
-    al limite della capacità del modello — buono a regime, instabile
-    all'inizio.
+    [FIX 1] WHY TWO SEPARATE LISTS:
+    Trainer v3 reads "hard_neg" and oversamples them (x2) because they
+    are most informative. Soft "neg" items are included with normal
+    weight to stabilize gradients in early iterations.
 
-    [FIX 2] neg_offset=1 di default:
-    Il documento a rank=0 nel run (dopo aver escluso il positivo) è
-    il più simile alla query secondo Nemotron. In rari casi potrebbe
-    essere un documento rilevante non annotato (falso negativo nel
-    ground truth). Partire da offset=1 aggiunge un margine.
+    [FIX 2] default neg_offset=1:
+    Rank=0 (after excluding positive) is usually most similar to query.
+    In rare cases it may be relevant but unlabeled (false negative).
+    Starting from offset=1 adds margin.
 
     [FIX 3] soft_neg_offset=10:
-    Rank 10-15 sono abbastanza lontani dal positivo da essere quasi
-    certamente non rilevanti, ma non così lontani da essere triviali.
-    Per un corpus di ~10k documenti con 400 candidati BM25, rank 10-15
-    è il "punto medio" empiricamente più pulito.
+    Rank 10-15 is usually far enough from positives to be non-relevant,
+    yet not so far as to become trivial negatives.
     """
     groups        = []
     stats         = Counter()
@@ -300,7 +281,7 @@ def build_groups(
             stats["no_run"] += 1
             continue
 
-        # Candidati negativi: tutti i doc nel run escluso il positivo
+        # Negative candidates: all docs in run except the positive
         candidates = [
             d for d in nemotron_run[qid]
             if d != pos_id and d in corpus
@@ -310,32 +291,32 @@ def build_groups(
             stats["few_negs"] += 1
             continue
 
-        # [FIX 1 + FIX 2] Hard negatives: top-k con offset
+        # [FIX 1 + FIX 2] Hard negatives: top-k with offset
         hard_start = neg_offset
         hard_end   = neg_offset + num_hard_neg
         hard_negs  = candidates[hard_start:hard_end]
 
-        # Fallback se offset supera i candidati disponibili
+        # Fallback if offset exceeds available candidates
         if len(hard_negs) < num_hard_neg:
             hard_negs = candidates[:num_hard_neg]
 
-        # [FIX 1 + FIX 3] Soft negatives: posizioni a metà classifica
+        # [FIX 1 + FIX 3] Soft negatives: mid-ranking positions
         soft_start = soft_neg_offset
         soft_end   = soft_neg_offset + num_soft_neg
         soft_negs  = candidates[soft_start:soft_end]
 
-        # Se non ci sono abbastanza candidati per i soft neg, skippa i soft
-        # (non è un errore fatale — meglio avere meno soft che zero gruppi)
+        # If there are not enough candidates for soft negatives, skip soft
+        # (not fatal - better fewer soft negatives than zero groups)
         if len(soft_negs) == 0:
             stats["no_soft_neg"] += 1
             soft_negs = []
 
-        # Verifica che hard e soft non si sovrappongano
-        # (può capitare se neg_offset + num_hard_neg > soft_neg_offset)
+        # Ensure hard and soft negatives do not overlap
+        # (can happen if neg_offset + num_hard_neg > soft_neg_offset)
         hard_set = set(hard_negs)
         soft_negs = [d for d in soft_negs if d not in hard_set]
 
-        # Statistiche rank degli hard negatives per FIX 5
+        # Hard-negative rank stats for FIX 5
         for d in hard_negs:
             try:
                 rank = nemotron_run[qid].index(d)
@@ -354,12 +335,12 @@ def build_groups(
         })
         stats["ok"] += 1
 
-    # Statistiche qualità [FIX 5]
+    # Quality stats [FIX 5]
     overlap_rate      = stats["ok"] / max(1, len(queries))
     hard_neg_avg_rank = rank_sum_hard / max(1, rank_count)
 
     log.info(
-        f"  [{tag}] {stats['ok']:,} gruppi "
+        f"  [{tag}] {stats['ok']:,} groups "
         f"({num_hard_neg} hard + {num_soft_neg} soft neg) | "
         f"overlap_rate={overlap_rate:.2%} | "
         f"hard_neg_avg_rank={hard_neg_avg_rank:.1f} | "
@@ -371,12 +352,12 @@ def build_groups(
     if overlap_rate < 0.85:
         log.warning(
             f"  ⚠  overlap_rate={overlap_rate:.2%} < 85% per [{tag}]. "
-            "Controlla che il run Nemotron copra la maggior parte delle query."
+            "Check that Nemotron run covers most queries."
         )
     if hard_neg_avg_rank < 2.0:
         log.warning(
-            f"  ⚠  hard_neg_avg_rank={hard_neg_avg_rank:.1f} molto basso. "
-            "Il positivo potrebbe essere già escluso dal run — verifica neg_offset."
+            f"  WARNING: hard_neg_avg_rank={hard_neg_avg_rank:.1f} is very low. "
+            "Positive may already be excluded from run - check neg_offset."
         )
 
     quality_stats = {
@@ -402,9 +383,9 @@ def split_2026_by_query(
         seed:        int,
 ) -> tuple[list[dict], list[dict]]:
     """
-    Split stratificato per query ID.
-    Tutte le righe della stessa query vanno nello stesso split
-    (train o dev) — evita data leakage.
+    Stratified split by query ID.
+    All rows for the same query stay in same split
+    (train or dev) to avoid data leakage.
     """
     by_qid = defaultdict(list)
     for g in groups_2026:
@@ -420,7 +401,7 @@ def split_2026_by_query(
     train = [g for qid in train_qids for g in by_qid[qid]]
     dev   = [g for qid in dev_qids   for g in by_qid[qid]]
 
-    log.info(f"  Split 2026: {len(train):,} train / {len(dev):,} dev gruppi")
+    log.info(f"  Split 2026: {len(train):,} train / {len(dev):,} dev groups")
     return train, dev
 
 
@@ -430,17 +411,16 @@ def interleaved_shuffle(
         seed:        int,
 ) -> list[dict]:
     """
-    [FIX 6] Shuffle interleaved che mantiene proporzione 2026/2025 costante.
+    [FIX 6] Interleaved shuffle that keeps 2026/2025 proportion stable.
 
-    Invece di concatenare e mescolare casualmente (che porta a batch
-    iniziali dominati dal gruppo più grande), interleava i due dataset
-    in proporzione, poi shuffla localmente in finestre di dimensione
-    fissa. Questo garantisce che ogni finestra di batch_size esempi
-    abbia una rappresentazione bilanciata dei due anni.
+    Instead of concatenating and random-shuffling (which can produce
+    initial batches dominated by the larger group), interleave datasets
+    by ratio and then locally shuffle fixed-size windows. This keeps
+    windows balanced across years.
 
     Esempio con ratio 1:1.16 (13480 vs 15699 come nel tuo caso):
       [2026, 2025, 2026, 2025, 2026, 2025, 2026, 2026, ...]
-    invece di:
+    instead of:
       [2026, 2026, ..., 2026, 2025, 2025, ..., 2025]
     """
     rng = random.Random(seed)
@@ -453,7 +433,7 @@ def interleaved_shuffle(
     if not g25:
         return g26
 
-    # Calcola ratio: per ogni N documenti 2026, quanti 2025 inserire
+    # Compute ratio: for each N 2026 samples, how many 2025 samples to insert
     ratio = len(g25) / max(1, len(g26))  # es. 15699/13480 ≈ 1.16
 
     result  = []
@@ -468,10 +448,10 @@ def interleaved_shuffle(
             idx_25  += 1
             acc_25  -= 1.0
 
-    # Eventuali 2025 rimanenti in coda
+    # Append any remaining 2025 samples at the end
     result.extend(g25[idx_25:])
 
-    # Shuffle locale in finestre di 128 per non distruggere il bilanciamento
+    # Local shuffle in windows of 128 without destroying global balance
     window = 128
     for start in range(0, len(result), window):
         chunk = result[start : start + window]
@@ -486,12 +466,12 @@ def interleaved_shuffle(
 # ══════════════════════════════════════════════════════════════════
 
 def save_jsonl(groups: list[dict], path: Path):
-    """Salva i gruppi rimuovendo i campi metadata (prefisso '_')."""
+    """Save groups removing metadata fields (prefix '_')."""
     with open(path, "w", encoding="utf-8") as f:
         for g in groups:
             out = {k: v for k, v in g.items() if not k.startswith("_")}
             f.write(json.dumps(out, ensure_ascii=False) + "\n")
-    log.info(f"  → {path.name}: {len(groups):,} gruppi salvati")
+    log.info(f"  -> {path.name}: {len(groups):,} groups saved")
 
 
 # ══════════════════════════════════════════════════════════════════
@@ -500,44 +480,44 @@ def save_jsonl(groups: list[dict], path: Path):
 
 def main():
     p = argparse.ArgumentParser(
-        description="Prepara dati per fine-tuning llama-nemotron-rerank-1b-v2 v2"
+        description="Prepare data for llama-nemotron-rerank-1b-v2 fine-tuning v2"
     )
 
-    g26 = p.add_argument_group("Corpus 2026 (obbligatorio)")
+    g26 = p.add_argument_group("2026 corpus (required)")
     g26.add_argument("--collection_2026",   required=True)
     g26.add_argument("--queries_2026",      required=True)
     g26.add_argument("--nemotron_run_2026", required=True)
 
-    g25 = p.add_argument_group("Corpus 2025 (opzionale)")
+    g25 = p.add_argument_group("2025 corpus (optional)")
     g25.add_argument("--collection_2025",    default=None)
     g25.add_argument("--queries_2025",       nargs="+", default=[])
     g25.add_argument("--nemotron_runs_2025", nargs="+", default=[])
     g25.add_argument(
         "--no_2025",
         action="store_true",
-        help="Ignora completamente i dati 2025 (raccomandato se domain shift confermato)",
+        help="Completely ignore 2025 data (recommended if domain shift is confirmed)",
     )
 
     p.add_argument("--out_dir",          default="training_data_nemotron_ft_v2")
     p.add_argument(
         "--num_hard_neg",
         type=int, default=5,
-        help="Numero hard negatives (top-k errori Nemotron base). Default: 5",
+        help="Number of hard negatives (top-k base Nemotron errors). Default: 5",
     )
     p.add_argument(
         "--neg_offset",
         type=int, default=1,                    # [FIX 2] era 0
-        help="Offset iniziale per gli hard negatives nel run. Default: 1",
+        help="Starting offset for hard negatives in run. Default: 1",
     )
     p.add_argument(
         "--num_soft_neg",
         type=int, default=5,                    # [FIX 1]
-        help="Numero soft negatives (metà classifica). Default: 5",
+        help="Number of soft negatives (mid ranking). Default: 5",
     )
     p.add_argument(
         "--soft_neg_offset",
         type=int, default=10,                   # [FIX 3]
-        help="Posizione di partenza per i soft negatives nel run. Default: 10",
+        help="Start position for soft negatives in run. Default: 10",
     )
     p.add_argument("--dev_ratio",       type=float, default=0.1)
     p.add_argument("--max_doc_chars",   type=int,   default=4000)
@@ -545,26 +525,26 @@ def main():
     p.add_argument(
         "--domain_shift_threshold",
         type=float, default=0.5,
-        help="Soglia Jaccard per warning domain shift. Default: 0.5",
+        help="Jaccard threshold for domain-shift warning. Default: 0.5",
     )
     args = p.parse_args()
 
-    # Validazione argomenti 2025
+    # Validate 2025 arguments
     if not args.no_2025 and args.queries_2025 and args.nemotron_runs_2025:
         if len(args.queries_2025) != len(args.nemotron_runs_2025):
             p.error(
-                f"--queries_2025 ha {len(args.queries_2025)} file ma "
-                f"--nemotron_runs_2025 ne ha {len(args.nemotron_runs_2025)}. "
-                "Devono corrispondere 1:1."
+                f"--queries_2025 has {len(args.queries_2025)} files but "
+                f"--nemotron_runs_2025 has {len(args.nemotron_runs_2025)}. "
+                "They must match 1:1."
             )
 
-    # Validazione offset: hard e soft non devono sovrapporsi
+    # Validate offset: hard and soft negatives should not overlap
     hard_end = args.neg_offset + args.num_hard_neg
     if hard_end > args.soft_neg_offset:
         log.warning(
             f"  ⚠  hard negatives [{args.neg_offset}:{hard_end}] e "
-            f"soft negatives [{args.soft_neg_offset}:...] si sovrappongono. "
-            f"Considera di aumentare --soft_neg_offset a {hard_end + 2} o superiore."
+            f"soft negatives [{args.soft_neg_offset}:...] overlap. "
+            f"Consider increasing --soft_neg_offset to {hard_end + 2} or higher."
         )
 
     random.seed(args.seed)
@@ -574,8 +554,8 @@ def main():
     all_quality_stats  = {}
     domain_shift_found = False
 
-    # ── 1. Corpus e query 2026 ────────────────────────────────────
-    log.info("══ Corpus 2026 ══════════════════════════════════════════════")
+    # -- 1. 2026 corpus and queries --
+    log.info("== 2026 corpus ==================================================")
     corpus_2026           = load_corpus(args.collection_2026, args.max_doc_chars, "2026")
     queries_2026, gt_2026 = load_queries_and_gt(args.queries_2026)
     nemotron_2026         = load_nemotron_run(args.nemotron_run_2026)
@@ -595,7 +575,7 @@ def main():
 
     train_2026, dev_2026 = split_2026_by_query(groups_2026, args.dev_ratio, args.seed)
 
-    # ── 2. Corpus e query 2025 (opzionale) ───────────────────────
+    # -- 2. 2025 corpus and queries (optional) --
     train_2025 = []
     n25        = 0
 
@@ -607,12 +587,12 @@ def main():
     )
 
     if args.no_2025:
-        log.info("══ Dati 2025 SKIPPATI (--no_2025) ══════════════════════════")
+        log.info("== 2025 data SKIPPED (--no_2025) ===============================")
     elif use_2025:
-        log.info("══ Corpus 2025 ══════════════════════════════════════════════")
+        log.info("== 2025 corpus ==================================================")
         corpus_2025 = load_corpus(args.collection_2025, args.max_doc_chars, "2025")
 
-        # Raccogli tutte le query 2025 per analisi domain shift
+        # Collect all 2025 queries for domain-shift analysis
         all_queries_2025: dict[str, str] = {}
         all_groups_2025_per_file: list[list[dict]] = []
 
@@ -636,7 +616,7 @@ def main():
             all_quality_stats[f"2025_{stem}"] = qstats_q
             all_groups_2025_per_file.append(groups_q)
 
-        # [FIX 4] Analisi domain shift
+        # [FIX 4] Domain-shift analysis
         domain_shift_found = analyze_domain_shift(
             queries_2026 = queries_2026,
             queries_2025 = all_queries_2025,
@@ -648,26 +628,26 @@ def main():
         n25 = len(train_2025)
 
     elif not args.no_2025 and args.queries_2025:
-        log.warning("⚠  --nemotron_runs_2025 non fornito: dati 2025 SKIPPATI.")
+        log.warning("WARNING: --nemotron_runs_2025 not provided: 2025 data SKIPPED.")
 
-    # ── 3. Composizione train finale ─────────────────────────────
-    # [FIX 6] Shuffle interleaved invece di concatenazione + shuffle random
+    # -- 3. Final train composition --
+    # [FIX 6] Interleaved shuffle instead of concat + random shuffle
     final_train = interleaved_shuffle(train_2026, train_2025, args.seed)
     final_dev   = dev_2026
 
     if not final_train:
-        log.error("Nessun gruppo costruito. Controlla i file di input.")
+        log.error("No group constructed. Check input files.")
         return
 
-    # ── 4. Salvataggio ────────────────────────────────────────────
-    log.info("══ Composizione finale ══════════════════════════════════════")
-    log.info(f"  Training: {len(final_train):,} gruppi  (2026={len(train_2026):,} + 2025={n25:,})")
-    log.info(f"  Dev (solo 2026): {len(final_dev):,} gruppi")
+    # -- 4. Save --
+    log.info("== Final composition ============================================")
+    log.info(f"  Training: {len(final_train):,} groups (2026={len(train_2026):,} + 2025={n25:,})")
+    log.info(f"  Dev (2026 only): {len(final_dev):,} groups")
 
     save_jsonl(final_train, out_dir / "train_groups.jsonl")
     save_jsonl(final_dev,   out_dir / "dev_groups.jsonl")
 
-    # ── 5. Stats.json arricchito [FIX 5] ─────────────────────────
+    # -- 5. Enriched stats.json [FIX 5] --
     tgs = 1 + args.num_hard_neg + args.num_soft_neg
     stats = {
         "train_groups":           len(final_train),
@@ -683,36 +663,36 @@ def main():
         "domain_shift_warning":   domain_shift_found,         # [FIX 4]
         "quality_per_split":      all_quality_stats,          # [FIX 5]
         "note": (
-            "Nemotron NON usa prefissi query. Solo pulizia testo. "
+            "Nemotron does NOT use query prefixes. Text cleaning only. "
             f"train_group_size={tgs}. "
-            f"hard_neg=errori modello base (rank {args.neg_offset}-{args.neg_offset+args.num_hard_neg}). "
-            f"soft_neg=metà classifica (rank {args.soft_neg_offset}-{args.soft_neg_offset+args.num_soft_neg})."
+            f"hard_neg=base model errors (rank {args.neg_offset}-{args.neg_offset+args.num_hard_neg}). "
+            f"soft_neg=mid ranking (rank {args.soft_neg_offset}-{args.soft_neg_offset+args.num_soft_neg})."
         ),
     }
     stats_path = out_dir / "stats.json"
     json.dump(stats, open(stats_path, "w"), indent=2)
-    log.info(f"  → stats.json salvato")
+    log.info(f"  -> stats.json saved")
 
-    # ── 6. Riepilogo finale ───────────────────────────────────────
+    # -- 6. Final summary --
     log.info("\n" + "═" * 60)
-    log.info("✓ Dataset pronto")
+    log.info("Dataset ready")
     log.info(f"  Output dir:          {out_dir}/")
-    log.info(f"  train_groups.jsonl : {len(final_train):,} righe")
-    log.info(f"  dev_groups.jsonl   : {len(final_dev):,} righe")
+    log.info(f"  train_groups.jsonl : {len(final_train):,} rows")
+    log.info(f"  dev_groups.jsonl   : {len(final_dev):,} rows")
     log.info(f"  Hard neg per query : {args.num_hard_neg} (rank {args.neg_offset}-{args.neg_offset+args.num_hard_neg})")
     log.info(f"  Soft neg per query : {args.num_soft_neg} (rank {args.soft_neg_offset}-{args.soft_neg_offset+args.num_soft_neg})")
     if domain_shift_found:
         log.warning(
-            "  ⚠  Domain shift rilevato — considera di rieseguire con --no_2025 "
-            "e confrontare le metriche sul dev set."
+            "  WARNING: Domain shift detected - consider re-running with --no_2025 "
+            "and comparing metrics on the dev set."
         )
     log.info("═" * 60)
-    log.info("\nProssimo step:")
+    log.info("\nNext step:")
     log.info(f"  python finetune_nemotron_reranker_v3.py \\")
     log.info(f"    --train_file {out_dir}/train_groups.jsonl \\")
     log.info(f"    --dev_file   {out_dir}/dev_groups.jsonl \\")
     log.info(f"    --output_dir models/nemotron-rerank-1b-retrix-v3")
-    log.info(f"\n  # Oppure senza dati 2025 se domain shift confermato:")
+    log.info(f"\n  # Or without 2025 data if domain shift is confirmed:")
     log.info(f"  python prepare_data_nemotron_finetune_v2.py \\")
     log.info(f"    --collection_2026   collection_data.json \\")
     log.info(f"    --queries_2026      en_train.json \\")
