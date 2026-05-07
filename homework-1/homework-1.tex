@@ -2,6 +2,7 @@
 
 \usepackage{acronym}
 \usepackage{subcaption}
+\usepackage{float}
 
 \usepackage[most]{tcolorbox}
 \newtcolorbox{promptbox}{
@@ -14,11 +15,7 @@
   arc=2pt,
   boxrule=0.5pt,
   fonttitle=\bfseries,
-  title=LLM Prompt,
-  breakable,
-  enhanced,
-  before skip=1em,
-  after skip=1em
+  title=LLM Prompt
 }
 
 \renewcommand{\acffont}[1]{\textsl{#1}}
@@ -78,7 +75,7 @@ email=marco.tessari.8@studenti.unipd.it
 %% The abstract is a short summary of the work to be presented in the
 %% article.
 \begin{abstract}
-We present the results of the retrix group for the CheckThat! 2026 - Task 1, in which the goal is to identify the scientific paper implicitly referenced in a social media post. The input consists of short, noisy and usually informal posts that mention scientific findings without providing explicit links or explicit citations. In our pipeline, first we translate the non-English posts, then we expand them using an embedding model and the terms of the top 5 documents (ranked by similarity). After that, the first research is an hybrid retrieval system that combines dense FAISS search with sparse lexical matching and ColBERT multi-vector scoring ($s = 0.5\,s_\text{dense} + 0.15\,s_\text{sparse} + 0.35\,s_\text{colbert}$). Finally a neural re-ranking with a fine-tuned cross-encoder model is performed. On the development set our best system achieves an average MRR@5 of 0.71 (second place in the official dashboard).
+We present the results of the retrix group for the CheckThat! 2026 - Task 1, in which the goal is to identify the scientific paper implicitly referenced in a social media post. The input consists of short, noisy and usually informal posts that mention scientific findings without providing explicit links or explicit citations. In our pipeline, first we translate the non-English posts, then we expand them using an embedding model and the terms of the top 5 documents (ranked by similarity). After that, the first research is an hybrid retrieval system that combines dense FAISS search with sparse lexical matching and ColBERT multi-vector scoring ($s = 0.5\,s_\text{dense} + 0.15\,s_\text{sparse} + 0.35\,s_\text{colbert}$). Finally a neural re-ranking with a fine-tuned cross-encoder model is performed.
 \end{abstract}
 
 %%
@@ -111,7 +108,7 @@ We present the results of the retrix group for the CheckThat! 2026 - Task 1, in 
 \input{section/contributions}
 
 
-% \section{Misc [TO BE REMOVED]}
+\section{Misc [TO BE REMOVED]}
 
 
 % \subsection{Tex Files}
