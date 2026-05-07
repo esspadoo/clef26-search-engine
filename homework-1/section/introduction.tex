@@ -1,55 +1,62 @@
 \section{Introduction}
 \label{sec:introduction}
 
-The rapid spread of scientific claims through social media creates a difficult fact-checking scenario: posts often report, simplify, or sensationalize research findings while omitting the original source. In many cases, the cited study is not linked explicitly with a URL or a bibliographic reference, but only mentioned indirectly through fragments such as the reported finding, the venue, the institution, or the authors. As a consequence, verifying such claims requires first identifying the scientific publication that is being implicitly referenced.
+The rapid dissemination of scientific claims through social media poses a substantial challenge for fact-checking, as
+posts frequently summarize, simplify, or sensationalize research findings while omitting an explicit reference to the
+original study. As a result, the scientific source underlying a claim is rarely provided through a direct URL or a
+complete bibliographic citation and is instead only hinted at through partial cues, such as the reported finding, the
+publication venue, the research institution, or the authors involved, making verification not merely a matter of
+assessing the plausibility of the claim itself, but first and foremost a matter of identifying the scientific
+publication to which the post implicitly refers.
 
-This problem is the focus of Task 1 of the CLEF 2026 CheckThat! Lab, \emph{Source Retrieval for Scientific Web Claims}. Given a social media post containing a scientific claim and an implicit reference to a paper, the goal is to retrieve the correct publication from a fixed collection of 10.000 candidate papers written in English.
+This problem is addressed in Task 1 of the CLEF 2026 CheckThat! Lab, \emph{Source Retrieval for Scientific Web Claims},
+whose objective is to identify, for each social media post containing a scientific claim and an implicit reference to a
+study, the corresponding publication within a fixed pool of 10,000 English-language candidate papers.
 
-The task is challenging for several reasons. First, the linguistic gap between social media and scientific writing is substantial: posts are short, informal and often contain paraphrases, slogans, hashtags or incomplete statements, whereas scientific papers use more precise and technical language. Second, the reference to the source paper is implicit rather than explicit so the retrieval system must infer the connection from partial semantic evidence rather than from direct citations. Third, relevant clues may appear in different forms, such as mentions of a scientific result, a medical outcome, a research institution, or a publication venue, requiring the system to combine lexical and semantic evidence effectively.
+The task is particularly challenging because it requires bridging the marked gap between the language of social media
+and that of scientific writing, as posts are typically short, informal, and often expressed through paraphrases,
+slogans, hashtags, or incomplete statements, whereas scientific papers adopt a much more precise and technical register.
+At the same time, the referenced source is not cited explicitly, meaning that the retrieval system cannot rely on direct
+bibliographic signals and must instead infer the connection from partial semantic evidence; this challenge is further
+compounded by the variety of forms in which relevant clues may appear, including mentions of a scientific finding, a
+medical outcome, a research institution, or a publication venue, thus requiring the effective integration of lexical and
+semantic evidence.
 
-An additional challenge is multilinguality: the official query sets include English, German and French posts while the candidate pool remains shared across languages.
+A further layer of complexity is introduced by the multilingual nature of the benchmark, since the official query sets
+include posts in English, German, and French, while the candidate collection is shared across languages. Consequently,
+an effective retrieval system must not only reconstruct the implicit link between a post and its source publication, but
+must also do so in a setting where the evidence is expressed in multiple languages and must ultimately be mapped onto
+the same English-language document pool.
 
-Team Retrix approaches this problem with a four-stage sequential pipeline.
+Team Retrix addresses this task through a four-stage sequential pipeline (Figure~\ref{fig:pipeline}):
 \begin{enumerate}
-    \item In a preliminary stage we translate to English all the queries written in French and German using the model \texttt{utter-project/EuroLLM-9B-Instruct-2512}. This allows us to handle all queries the same way, independently of the original language.
+    \item {Queries originally written in French or German are first translated into English using
+    \sloppy{utter-project/EuroLLM-9B-Instruct-2512}, so that all downstream components can operate over a unified input
+    space independently of the source language.}
 
-    \item Raw tweet-style queries are enriched via pseudo-relevance feedback: \texttt{BAAI/bge-large-en-v1.5} encodes both queries and corpus documents into a shared embedding space, retrieves the top-5 semantically similar papers per query and extracts the most frequent terms from those papers as expansion tokens.
-    ?????????????????????????
-    ?????????????????????????
-    ?????????????????????????
-    ?????????????????????????
-    ??????????????????????????
-    ?????????????????????????
+    \item {The resulting English queries are then enriched through a pseudo-relevance feedback strategy, where
+    \sloppy{BAAI/bge-large-en-v1.5} is used to retrieve semantically related papers and extract salient expansion terms,
+    thereby helping bridge the gap between the informal language of social media posts and the more specialized
+    terminology of scientific publications.}
 
-    
-    \item The expanded queries are fed into \texttt{BAAI/bge-m3} operating in hybrid mode, which combines dense inner-product search via FAISS \cite{faiss_documentation} with sparse lexical matching and ColBERT multi-vector scoring to produce an initial ranked list of candidates.
+    \item {The expanded queries are subsequently processed by a hybrid retriever based on \sloppy{BAAI/bge-m3}, which
+    combines dense, sparse, and ColBERT-style signals in order to generate a high-recall list of candidate papers from
+    the shared collection.}
 
+    \item {The retrieved candidates are reranked with a neural cross-encoder, with
+    \sloppy{nvidia/llama-nemotron-rerank-1b-v2} providing our strongest single-stage configuration, while additional
+    experiments with cascaded and fine-tuned rerankers were conducted to further improve the ordering of the top results.}
+\end{enumerate}
 
-    
-    \item Finally, the top candidates are reranked by a neural cross-encoder, 
-    ????????????????????????????
-    ????????????????????????????
-    ????????????????????????????
-    in our case nvidia/llama-nemotron-rerank-1b-v2. 
-    in our case nvidia/llama-nemotron-rerank-1b-v2 fine-tuned on XXXXXXXX
-    in our case answerdotai/ModernBERT-large fine-tuned on XXXXXXXXXX
-    ????????????????????????????
-    ????????????????????????????
-    ????????????????????????????
-    
-    Throughout the project we also investigated the effect of fine-tuning the reranker on domain-specific hard negatives extracted from the training set.
-\end{enumerate}  
+Throughout the development of this pipeline, we also investigated the effect of fine-tuning reranking models on
+domain-specific hard negatives derived from the training data. \\
 
+%Todo : inserire il posizionamento
+Evaluated on the CheckThat! 2026 Task 1 dataset our system ranked XXXXXXXXXXXXX on the official leaderboard attaining an
+average Mean Reciprocal Rank at 5 (MRR@5) of XXXXXXXXXXXXXX \% on the development set (XXXXX place). \\
 
-
-????????????????????????????
-????????????????????????????
-Evaluated on the CheckThat! 2026 Task 1 dataset our system ranked XXXXXXXXXXXXX on the official leaderboard attaining an average Mean Reciprocal Rank at 5 (MRR@5) of XXXXXXXXXXXXXX \% on the development set (XXXXX place).
-????????????????????????????
-????????????????????????????
-
-
-
-
-
-The paper is organized as follows: Section~\ref{sec:related} discusses the most relevant research directions related to this task; Section~\ref{sec:methodology} describes in more detail our approach; Section~\ref{sec:setup} explains our experimental setup; Section~\ref{sec:results} discusses our main findings; finally, Section~\ref{sec:conclusion} draws some conclusions and outlooks for future work.
+The remainder of this paper is organized as follows: Section~\ref{sec:related} reviews the research directions most
+closely related to the task, Section~\ref{sec:methodology} presents our approach in detail, Section~\ref{sec:setup}
+describes the experimental setup, and Section~\ref{sec:results} discusses the main results, while
+Section~\ref{sec:conclusion} concludes the paper by summarizing our findings and outlining possible directions for
+future work.
