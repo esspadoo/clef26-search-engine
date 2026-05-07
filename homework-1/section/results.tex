@@ -28,18 +28,7 @@ In the analyzer rows, \texttt{MyEnglishAnalyzer\_V2} denotes the Lucene analyzer
 
 The results show a consistent progression from lexical retrieval toward neural ranking. The best retrieval-only configuration reaches an MRR@5 of 0.557, while the strongest reranked run reported in Table~\ref{tab:main-results} reaches 0.702. The largest observed step comes from adding \texttt{nvidia/llama-nemotron-rerank-1b-v2}: the top-1000 Nemotron run reaches an MRR@5 of 0.702 and Recall@100 of 0.911, compared with 0.557 and 0.839 for the retained hybrid retriever. We do not have traced and reported confidence intervals, paired significance tests, or effect sizes, so these differences are discussed as observed metric differences only. Due to limited computing resources and time constraints we have not been able to perform a meaningful run on the english training dataset: it would have demanded more than 40 hours of computation on our RTX 3090 for a run on the top-k=1000 reranking).
 
-
-
-
-
-
-
-
-OCCHIOOOOOO
-OCCHIOOOOOO
-OCCHIOOOOOO
-OCCHIOOOOOO
-For the runs performed in the \texttt{dev\_set} we provide a separate multilingual check rather than a single aggregate score. On the English development split, the non-fine-tuned Nemotron baseline reaches 0.675 MRR@5 and 0.835 Recall@100 when reranking the top 100 candidates; 0.692 MRR@5 and 0.909 Recall@100 when reranking the top 1000 candidates. The fine-tuned Nemotron LoRA run on the same English development split reaches 0.716 MRR@5 and 0.913 Recall@100. The corresponding fine-tuned development runs reach 0.750 MRR@5 and 0.929 Recall@100 for French and 0.655 MRR@5 and 0.889 Recall@100 for German with the top-2500 candidate setting.
+For the runs performed in the \texttt{dev\_set} we provide a separate multilingual check rather than a single aggregate score. On the English development split, the non-fine-tuned Nemotron baseline reaches 0.675 MRR@5 and 0.835 Recall@100 when reranking the top 100 candidates; 0.692 MRR@5 and 0.909 Recall@100 when reranking the top 1000 candidates. The fine-tuned Nemotron LoRA run on the same English development split reaches 0.716 MRR@5 and 0.913 Recall@100. The corresponding fine-tuned development runs reach 0.76 MRR@5 and 0.929 Recall@100 for French and 0.67 MRR@5 and 0.889 Recall@100 for German with the top-2000 candidate setting.
 
 \subsection{Ablation / Run Analysis}
 
