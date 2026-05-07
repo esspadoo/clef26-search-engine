@@ -24,7 +24,7 @@ HUB_MODEL_ID = "Gigi332/nemotronFT_Aarsen_EnTrain2026"
 
 
 # ---------------------------------------------------------------------------
-# Formato prompt ufficiale NVIDIA
+# Official NVIDIA prompt format
 # ---------------------------------------------------------------------------
 
 def make_prompt(query: str, passage: str) -> str:
@@ -51,7 +51,7 @@ def load_json(path: str):
 
 
 def doc_to_text(item: dict) -> str:
-    """Corpus: title + abstract. Robusto a campi mancanti."""
+    """Corpus: title + abstract. Robust to missing fields."""
     title    = item.get("title", "").strip()
     abstract = item.get("abstract", "").strip()
     if title and abstract:
@@ -60,15 +60,15 @@ def doc_to_text(item: dict) -> str:
 
 
 def get_positive(rec: dict) -> str:
-    """Supporta sia 'positive' (mining) che 'pos' (JSONL del dataset)."""
+    """Supports both 'positive' (mining) and 'pos' (dataset JSONL)."""
     return rec.get("positive") or rec.get("pos", "")
 
 
 def get_negatives(rec: dict) -> list[str]:
     """
-    Supporta:
+    Supports:
       - 'negatives': list[str]   (mining)
-      - 'pos'/'neg'/'hard_neg'   (JSONL dataset con campo singolo)
+      - 'pos'/'neg'/'hard_neg'   (JSONL dataset with single field)
     """
     if "negatives" in rec:
         return rec["negatives"]
@@ -88,10 +88,9 @@ def get_negatives(rec: dict) -> list[str]:
 
 class RerankDataset(Dataset):
     """
-    Ogni campione è una coppia (query, passage) con label float 0.0 o 1.0.
-    Applica il prompt format NVIDIA prima della tokenizzazione.
-    Supporta sia il formato mining (positive/negatives) sia il formato
-    JSONL del dataset (pos/neg/hard_neg).
+    Every sample is a (query, passage) pair with label float 0.0 or 1.0.
+    Applies the NVIDIA prompt format before tokenization.
+    Supports both mining (positive/negatives) and JSONL (pos/neg/hard_neg) dataset formats.
     """
 
     def __init__(self, records: list[dict], num_negatives: int = 5):
@@ -112,7 +111,7 @@ class RerankDataset(Dataset):
                     self.pairs.append((make_prompt(q, neg), 0.0))
 
         if skipped:
-            logger.warning(f"Dataset: saltati {skipped} record senza query o positivo.")
+            logger.warning(f"Dataset: skipped {skipped} record without query or positive.")
 
     def __len__(self):
         return len(self.pairs)
@@ -135,7 +134,7 @@ def collate_fn(batch, tokenizer, max_length):
 
 
 # ---------------------------------------------------------------------------
-# Mining hard negatives da topics/corpus/qrels
+# Mining hard negatives from topics/corpus/qrels
 # ---------------------------------------------------------------------------
 
 def mine_negatives_from_raw(
@@ -146,13 +145,13 @@ def mine_negatives_from_raw(
     use_faiss: bool,
 ) -> tuple[list[dict], list[dict]]:
     """
-    Restituisce (train_records, dev_records) nello stesso formato JSONL.
+    Returns (train_records, dev_records) in the same JSONL format.
     """
     from sentence_transformers import SentenceTransformer
     from sentence_transformers.util import mine_hard_negatives
     from datasets import Dataset as HFDataset
 
-    logger.info("Caricamento topics, corpus, qrels...")
+    logger.info("Loading topics, corpus, qrels...")
     topics      = load_json(topics_path)
     corpus_list = load_json(corpus_path)
     qrels       = load_json(qrels_path) if qrels_path else {}
@@ -179,14 +178,14 @@ def mine_negatives_from_raw(
                     qids_list.append(qid)
                     break
 
-    logger.info(f"Coppie query-answer: {len(queries_list)}")
+    logger.info(f"query-answer pairs: {len(queries_list)}")
 
     raw_dataset = HFDataset.from_dict({
         "question": queries_list,
         "answer":   answers_list,
     })
 
-    logger.info("Mining hard negatives con static-retrieval-mrl-en-v1...")
+    logger.info("Mining hard negatives with static-retrieval-mrl-en-v1...")
     embedding_model = SentenceTransformer(
         "sentence-transformers/static-retrieval-mrl-en-v1", device="cpu"
     )
@@ -205,7 +204,7 @@ def mine_negatives_from_raw(
         use_faiss=use_faiss,
     )
 
-    # Converti in formato JSONL interno
+    # Converts in internal JSONL format
     records = []
     for i, row in enumerate(hard_dataset):
         records.append({
@@ -216,7 +215,7 @@ def mine_negatives_from_raw(
             "pubkey_gold": int(pubkeys_list[i % len(pubkeys_list)]),
         })
 
-    # Raggruppa negatives per query
+    # Groups negatives
     from collections import defaultdict
     grouped = defaultdict(lambda: {"query": "", "positive": "", "negatives": [], "qid": 0, "pubkey_gold": 0})
     for rec in records:
@@ -246,7 +245,7 @@ def mine_negatives_from_raw(
 def evaluate_mrr(model, tokenizer, dev_records: list[dict], max_length: int,
                  batch_size: int, device: str, k: int = 5) -> float:
     """
-    Calcola MRR@k sul dev set raggruppando per query.
+    Computes MRR@k on the dev set grouped by query.
     """
     model.eval()
     mrr_scores = []
@@ -294,8 +293,8 @@ def evaluate_mrr(model, tokenizer, dev_records: list[dict], max_length: int,
 
 def _format_mrr(metrics: dict) -> str:
     """
-    Restituisce una stringa formattata per l'MRR da usare nei commit message.
-    Gestisce sia valori float sia 'N/A' senza crashare.
+    Returns a string formatted for MRR to use in the commit message.
+    Handles both float values and 'N/A' without crashing.
     """
     if not metrics:
         return ""
@@ -310,29 +309,29 @@ def _format_mrr(metrics: dict) -> str:
 
 def push_to_hub(model, tokenizer, checkpoint_name=None, metrics=None, is_final=False):
     """
-    Push del modello su Hugging Face Hub.
-    Usa la variabile d'ambiente HF_TOKEN per autenticazione.
+    Push of the model on Hugging Face Hub.
+    Use the environment variable HF_TOKEN for authentication.
     Repository: Gigi332/nemotronFT_Aarsen_EnTrain2026
     """
     import tempfile
 
-    # Determina il path nel repository
+    # Determines the path in the repository
     repo_path = "" if (is_final or checkpoint_name is None) else checkpoint_name
 
-    # Salva temporaneamente il modello
+    # Temporarely saves the model
     with tempfile.TemporaryDirectory() as tmp_dir:
         save_path = Path(tmp_dir) / repo_path if repo_path else Path(tmp_dir)
 
-        # Salva modello e tokenizer
+        # Saves model and tokenizer
         model.save_pretrained(save_path)
         tokenizer.save_pretrained(save_path)
 
-        # Salva le metriche
+        # Saves metrics
         if metrics:
             with open(save_path / "metrics.json", "w") as f:
                 json.dump(metrics, f, indent=2)
 
-        # Crea il README solo per il modello finale
+        # creates the README only for the final model
         if is_final:
             best_mrr_val = metrics.get("best_mrr", metrics.get("mrr")) if metrics else None
             if isinstance(best_mrr_val, float):
@@ -367,7 +366,7 @@ tokenizer.padding_side = "left"
             with open(Path(tmp_dir) / "README.md", "w") as f:
                 f.write(readme_content)
 
-        # Upload su Hub
+        # Upload on Hub
         api = HfApi()
         commit_msg = f"Upload {checkpoint_name or 'final model'}" + _format_mrr(metrics)
         api.upload_folder(
@@ -377,7 +376,7 @@ tokenizer.padding_side = "left"
             commit_message=commit_msg,
         )
 
-        logger.info(f"✅ Modello pushato su Hub: {HUB_MODEL_ID}/{repo_path}")
+        logger.info(f"✅ Modello pushed on Hub: {HUB_MODEL_ID}/{repo_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -435,26 +434,26 @@ def main():
         hf_token = os.environ.get("HF_TOKEN")
         if hf_token:
             login(token=hf_token)
-            logger.info("✅ Autenticato su Hugging Face Hub via HF_TOKEN")
+            logger.info("✅ Autenticated on Hugging Face Hub via HF_TOKEN")
         else:
-            logger.warning("⚠️ HF_TOKEN non trovato nelle variabili d'ambiente. Provo login interattivo...")
+            logger.warning("⚠️ HF_TOKEN not found in the evironment variables. Trying interactive login...")
             login()
 
         try:
             create_repo(repo_id=HUB_MODEL_ID, exist_ok=True)
-            logger.info(f"✅ Repository Hub pronto: {HUB_MODEL_ID}")
+            logger.info(f"✅ Repository Hub ready: {HUB_MODEL_ID}")
         except Exception as e:
-            logger.warning(f"Errore nella verifica/creazione del repo: {e}")
+            logger.warning(f"Error in repo verification/creation: {e}")
 
     # ------------------------------------------------------------------
-    # Dati
+    # Data
     # ------------------------------------------------------------------
     if args.train_jsonl and args.dev_jsonl:
-        logger.info("Caricamento dati da JSONL pre-processati...")
+        logger.info("Loading data from pre-processed JSONL...")
         train_records = load_jsonl(args.train_jsonl)
         dev_records   = load_jsonl(args.dev_jsonl)
     elif args.topics and args.corpus:
-        logger.info("Mining hard negatives da topics/corpus...")
+        logger.info("Mining hard negatives from topics/corpus...")
         train_records, dev_records = mine_negatives_from_raw(
             topics_path=args.topics,
             corpus_path=args.corpus,
@@ -464,13 +463,13 @@ def main():
         )
     else:
         raise ValueError(
-            "Fornisci --train_jsonl + --dev_jsonl  oppure  --topics + --corpus"
+            "Provide --train_jsonl + --dev_jsonl  or  --topics + --corpus"
         )
 
     # ------------------------------------------------------------------
     # Tokenizer
     # ------------------------------------------------------------------
-    logger.info(f"Caricamento tokenizer: {args.model}")
+    logger.info(f"Loading tokenizer: {args.model}")
     tokenizer = AutoTokenizer.from_pretrained(
         args.model,
         trust_remote_code=True,
@@ -483,7 +482,7 @@ def main():
     # Config
     # ------------------------------------------------------------------
     from transformers import AutoConfig
-    logger.info("Caricamento config con trust_remote_code=True...")
+    logger.info("loading config with trust_remote_code=True...")
     config = AutoConfig.from_pretrained(
         args.model,
         trust_remote_code=True,
@@ -492,9 +491,9 @@ def main():
     config.pad_token_id = tokenizer.pad_token_id
 
     # ------------------------------------------------------------------
-    # Modello base
+    # Base model
     # ------------------------------------------------------------------
-    logger.info(f"Caricamento modello base: {args.model}")
+    logger.info(f"Loading base model: {args.model}")
     base_model = AutoModelForSequenceClassification.from_pretrained(
         args.model,
         config=config,
@@ -506,9 +505,9 @@ def main():
 
     # ------------------------------------------------------------------
     # LoRA
-    # NOTA: modules_to_save=["score"] RIMOSSO — causerebbe la re-inizializzazione
-    # del ranking head pre-addestrato di Nemotron, distruggendone la calibrazione.
-    # Il ranking head viene lasciato frozen; solo i layer LoRA vengono aggiornati.
+    # NOTE: modules_to_save=["score"] REMOVED: it would cause the re-initialization
+    # of Nemotron's pre-trained ranking head, destroying its calibration.
+    # The ranking head is left frozen; only the LoRA layers are updated.
     # ------------------------------------------------------------------
     lora_config = LoraConfig(
         task_type=TaskType.SEQ_CLS,
@@ -520,7 +519,7 @@ def main():
             "q_proj", "k_proj", "v_proj", "o_proj",
             "gate_proj", "up_proj", "down_proj",
         ],
-        # modules_to_save=["score"] rimosso deliberatamente
+        # modules_to_save=["score"] deliberately removed
     )
     model = get_peft_model(base_model, lora_config)
     model.gradient_checkpointing_enable()
@@ -543,7 +542,7 @@ def main():
     logger.info(f"Train pairs: {len(train_dataset)} | Dev records: {len(dev_records)}")
 
     # ------------------------------------------------------------------
-    # Optimizer e scheduler
+    # Optimizer and scheduler
     # ------------------------------------------------------------------
     optimizer = torch.optim.AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
@@ -557,8 +556,8 @@ def main():
     # Log parametri
     # ------------------------------------------------------------------
     logger.info("=" * 60)
-    logger.info("AVVIO FINE-TUNING NEMOTRON")
-    logger.info(f"  Modello      : {args.model}")
+    logger.info("LAUNCHING NEMOTRON FINE-TUNING")
+    logger.info(f"  Model        : {args.model}")
     logger.info(f"  Epoche       : {args.epochs}")
     logger.info(f"  Batch size   : {args.batch_size} (grad_accum={args.grad_accum} → eff {args.batch_size * args.grad_accum})")
     logger.info(f"  LR           : {args.lr}")
@@ -566,7 +565,7 @@ def main():
     logger.info(f"  Max length   : {args.max_length}")
     logger.info(f"  Output       : {args.output_dir}")
     if args.push_to_hub:
-        logger.info(f"  Hub push     : attivo → {HUB_MODEL_ID}")
+        logger.info(f"  Hub push     : enabled → {HUB_MODEL_ID}")
         logger.info(f"  Hub strategy : {args.hub_strategy}")
     logger.info("=" * 60)
 
@@ -622,7 +621,7 @@ def main():
                         best_path = os.path.join(args.output_dir, "best")
                         model.save_pretrained(best_path)
                         tokenizer.save_pretrained(best_path)
-                        logger.info(f"  → Nuovo best salvato localmente (MRR@5={mrr:.4f})")
+                        logger.info(f"  → Local new best stored (MRR@5={mrr:.4f})")
 
                         if args.push_to_hub and args.hub_strategy in ["best", "every_save"]:
                             push_to_hub(
@@ -633,12 +632,12 @@ def main():
                                 is_final=False,
                             )
 
-                # Checkpoint periodico
+                # Periodic checkpoint
                 if global_step % args.save_steps == 0:
                     ckpt_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                     model.save_pretrained(ckpt_path)
                     tokenizer.save_pretrained(ckpt_path)
-                    logger.info(f"Checkpoint locale salvato: {ckpt_path}")
+                    logger.info(f"Local checkpoint stored: {ckpt_path}")
 
                     if args.push_to_hub and args.hub_strategy in ["all", "every_save"]:
                         if ckpt_path not in pushed_checkpoints:
@@ -652,9 +651,9 @@ def main():
                             pushed_checkpoints.add(ckpt_path)
 
         avg_loss = epoch_loss / len(train_loader)
-        logger.info(f"Epoch {epoch} completata | Loss media: {avg_loss:.4f}")
+        logger.info(f"Epoch {epoch} complete | avg loss: {avg_loss:.4f}")
 
-        # Eval a fine epoca
+        # Eval after epoch
         mrr = evaluate_mrr(
             model, tokenizer, dev_records,
             args.max_length, args.batch_size * 2, device
@@ -666,7 +665,7 @@ def main():
             best_path = os.path.join(args.output_dir, "best")
             model.save_pretrained(best_path)
             tokenizer.save_pretrained(best_path)
-            logger.info(f"  → Nuovo best salvato (MRR@5={mrr:.4f})")
+            logger.info(f"  → New best stored (MRR@5={mrr:.4f})")
 
             if args.push_to_hub and args.hub_strategy in ["best", "every_save"]:
                 push_to_hub(
@@ -678,15 +677,15 @@ def main():
                 )
 
     # ------------------------------------------------------------------
-    # Salvataggio finale
+    # Final store
     # ------------------------------------------------------------------
     final_path = os.path.join(args.output_dir, "final")
     model.save_pretrained(final_path)
     tokenizer.save_pretrained(final_path)
-    logger.info(f"Modello finale salvato localmente in: {final_path}")
+    logger.info(f"Final model stored locally in: {final_path}")
 
     if args.push_to_hub:
-        logger.info("Push del modello finale su Hugging Face Hub...")
+        logger.info("Final model push on Hugging Face Hub...")
         push_to_hub(
             model=model,
             tokenizer=tokenizer,
@@ -696,7 +695,7 @@ def main():
         )
 
         if best_mrr > 0 and args.hub_strategy != "best":
-            logger.info("Caricamento del best model come modello principale...")
+            logger.info("Loading best model as main model...")
             from peft import PeftModel
             best_model = PeftModel.from_pretrained(base_model, best_path)
             push_to_hub(
@@ -707,7 +706,7 @@ def main():
                 is_final=True,
             )
 
-    logger.info(f"Miglior MRR@5 dev raggiunto: {best_mrr:.4f}")
+    logger.info(f"Best MRR@5 dev reached: {best_mrr:.4f}")
 
 
 if __name__ == "__main__":

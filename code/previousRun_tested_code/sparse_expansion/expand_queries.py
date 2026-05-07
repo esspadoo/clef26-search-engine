@@ -1,3 +1,37 @@
+"""
+sparse_query_expander.py (with Porter Stemming)
+
+Refines queries by applying tokenization, stopword removal, and Porter Stemming, followed by semantic expansion using a precomputed Word2Vec dictionary. This version is designed for systems where the index also uses stemmed tokens.
+
+Workflow:
+
+    Initializes MyEnglishAnalyzerNLTK to clean text (removes URLs, mentions, hashtags).
+
+    Processes text through a standard NLP pipeline: Lowercasing -> Tokenization -> Stopword Removal -> Porter Stemming.
+
+    Loads a Word2Vec expansion dictionary (must contain stemmed keys for matching).
+
+    For each original token, it fetches up to N synonyms that exceed the similarity threshold.
+
+    Combines original stemmed tokens and expansion terms into a single "sparse" string.
+
+Key Components:
+
+    PorterStemmer: Reduces words to their root form (e.g., "running" -> "run") to improve match consistency.
+
+    RegexpTokenizer: Extracts alphanumeric tokens and dashes, discarding punctuation.
+
+Parameters (Command Line):
+threshold (argv[1])  Minimum similarity score for expansion terms (default: 0.8).
+max_terms (argv[2])  Max synonyms to add per original stemmed token (default: 7).
+
+Usage:
+python sparse_query_expander.py [threshold] [max_terms]
+
+Output:
+expanded_queries_en.json  ← JSON enriched with the "sparse" field containing stemmed and expanded terms.
+"""
+
 import json
 import re
 import sys
@@ -7,7 +41,6 @@ from nltk.tokenize import RegexpTokenizer
 from nltk.corpus import stopwords
 from nltk.stem import PorterStemmer
 
-# Scarica le risorse se necessario
 nltk.download('punkt', quiet=True)
 
 class MyEnglishAnalyzerNLTK:
@@ -56,14 +89,12 @@ def run_expansion_pipeline(input_path, model_path, output_path, stop_path, thres
 
     final_results = []
 
-    for q in tqdm(queries, desc="Analisi ed Espansione"):
+    for q in tqdm(queries, desc="Analysis and expansion"):
         original_text = q.get('original', '')
 
-        # 1. Analisi (Stemming + Stopwords)
+
         analyzed_tokens = analyzer.analyze(original_text)
 
-        # 2. Reperimento termini di espansione
-        # Usiamo un set per contenere TUTTO (Originali + Espansi) senza duplicati
         combined_terms = set(analyzed_tokens)
 
         for token in analyzed_tokens:
@@ -72,12 +103,11 @@ def run_expansion_pipeline(input_path, model_path, output_path, stop_path, thres
                             if item['score'] >= threshold]
                 combined_terms.update(similars)
 
-        # 3. Costruzione dell'oggetto JSON
         output_obj = {
             "index": q.get("index"),
             "original": original_text,
             "expanded": q.get("expanded", ""),
-            "sparse": " ".join(list(combined_terms)), # Include sia originali che espansi
+            "sparse": " ".join(list(combined_terms)),
             "pubkey": q.get("pubkey")
         }
 
@@ -87,7 +117,6 @@ def run_expansion_pipeline(input_path, model_path, output_path, stop_path, thres
         json.dump(final_results, f, indent=2)
 
 if __name__ == "__main__":
-    # Parametri da riga di comando o default basati su analisi SOTA
     THRESHOLD = float(sys.argv[1]) if len(sys.argv) > 1 else 0.8
     MAX_TERMS = int(sys.argv[2]) if len(sys.argv) > 2 else 7
 

@@ -2,42 +2,42 @@
 Reranker_gte_modernbert_v2.py — GTE-Reranker-ModernBERT re-ranking
 ====================================================================
 
-Supporta sia il modello base che quello fine-tunato con --model_name.
+Supports both the base model and the fine-tuned version with --model_name.
 
-Alibaba-NLP/gte-reranker-modernbert-base è un cross-encoder encoder-only
-basato su ModernBERT (AutoModelForSequenceClassification).
+Alibaba-NLP/gte-reranker-modernbert-base is an encoder-only cross-encoder
+based on ModernBERT (AutoModelForSequenceClassification).
 
-Meccanismo:
-  1. Tokenizzare la coppia come pair: tokenizer([[query, doc], ...])
-  2. Forward pass → model(**inputs).logits  shape [B, 1]
-  3. sigmoid(logits.view(-1)) → score in (0, 1)
-     - score alto (~1) = documento rilevante
-     - score basso (~0) = documento irrilevante
-  4. Ranking: sorted(..., reverse=True)
+Mechanism:
+    1. Tokenize the pair as a pair: tokenizer([[query, doc], ...])
+    2. Forward pass → model(inputs).logits  shape [B, 1]
+    3. sigmoid(logits.view(-1)) → score in (0, 1)
+        - high score (~1) = relevant document
+        - low score (~0) = irrelevant document
+    4. Ranking: sorted(..., reverse=True)
 
-COMPATIBILITÀ CON MODELLO FINE-TUNATO:
-  Il modello fine-tunato da finetune_modernbert_reranker.py viene salvato
-  con AutoModelForSequenceClassification.save_pretrained() — identico al
-  modello base. Il loading è identico, il sigmoid è già applicato qui,
-  NON c'è double-sigmoid perché non usiamo CrossEncoder wrapper.
+COMPATIBILITY WITH FINE-TUNED MODEL:
+    The model fine-tuned by finetune_modernbert_reranker.py is saved
+    with AutoModelForSequenceClassification.save_pretrained() — identical to the
+    base model. Loading is identical, sigmoid is already applied here,
+    there is NO double-sigmoid because we do not use the CrossEncoder wrapper.
 
-Legge:
-  - queries JSON   (campo "original" o "text", campo "index")
-  - collection JSON (corpus, title+abstract, campo "pubkey")
-  - run JSON        (output reranker/BM25: { qid → [pubkey, ...] })
+Reads:
+  - JSON queries    (field "original" or "text", field "index")
+  - JSON collection (corpus, title+abstract, field "pubkey")
+  - JSON run        (output reranker/BM25: { qid → [pubkey, ...] })
 
-Scrive:
-  - output JSON  (stesso formato: { qid → [pubkey, ...] })
+Writes:
+  - JSON output  (same format: { qid → [pubkey, ...] })
 
-Uso:
-  # Modello base (default)
+Usage:
+  # base mdoel (default)
   python Reranker_gte_modernbert_v2.py \
     --queries  data/expanded_queries_bge_large.json \
     --papers   data/collection_data.json \
     --bm25     data/bi_encoder_results_513.json \
     --output   results/reranked_results_gte_modernbert_base.json
 
-  # Modello fine-tunato
+  # Fine-tuned model
   python Reranker_gte_modernbert_v2.py \
     --model_name models/gte-modernbert-base-retrix/final \
     --queries  data/expanded_queries_bge_large.json \
@@ -63,9 +63,9 @@ parser.add_argument(
     "--model_name",
     default="Alibaba-NLP/gte-reranker-modernbert-base",
     help=(
-        "Modello da usare per il reranking. Può essere:\n"
-        "  - 'Alibaba-NLP/gte-reranker-modernbert-base' (default, modello base)\n"
-        "  - Path locale al modello fine-tunato, es:\n"
+        "Model to use for reranking. It can be:\n"
+        "  - 'Alibaba-NLP/gte-reranker-modernbert-base' (default, base model)\n"
+        "  - Local path to fine-tuned model, e.g.:\n"
         "    'models/gte-modernbert-base-retrix/final'"
     ),
 )
@@ -89,25 +89,25 @@ parser.add_argument(
     "--top_k",
     type=int,
     default=100,
-    help="Candidati da passare al reranker per ogni query (default: 100).",
+    help="Candidates to pass to the reranker for each query (default: 100).",
 )
 parser.add_argument(
     "--batch",
     type=int,
     default=64,
-    help="Coppie per forward pass GPU (default: 64).",
+    help="Pairs per GPU forward pass (default: 64).",
 )
 parser.add_argument(
     "--query_chunk",
     type=int,
     default=8,
-    help="Query per chunk di elaborazione (default: 8).",
+    help="Queries per elaboration chunk (default: 8).",
 )
 parser.add_argument(
     "--max_length",
     type=int,
     default=1024,
-    help="Lunghezza massima token per coppia query+doc (default: 1024).",
+    help="Max token length per query+doc pair (default: 1024).",
 )
 
 
@@ -117,8 +117,8 @@ parser.add_argument(
 
 def sanity_check_scores(score_fn) -> bool:
     """
-    Verifica che il modello produca score discriminativi.
-    Dopo sigmoid: rilevante → vicino a 1, irrilevante → vicino a 0.
+    Verify that the model produces discriminative scores.
+    After sigmoid: relevant → close to 1, irrelevant → close to 0.
     """
     test_pairs = [
         (
@@ -137,21 +137,21 @@ def sanity_check_scores(score_fn) -> bool:
         s0, s1 = float(scores[0]), float(scores[1])
         diff = abs(s0 - s1)
         print(
-            f"\n  [Sanity check] Score rilevante={s0:.4f} | "
-            f"Score irrilevante={s1:.4f} | Δ={diff:.4f}"
+            f"\n  [Sanity check] Relevant score={s0:.4f} | "
+            f"Irrelevant score={s1:.4f} | Δ={diff:.4f}"
         )
         if diff < 0.05:
-            print("  WARNING: score quasi identici — controlla il modello/tokenizer!")
+            print("  WARNING: almost identical scores — check the model/tokenizer!")
             return False
         print("  [Sanity check] OK.")
         return True
     except Exception as e:
-        print(f"  WARNING: sanity check fallito: {e}")
+        print(f"  WARNING: sanity check failed: {e}")
         return False
 
 
 # ──────────────────────────────────────────────────────────────────
-# Helpers CPU
+# CPU helpers
 # ──────────────────────────────────────────────────────────────────
 
 def build_pairs_for_queries(
@@ -161,12 +161,12 @@ def build_pairs_for_queries(
     top_k: int,
 ) -> tuple[list, list, int]:
     """
-    Costruisce le coppie (query_text, doc_text) per un chunk di query.
+    Builds (query_text, doc_text) pairs for a query chunk.
 
-    Ritorna:
-      all_pairs : lista piatta di (str, str)
+    Returns:
+      all_pairs : plain list of (str, str)
       meta      : [(qid, valid_keys, n_pairs, fallback_candidates), ...]
-      missing   : n° doc non trovati nel corpus
+      missing   : number of documents not found in the corpus
     """
     all_pairs = []
     meta      = []
@@ -178,8 +178,8 @@ def build_pairs_for_queries(
 
         if not query_text:
             print(
-                f"  WARNING: query text non trovato per qid={qid}, "
-                "uso ordine originale",
+                f"  WARNING: query text not found for qid={qid}, "
+                "using original sorting",
                 flush=True,
             )
             meta.append((qid, [], 0, candidates))
@@ -203,8 +203,8 @@ def build_pairs_for_queries(
 
 def scores_to_results(meta: list, scores_flat: list) -> dict:
     """
-    Ricostruisce qid→[pubkey] dallo score array piatto.
-    Score in (0,1) dopo sigmoid: reverse=True mette i più rilevanti in cima.
+    Rebuilds qid→[pubkey] from the plain score array.
+    Score in (0,1) after sigmoid: reverse=True puts the most relevant on the top.
     """
     results = {}
     offset  = 0
@@ -226,25 +226,25 @@ def scores_to_results(meta: list, scores_flat: list) -> dict:
 
 
 # ──────────────────────────────────────────────────────────────────
-# Caricamento modello
+# Loading model
 # ──────────────────────────────────────────────────────────────────
 
 def load_reranker(model_name: str, device: str, max_length: int):
     """
-    Carica il reranker GTE-ModernBERT (base o fine-tunato).
+    Loads the GTE-ModernBERT reranker (base or fine-tuned).
 
-    Usa AutoModelForSequenceClassification direttamente — NON CrossEncoder
-    wrapper di sentence-transformers. Questo garantisce:
-      1. Nessun double-sigmoid: il modello fine-tunato viene salvato con
-         Sigmoid come default_activation_function nel sentence_bert_config.json,
-         ma NON viene applicata quando si carica con AutoModel. Il sigmoid
-         viene applicato esplicitamente qui in score_fn.
-      2. Compatibilità con entrambi i modelli (base e fine-tunato) senza
-         cambiare codice.
-      3. Gestione OOM con dimezzamento batch automatico.
+    Uses AutoModelForSequenceClassification directly — NOT the CrossEncoder
+    wrapper from sentence-transformers. This ensures:
+        1. No double-sigmoid: the fine-tuned model is saved with
+            Sigmoid as the default_activation_function in sentence_bert_config.json,
+            but it is NOT applied when loading with AutoModel. The sigmoid
+            is applied explicitly here in score_fn.
+        2. Compatibility with both models (base and fine-tuned) without
+            changing code.
+        3. OOM handling with automatic batch size halving.
 
-    Il tokenizer riceve pair-list [[query, doc], ...] — identico sia
-    per il modello base che per quello fine-tunato.
+    The tokenizer receives a pair-list [[query, doc], ...] — identical for
+    both the base model and the fine-tuned one.
     """
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
@@ -261,17 +261,17 @@ def load_reranker(model_name: str, device: str, max_length: int):
 
     is_finetuned = model_name != "Alibaba-NLP/gte-reranker-modernbert-base"
     print(
-        f"  Tipo modello: {'fine-tunato' if is_finetuned else 'base'}",
+        f"  Model type: {'fine-tuned' if is_finetuned else 'base'}",
         flush=True,
     )
 
     def score_fn(pairs: list[tuple[str, str]]) -> list[float]:
         """
-        Punteggia una lista di (query, doc).
-        Ritorna score float in (0, 1) dopo sigmoid.
+        Scores a list of (query, doc).
+        Returns float scores in (0, 1) after sigmoid.
 
-        Il tokenizer GTE accetta pair-list [[q, d], ...]:
-        gestisce internamente la separazione query/doc con [SEP].
+        The GTE tokenizer accepts a pair-list [[q, d], ...]:
+        it internally handles the query/doc separation with [SEP].
         """
         pair_list = [[q, d] for q, d in pairs]
         inputs = tokenizer(
@@ -293,14 +293,14 @@ def load_reranker(model_name: str, device: str, max_length: int):
 
 
 # ──────────────────────────────────────────────────────────────────
-# Inferenza con gestione OOM
+# Inference with OOM handling
 # ──────────────────────────────────────────────────────────────────
 
 def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
     """
-    Itera le coppie a batch, chiama score_fn e aggrega i risultati.
-    Gestisce OOM dimezzando il batch e ripristinandolo al chunk successivo.
-    Fallback score = 0.5 (neutro) se OOM anche con batch=1.
+    Iterates pairs in batches, calls score_fn, and aggregates results.
+    Handles OOM by halving the batch size and restoring it for the next chunk.
+    Fallback score = 0.5 (neutral) if OOM occurs even with batch=1.
     """
     all_scores    = []
     current_batch = batch_size
@@ -312,7 +312,7 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
             scores = score_fn(batch)
             all_scores.extend(scores)
             i            += current_batch
-            current_batch = batch_size  # ripristina dopo batch ridotto
+            current_batch = batch_size  # restores after reducing batch
 
         except (torch.OutOfMemoryError, RuntimeError) as e:
             is_oom = (
@@ -325,8 +325,8 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
             gc.collect()
             if current_batch <= 1:
                 print(
-                    f"  WARNING: OOM anche con batch=1 su {len(batch)} coppie. "
-                    "Fallback score=0.5 (ordine originale mantenuto).",
+                    f"  WARNING: OOM even with batch=1 on {len(batch)} pairs. "
+                    "Fallback score=0.5 (original sorting maintained).",
                     flush=True,
                 )
                 all_scores.extend([0.5] * len(batch))
@@ -335,7 +335,7 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
             else:
                 current_batch = max(1, current_batch // 2)
                 print(
-                    f"  OOM → riduco batch a {current_batch} per questo chunk",
+                    f"  OOM → reducing batch to {current_batch} for this chunk",
                     flush=True,
                 )
 
@@ -363,7 +363,7 @@ def rerank_worker(
 
     device = "cuda:0"
     print(
-        f"[GPU {gpu_id}] {torch.cuda.get_device_name(0)} — caricamento modello...",
+        f"[GPU {gpu_id}] {torch.cuda.get_device_name(0)} — loading model...",
         flush=True,
     )
 
@@ -416,14 +416,14 @@ if __name__ == "__main__":
     NUM_GPUS = torch.cuda.device_count()
     if NUM_GPUS == 0:
         DEVICE = "cpu"
-        print("Device: cpu (nessuna GPU CUDA trovata)")
+        print("Device: cpu (no CUDA GPU found)")
     else:
         DEVICE = "cuda:0"
-        print(f"Device: cuda — {NUM_GPUS} GPU disponibili:")
+        print(f"Device: cuda — {NUM_GPUS} available GPU:")
         for i in range(NUM_GPUS):
             print(f"  [{i}] {torch.cuda.get_device_name(i)}")
 
-    print(f"\nModello: {args.model_name}")
+    print(f"\nModel: {args.model_name}")
     print("Loading data...")
 
     with open(args.queries, "r", encoding="utf-8") as f:
@@ -442,16 +442,16 @@ if __name__ == "__main__":
         for p in papers_raw
     }
 
-    # Supporta sia "original" (query espanse BGE) che "text" (query raw)
+    # Supports both "original" (BGE expanded queries) and "text" (raw queries)
     query_texts: dict = {
         str(q["index"]): q.get("original", q.get("text", ""))
         for q in queries_raw
     }
 
     print(
-        f"\nCorpus: {len(paper_texts)} documenti | "
+        f"\nCorpus: {len(paper_texts)} documents | "
         f"Queries: {len(query_texts)} | "
-        f"Run input: {len(bm25_results)} query"
+        f"Run input: {len(bm25_results)} queries"
     )
 
     # Sanity check dati
@@ -460,21 +460,21 @@ if __name__ == "__main__":
     hits = sum(1 for pk in sample_candidates if str(pk) in paper_texts)
     print(
         f"Sanity check corpus — qid='{sample_qid}': "
-        f"{hits}/{len(sample_candidates)} candidati trovati"
+        f"{hits}/{len(sample_candidates)} candidates found"
     )
     if hits == 0:
         print(
-            "ERRORE CRITICO: 0 candidati trovati nel corpus. "
-            f"Tipo pubkey nel run={type(sample_candidates[0])}, "
-            "tipo chiave corpus=str — verifica il file --papers."
+            "CRITICAL ERROR: 0 candidates found in the corpus. "
+            f"pubkey type in the run={type(sample_candidates[0])}, "
+            "corpus key type=str — check the file --papers."
         )
 
     sample_qt = query_texts.get(str(sample_qid), "")
     print(f"Sanity check queries — qid='{sample_qid}': '{sample_qt[:80]}...'")
     if not sample_qt:
         print(
-            "WARNING: query text vuoto. "
-            "Controlla campo 'original'/'text' nel file --queries."
+            "WARNING: query text empty. "
+            "Check field 'original'/'text' in the file --queries."
         )
 
     all_query_items = list(bm25_results.items())
@@ -490,7 +490,7 @@ if __name__ == "__main__":
 
         ok = sanity_check_scores(score_fn)
         if not ok:
-            print("\nWARNING: sanity check fallito. Procedo comunque.\n")
+            print("\nWARNING: sanity check failed. Continuing anyway.\n")
 
         reranked_results: dict = {}
         missing_docs  = 0
@@ -561,7 +561,7 @@ if __name__ == "__main__":
         for proc in processes:
             proc.join()
 
-        # Preserva l'ordine originale delle query
+        # Preserves the original sorting of the queries
         reranked_results = {
             qid: reranked_results[qid]
             for qid in bm25_results
@@ -572,7 +572,7 @@ if __name__ == "__main__":
     print(f"\nTotal pairs scored : {total_pairs:,}")
     print(f"Queries re-ranked  : {len(reranked_results):,}")
     if missing_docs:
-        print(f"Pubkey non trovati : {missing_docs} (ordine originale mantenuto)")
+        print(f"Pubkey not found : {missing_docs} (original sorting maintained)")
     coverage = len(reranked_results) / max(1, len(bm25_results)) * 100
     print(f"Coverage           : {coverage:.1f}% ({len(reranked_results)}/{len(bm25_results)})")
 
@@ -583,5 +583,5 @@ if __name__ == "__main__":
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(reranked_results, f, indent=2, ensure_ascii=False)
 
-    print(f"\nSalvato → {args.output}")
+    print(f"\nStored → {args.output}")
     print("Done.")

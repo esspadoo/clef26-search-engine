@@ -1,20 +1,20 @@
 """
-Fine-tuning di answerdotai/ModernBERT-large come reranker
-per dataset con query tweet-style e corpus scientifico.
+Fine-tuning of answerdotai/ModernBERT-large as reranker
+for dataset with tweet-style queries and scientific corpus.
 
 Basato su: https://huggingface.co/blog/train-reranker
 Framework: sentence-transformers >= 4.0
 
-Struttura attesa dei file input:
-  - train.jsonl / dev.jsonl / test.jsonl  (output di prepare_reranker_data.py)
-    Ogni riga: {"query": str, "positive": str, "negatives": [str, ...], "qid": int, "pubkey_gold": int}
+Expected input file structure:
+  - train.jsonl / dev.jsonl / test.jsonl  (output of prepare_reranker_data.py)
+    Every row: {"query": str, "positive": str, "negatives": [str, ...], "qid": int, "pubkey_gold": int}
 
-  oppure in alternativa:
+  alternatively:
   - topics.json   : [{"index": int, "text": str, "pubkey": int}, ...]
   - corpus.json   : [{"index": int, "text": str, "pubkey": int}, ...]
   - qrels.json    : {str(qid): {str(pubkey): int, ...}, ...}   (rilevanze)
 
-Uso:
+Usage:
   python finetune_modernbert_reranker.py \
       --train_jsonl   data/train.jsonl \
       --dev_jsonl     data/dev.jsonl \
@@ -48,7 +48,7 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
-# Helpers per caricare i dati
+# Helpers for loading data
 # ---------------------------------------------------------------------------
 
 def load_jsonl(path: str) -> list[dict]:
@@ -63,9 +63,9 @@ def load_jsonl(path: str) -> list[dict]:
 
 def jsonl_to_labeled_pairs(records: list[dict], num_negatives: int = 5) -> dict:
     """
-    Converte record {query, positive, negatives, ...} in coppie (query, passage, label)
-    compatibili con BinaryCrossEntropyLoss.
-    label=1 → positivo, label=0 → negativo
+    Converts record {query, positive, negatives, ...} in pairs (query, passage, label)
+    compatible with BinaryCrossEntropyLoss.
+    label=1 → positive, label=0 → negative
     """
     queries, passages, labels = [], [], []
     for rec in records:
@@ -73,12 +73,12 @@ def jsonl_to_labeled_pairs(records: list[dict], num_negatives: int = 5) -> dict:
         pos = rec["positive"]
         negs = rec.get("negatives", [])
 
-        # positivo
+        # positives
         queries.append(q)
         passages.append(pos)
         labels.append(1.0)
 
-        # negativi (fino a num_negatives)
+        # negatives (up to num_negatives)
         for neg in negs[:num_negatives]:
             queries.append(q)
             passages.append(neg)
@@ -89,22 +89,22 @@ def jsonl_to_labeled_pairs(records: list[dict], num_negatives: int = 5) -> dict:
 
 def build_reranking_samples(records: list[dict], min_negatives: int = 4) -> list[dict]:
     """
-    Costruisce campioni per CrossEncoderRerankingEvaluator:
+    Builds samples for CrossEncoderRerankingEvaluator:
     [{'query': str, 'positive': [str, ...], 'negative': [str, ...]}]
 
-    CrossEncoderRerankingEvaluator richiede almeno 1 negativo per query
-    (altrimenti ndcg_score di sklearn crasha con "only 1 document").
-    Se i negativi mancano o sono pochi, li integra con positivi di altre query
-    (che sono negativi "casuali" per la query corrente).
+    CrossEncoderRerankingEvaluator requires at least 1 negative per query
+    (otherwise ndcg_score of sklearn crashes with "only 1 document").
+    If negatives are missing or are too few, integrates them with positives from other queries
+    (which are "random" negatives for the current query).
     """
-    # Raccogli tutti i positivi come pool da cui pescare negativi casuali
+    # COllect all positives as pool from which we take random negatives
     all_positives = [rec["positive"] for rec in records]
 
     samples = []
     for i, rec in enumerate(records):
         negs = list(rec.get("negatives", []))
 
-        # Se non ci sono abbastanza negativi, aggiungi positivi di altre query
+        # If there aren't enough negatives, take positives from other queries
         if len(negs) < min_negatives:
             pool = [p for j, p in enumerate(all_positives) if j != i and p not in negs]
             random.shuffle(pool)
@@ -119,7 +119,7 @@ def build_reranking_samples(records: list[dict], min_negatives: int = 4) -> list
 
 
 # ---------------------------------------------------------------------------
-# Mining hard negatives da topics/corpus/qrels (percorso alternativo)
+# Mining hard negatives from topics/corpus/qrels (alternative path)
 # ---------------------------------------------------------------------------
 
 def mine_negatives_from_raw(
@@ -130,8 +130,8 @@ def mine_negatives_from_raw(
     use_faiss: bool,
 ) -> tuple[Dataset, list[dict]]:
     """
-    Se non sono disponibili JSONL pre-processati, mina hard negatives
-    direttamente da topics + corpus + qrels.
+    If pre-processed JSONL are not available, mines hard negatives
+    directly from topics + corpus + qrels.
     """
     from sentence_transformers import SentenceTransformer
     from sentence_transformers.util import mine_hard_negatives
@@ -145,7 +145,7 @@ def mine_negatives_from_raw(
         qrels = json.load(f)  # {str(qid): {str(pubkey): score}}
 
     def doc_to_text(item):
-        """Corpus: title + abstract. Robusto a campi mancanti."""
+        """Corpus: title + abstract. Robust to missing fields."""
         title    = item.get("title", "").strip()
         abstract = item.get("abstract", "").strip()
         if title and abstract:
@@ -163,7 +163,7 @@ def mine_negatives_from_raw(
             queries_list.append(q_text)
             answers_list.append(pubkey_to_text[pubkey])
         elif qid in qrels:
-            # prendi il primo rilevante da qrels
+            # Take the first relevant from qrels
             for pk, score in qrels[qid].items():
                 if score > 0 and pk in pubkey_to_text:
                     queries_list.append(q_text)
@@ -174,9 +174,9 @@ def mine_negatives_from_raw(
         "question": queries_list,
         "answer": answers_list,
     })
-    logger.info(f"Coppie query-answer: {len(raw_dataset)}")
+    logger.info(f"query-answer pairs: {len(raw_dataset)}")
 
-    logger.info("Mining hard negatives con static-retrieval-mrl-en-v1...")
+    logger.info("Mining hard negatives with static-retrieval-mrl-en-v1...")
     embedding_model = SentenceTransformer(
         "sentence-transformers/static-retrieval-mrl-en-v1", device="cpu"
     )
@@ -195,15 +195,15 @@ def mine_negatives_from_raw(
         use_faiss=use_faiss,
     )
 
-    # Rinomina colonne per uniformità
+    # Rename columns
     hard_dataset = hard_dataset.rename_column("question", "query")
     hard_dataset = hard_dataset.rename_column("answer", "passage")
 
-    # Split 90/10 per train/dev
+    # Split 90/10 for train/dev
     split = hard_dataset.train_test_split(test_size=0.1, seed=42)
 
-    # Campioni per il reranking evaluator (dal set dev grezzo)
-    # Aggiungi negativi casuali (altri positivi) per evitare il crash ndcg_score
+    # Samples for the reranking evaluator (from the raw dev set)
+    # Add random negatives (positives from other queries) to avoid a crash with ndcg_score
     eval_answers = answers_list[:500]
     eval_samples = []
     for i, (q, a) in enumerate(zip(queries_list[:500], eval_answers)):
@@ -223,46 +223,46 @@ def mine_negatives_from_raw(
 # ---------------------------------------------------------------------------
 
 def main():
-    parser = argparse.ArgumentParser(description="Fine-tune ModernBERT-large come reranker")
+    parser = argparse.ArgumentParser(description="Fine-tune ModernBERT-large as reranker")
 
     # Input dati
     parser.add_argument("--train_jsonl", type=str, default=None,
-                        help="Path a train.jsonl (output di prepare_reranker_data.py)")
+                        help="Path to train.jsonl (output of prepare_reranker_data.py)")
     parser.add_argument("--dev_jsonl", type=str, default=None,
-                        help="Path a dev.jsonl")
+                        help="Path to dev.jsonl")
     parser.add_argument("--topics", type=str, default=None,
-                        help="Path a topics.json (alternativo a JSONL)")
+                        help="Path to topics.json (alternative to JSONL)")
     parser.add_argument("--corpus", type=str, default=None,
-                        help="Path a corpus.json")
+                        help="Path to corpus.json")
     parser.add_argument("--qrels", type=str, default=None,
-                        help="Path a qrels.json")
+                        help="Path to qrels.json")
 
     # Modello
     parser.add_argument("--model", type=str,
                         default="answerdotai/ModernBERT-large",
-                        help="Modello base HuggingFace")
+                        help="Base HuggingFace model")
     parser.add_argument("--output_dir", type=str,
                         default="models/reranker-modernbert-large",
-                        help="Directory di output")
+                        help="Output directory")
 
     # Iperparametri
     parser.add_argument("--num_negatives", type=int, default=5,
-                        help="Numero di negativi per campione positivo")
+                        help="NNumber of negatives per positive sample")
     parser.add_argument("--epochs", type=int, default=3)
     parser.add_argument("--batch_size", type=int, default=16,
-                        help="Batch size per device (riduci se OOM)")
+                        help="Batch size per device (riduce if OOM)")
     parser.add_argument("--lr", type=float, default=2e-5)
     parser.add_argument("--warmup_ratio", type=float, default=0.1)
     parser.add_argument("--max_length", type=int, default=512,
-                        help="Max token length per coppia query+passage")
+                        help="Max token length per query+passage pair")
     parser.add_argument("--use_faiss", action="store_true",
-                        help="Usa FAISS per il mining (richiede faiss-gpu o faiss-cpu)")
+                        help="Use FAISS for mining (requires faiss-gpu or faiss-cpu)")
     parser.add_argument("--bf16", action="store_true", default=True,
-                        help="Usa bfloat16 (consigliato su L40S)")
+                        help="Use bfloat16 (recommended on L40S)")
     parser.add_argument("--fp16", action="store_true", default=False,
-                        help="Usa fp16 (alternativa a bf16)")
+                        help="Use fp16 (alternative to bf16)")
     parser.add_argument("--grad_checkpoint", action="store_true", default=True,
-                        help="Gradient checkpointing per risparmio VRAM")
+                        help="Gradient checkpointing to save VRAM")
     parser.add_argument("--eval_steps", type=int, default=200)
     parser.add_argument("--save_steps", type=int, default=600)
     parser.add_argument("--run_name", type=str, default="reranker-modernbert-large")
@@ -274,7 +274,7 @@ def main():
     args = parser.parse_args()
 
     # ------------------------------------------------------------------
-    # Import sentence-transformers (>= 4.0 richiesto)
+    # Import sentence-transformers (>= 4.0 required)
     # ------------------------------------------------------------------
     try:
         from sentence_transformers import CrossEncoder
@@ -287,8 +287,8 @@ def main():
         from sentence_transformers.cross_encoder.evaluation import CrossEncoderRerankingEvaluator
     except ImportError as e:
         logger.error(
-            "sentence-transformers >= 4.0 richiesto.\n"
-            "Installa con: pip install -U sentence-transformers\n"
+            "sentence-transformers >= 4.0 required.\n"
+            "Install with: pip install -U sentence-transformers\n"
             f"Errore: {e}"
         )
         raise
@@ -299,7 +299,7 @@ def main():
     eval_samples = None
 
     if args.train_jsonl and args.dev_jsonl:
-        logger.info("Caricamento dati da JSONL pre-processati...")
+        logger.info("Loading data from pre-processed JSONL...")
         train_records = load_jsonl(args.train_jsonl)
         dev_records = load_jsonl(args.dev_jsonl)
 
@@ -314,7 +314,7 @@ def main():
         logger.info(f"Train samples: {len(train_dataset)} | Dev samples: {len(dev_dataset)}")
 
     elif args.topics and args.corpus:
-        logger.info("Nessun JSONL trovato → mining hard negatives da topics/corpus...")
+        logger.info("No JSONL found → mining hard negatives from topics/corpus...")
         split, eval_samples = mine_negatives_from_raw(
             topics_path=args.topics,
             corpus_path=args.corpus,
@@ -326,36 +326,36 @@ def main():
         dev_dataset = split["test"]
     else:
         raise ValueError(
-            "Devi fornire --train_jsonl + --dev_jsonl  oppure  --topics + --corpus (+ opzionalmente --qrels)"
+            "Must provide --train_jsonl + --dev_jsonl  or  --topics + --corpus (+ optionally --qrels)"
         )
 
     # ------------------------------------------------------------------
-    # Modello
+    # Model
     # ------------------------------------------------------------------
-    logger.info(f"Caricamento modello base: {args.model}")
+    logger.info(f"Loading base model: {args.model}")
     model = CrossEncoder(
         args.model,
-        num_labels=1,          # reranker: singolo score scalare
+        num_labels=1,          # reranker: single scalar score
         max_length=args.max_length,
         default_activation_function=torch.nn.Sigmoid(),  # → score in [0,1]
     )
 
     if args.grad_checkpoint:
         model.model.gradient_checkpointing_enable()
-        logger.info("Gradient checkpointing abilitato")
+        logger.info("Gradient checkpointing enabled")
 
     # ------------------------------------------------------------------
     # Loss
     # ------------------------------------------------------------------
     if args.loss == "bce":
-        # Richiede colonne: query, passage, label (0/1)
-        # Ottima per dataset con coppie etichettate
+        # Required columns: query, passage, label (0/1)
+        # Excellent for dataset with labeled pairs
         loss = BinaryCrossEntropyLoss(model)
         logger.info("Loss: BinaryCrossEntropyLoss")
 
     elif args.loss == "mnrl":
-        # In-batch negatives: ogni positivo usa gli altri campioni del batch come negativi
-        # Non richiede colonna label → rimuovila se presente
+        # In-batch negatives: every positive uses the other samples in the batch as negatives
+        # Doesn't require label column → remove it if present
         if "label" in train_dataset.column_names:
             train_dataset = train_dataset.filter(lambda x: x["label"] == 1.0)
             train_dataset = train_dataset.remove_columns(["label"])
@@ -366,10 +366,10 @@ def main():
         logger.info("Loss: CachedMultipleNegativesRankingLoss")
 
     elif args.loss == "lambda":
-        # LambdaLoss: ottimizza direttamente metriche di ranking (NDCG)
-        # Richiede colonne: query, passage, label
+        # LambdaLoss: directly optimized ranking metrics (NDCG)
+        # Requires columns: query, passage, label
         loss = LambdaLoss(model)
-        logger.info("Loss: LambdaLoss (ottimizza NDCG direttamente)")
+        logger.info("Loss: LambdaLoss (optimizes NDCG directly)")
 
     # ------------------------------------------------------------------
     # Evaluator
@@ -382,7 +382,7 @@ def main():
             batch_size=args.batch_size,
             show_progress_bar=True,
         )
-        logger.info(f"Evaluator: CrossEncoderRerankingEvaluator su {len(eval_samples)} query")
+        logger.info(f"Evaluator: CrossEncoderRerankingEvaluator on {len(eval_samples)} queries")
 
     # ------------------------------------------------------------------
     # Training Arguments
@@ -396,7 +396,7 @@ def main():
         warmup_ratio=args.warmup_ratio,
         fp16=args.fp16,
         bf16=args.bf16,
-        # Strategie di eval e salvataggio
+        # Storing and eval strategy
         eval_strategy="steps" if evaluator else "no",
         eval_steps=args.eval_steps,
         save_strategy="steps",
@@ -407,10 +407,10 @@ def main():
         greater_is_better=True,
         logging_steps=50,
         run_name=args.run_name,
-        # Ottimizzazioni memoria
+        # Memory optimization
         dataloader_num_workers=2,
         dataloader_pin_memory=True,
-        # Gradient accumulation (aumenta effective batch size senza più VRAM)
+        # Gradient accumulation (increases effective batch size if there's no more VRAM)
         gradient_accumulation_steps=2,  # effective_batch = batch_size * 2
     )
 
@@ -431,7 +431,7 @@ def main():
     # ------------------------------------------------------------------
     logger.info("=" * 60)
     logger.info("AVVIO FINE-TUNING")
-    logger.info(f"  Modello base  : {args.model}")
+    logger.info(f"  Base model    : {args.model}")
     logger.info(f"  Loss          : {args.loss}")
     logger.info(f"  Epoche        : {args.epochs}")
     logger.info(f"  Batch size    : {args.batch_size} (grad_accum=2 → eff {args.batch_size * 2})")
@@ -447,15 +447,15 @@ def main():
     # ------------------------------------------------------------------
     final_path = os.path.join(args.output_dir, "final")
     model.save_pretrained(final_path)
-    logger.info(f"Modello salvato in: {final_path}")
+    logger.info(f"Modello stored in: {final_path}")
 
     # ------------------------------------------------------------------
-    # Valutazione finale sul dev set
+    # Final evaluation on dev set
     # ------------------------------------------------------------------
     if evaluator:
-        logger.info("Valutazione finale sul dev set...")
+        logger.info("Final evaluation on dev set...")
         results = evaluator(model)
-        logger.info("Risultati finali:")
+        logger.info("Final results:")
         for k, v in results.items():
             logger.info(f"  {k}: {v:.4f}")
 
