@@ -37,26 +37,39 @@ Do not include the original text, explanations, labels, or any other content.\\[
 \textit{user:} Translate this \{\textbf{French/German}\} text to English.\\
 Output only the English translation, nothing else.\\[0.8em]
 
-\{\textbf{Query original text}\}
+\{\textbf{Query original text $x$}\}
 \end{flushleft}
 \end{promptbox}
-
+Given $x$ as the original query text, the model predict probabilities for the next token with \cite{huggingface_transformers_generation}: 
+$$P(y_t=i\mid y_{<t},x)=\operatorname{softmax}(z_t/T)_i$$
+Looking at our model configuration, the prediction becomes greedy, following \cite{utter_project_eurollm_9b_instruct_2512}: $$y_t=\arg\max_i P(y_t=i\mid y_{<t},x)$$
 The resulting English queries are then fed into the following step of our pipeline. 
 
-\subsection{Query Expansion} \label{sub:queryexp}
-Following the translation phase, the English queries undergo a semantic and lexical expansion process. This stage is designed to bridge the vocabulary gap between the user's informal query and the formal academic language present in the scientific document corpus. Unlike previous iterations that relied on generative LLM re-phrasings, the current architecture utilizes a hybrid expansion strategy, combining deep semantic retrieval with linguistic analysis. The expansion process follows three main technical steps:
+\subsection{Query Expansion} \label{sub:query-expansion}
+
+Following the translation stage, each query is processed by a deterministic query-expansion module designed to reduce query–document vocabulary mismatch between short user claims and the terminology used in the scientific corpus. The module does not rely on generative LLM-based paraphrasing. Instead, it combines lexical feature extraction with dense semantic retrieval and neighborhood-based term induction. This design is consistent with the established role of query expansion in mitigating vocabulary mismatch in information retrieval and with the use of embedding models for semantic search.
+
 \begin{itemize}
-    \item \textbf{Keyword Extraction}: We use the \texttt{spaCy} library (\texttt{en\_core\_web\_sm}) to perform Part-of-Speech (POS) tagging on the translated query. We specifically extract nouns (\texttt{NOUN}) and proper nouns (\texttt{PROPN}), which represent the core technical entities of the claim.
-    \item \textbf{Semantic Neighbor Retrieval}: The query is embedded using the \texttt{BAAI/bge-large-en-v1.5} model. We retrieve the top-5 most similar documents from the corpus to act as a source of domain-specific terminology. To ensure high-quality embeddings, we apply the BGE-specific instruction prefix: \textit{"Represent this sentence for searching relevant passages:"}.
-    \item \textbf{Term Frequency Selection}: Candidate expansion terms are extracted from the retrieved neighbors and weighted based on their frequency and the original semantic similarity score.
+    \item The translated English query is first analyzed with spaCy’s \texttt{en\_core\_web\_sm} pipeline, which provides token-level linguistic annotations, including stop-word indicators and coarse-grained part-of-speech labels from the Universal POS tag set. Candidate lexical anchors are then identified by retaining tokens tagged as NOUN or PROPN, while excluding stop words and tokens shorter than three characters. The resulting set is deduplicated to produce a compact lexical signature that captures the principal nominal content of the query. 
+    
+    \item The semantic expansion stage operates over a corpus in which each document is represented as the concatenation of its title and abstract. These title–abstract pairs are embedded with \texttt{BAAI/bge-large-en-v1.5}. In accordance with the documented BGE retrieval interface, query embeddings are produced by prepending the instruction \texttt{\{Represent this sentence for searching relevant passages:\}} to the translated query, whereas the corpus documents are encoded as retrieval targets. Similarity is then computed on normalized embeddings using the dot product; for unit-length vectors, dot-product scoring is equivalent to cosine similarity while being computationally more efficient. 
+    $$s(q,d)=e_q^\top e_d=\sum_i e_{q,i}e_{d,i}$$
+    Because embeddings \(e = \frac{v}{\lVert v\rVert_2}\) are L2-normalized \(e_q^\top e_d = \cos(q,d)\) \cite{bge_large_model_card}.\\
+    The five highest-scoring documents are retained as the local semantic neighborhood used for expansion.
+
+    In the described implementation, candidate expansion terms are extracted from the retrieved documents after lowercasing, ASCII normalization, mention and hashtag removal, stop-word filtering, and exclusion of short tokens. The candidate pool is aggregated across the retrieved neighborhood and assigned coarse weights derived from the semantic similarity of the source documents, so that terms originating from more similar neighbors contribute more strongly. Terms already present in the query are removed, and the fifteen highest-ranking candidates are retained as explicit expansion terms.
+    \[
+K=\operatorname{unique}\{\ell(t): POS(t)\in\{\mathrm{NOUN},\mathrm{PROPN}\},\neg stop(t), |t|>2\}
+\]
+\[
+w_h=\max(1,\operatorname{round}(5s_h))
+\]
+\[
+c(t)=\sum_h w_h\,tf(t,d_h)
+\]
 \end{itemize}
-
-The final expanded query is constructed by concatenating the original translated text, the extracted POS keywords, and the top-15 most relevant expansion terms. This creates a high-density representation that maximizes the probability of overlap during the hybrid retrieval stage, ensuring that both specific technical nomenclature and broader semantic contexts are represented. The resulting JSON object preserves the original query metadata while adding an \texttt{expanded} field for the downstream retrieval framework.
-
-
-% After the translation (if needed), the queries undergo expansion: given the original query, we generate extra terms and tokens related to it.
-% This serves two purposes: to increase the number of available tokens for a match, and to bridge the gap between the original
-% informal query and the formal academic language used in the document corpus.\newline
+The final expanded query is constructed by concatenating three components: the cleaned translated query, the noun- and proper-noun-based keyword set extracted directly from the query, and the expansion terms induced from the retrieved document neighborhood.
+This output expanded query is then used by the downstream retrieval pipeline.\\
 
 Before confirming this as query expansion strategy, we have also tried to use two LLM models, \texttt{meta-llama/Llama-3.2-1B} and \texttt{openai/gpt-oss-20b} with the following prompt:
 \begin{promptbox}
@@ -125,13 +138,47 @@ This choice reflects the nature of the task. Social media claims often contain i
 
 The retriever searches the fixed paper collection provided by the task organizers. Each paper is represented at document level by concatenating its title and abstract, and the retrieved unit is always the paper \texttt{pubkey}. We did not split papers into smaller chunks because the task requires identifying the source publication rather than retrieving a specific evidence passage. Using one representation per paper also avoids an additional chunk-to-document aggregation step. Although the collection includes metadata such as venue and authors, this hybrid retrieval stage uses only titles and abstracts, since these are the fields consistently encoded for all documents.
 
-All input queries are converted into plain English, either because they are originally written in English or because they are translated before retrieval, see Section~\ref{sub:querytransl}. They are then expanded using the procedure described in Sections~\ref{sub:queryexp}.
+All input queries are converted into plain English, either because they are originally written in English or because they are translated before retrieval, see Section~\ref{sub:querytransl}. They are then expanded using the procedure described in Sections~\ref{sub:query-expansion}.
 
-We chose \textbf{BAAI/bge-m3} because it is well suited to this retrieval setting. The model can produce dense vectors, sparse lexical weights, and ColBERT-style multi-vector representations from the same encoder. This allows the retriever to combine broad semantic matching, exact term evidence, and fine-grained token-level matching without switching between unrelated encoders.
+We chose \textbf{BAAI/bge-m3} because it is well suited to this retrieval setting. The model can produce dense vectors, sparse lexical weights, and ColBERT-style multi-vector representations from the same encoder.\\
+This allows the retriever to combine broad semantic matching, exact term evidence, and fine-grained token-level matching without switching between unrelated encoders.\\
+For the dense representation, the document or query embedding is obtained from the normalized
+CLS representation \cite{chen2024bgem3}:
+\[
+e=\operatorname{norm}(H[0])
+\]
+For the sparse representation, BGE-M3 assigns lexical weights to tokens \cite{bge_m3_docs}:
+\[
+w_{qt}=\operatorname{ReLU}(W_{lex}^\top H_q[i])
+\]
+The sparse similarity between a query and a paper is then computed over overlapping terms:
+\[
+s_{lex}=\sum_{t\in q\cap p} w_{qt}w_{pt}
+\]
 
-Candidate selection is performed in two steps. First, all documents are encoded as dense BGE-M3 vectors and searched with an inner-product FAISS index~\cite{faiss_documentation}. This dense stage acts as an efficient broad filter over the whole collection. The default setting retrieves a large candidate pool of \texttt{candidate\_multiplier} $\times$ \texttt{top\_k}, with \texttt{candidate\_multiplier = 3} and \texttt{top\_k = 2000}, before the final truncation. This deliberately large candidate set favours recall, which is more important than precision at this stage.
+Candidate selection is performed in two steps. First, all documents are encoded as dense BGE-M3 vectors and searched with an inner-product FAISS index~\cite{faiss_documentation}. 
+The dense FAISS score is computed using inner product \cite{faiss_metrics}:
+\[
+s_{IP}(q,d)=q^\top d
+\]
+
+Since the dense vectors are normalized, this inner product is equivalent to cosine similarity:
+\[
+q^\top d=\cos(q,d)
+\]
+This dense stage acts as an efficient broad filter over the whole collection. The default setting retrieves a large candidate pool of \texttt{candidate\_multiplier} $\times$ \texttt{top\_k}, with \texttt{candidate\_multiplier = 3} and \texttt{top\_k = 2000}, before the final truncation. 
+The number of candidates passed to the hybrid rescoring stage is:
+\[
+K_c=\min(N,\max(K,Km))
+\]
+
+This deliberately large candidate set favours recall, which is more important than precision at this stage.
 
 Second, the dense candidates are rescored using the sparse and ColBERT-style representations. The sparse component rewards important overlapping terms, while the ColBERT-style component captures local token correspondences that may be lost when each document is represented by a single dense vector~\cite{KhattabZaharia2020}.
+The ColBERT-style late-interaction score is computed as \cite{khattab2020colbert}:
+\[
+s_{colbert}(q,d)=\frac{1}{N_q}\sum_{i=1}^{N_q}\max_{1\le j\le N_d} q_i^\top d_j
+\]
 
 The final configuration was selected through a series of development runs. We first tuned the lexical baseline by varying the Lucene analyzer, stop-word lists, stemming strategy, and BM25 searcher variants. These experiments improved the classical baseline, but also highlighted its limitations for this task: even with query expansion and reranking, BM25-based candidate generation remained more dependent on surface-level lexical overlap than desired.
 
