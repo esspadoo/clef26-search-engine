@@ -1,8 +1,8 @@
 """
-Reranker_Nemotron_1b.py — Llama-Nemotron-Rerank-1B re-ranking dei risultati BM25
+Reranker_Nemotron_1b.py — Llama-Nemotron-Rerank-1B re-ranking of BM25 results
 ======================================================================================
-nvidia/llama-nemotron-rerank-1b-v2 è un cross-encoder (AutoModelForSequenceClassification)
-fine-tuned con bidirectional attention su Llama-3.2-1B.
+nvidia/llama-nemotron-rerank-1b-v2 is a cross-encoder (AutoModelForSequenceClassification)
+fine-tuned with bidirectional attention on Llama-3.2-1B.
 
 Meccanismo ufficiale (da HuggingFace nvidia/llama-nemotron-rerank-1b-v2):
   1. Formattare la coppia con il template: "question:{q} \n \n passage:{p}"

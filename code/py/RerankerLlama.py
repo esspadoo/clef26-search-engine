@@ -280,7 +280,7 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
             if current_batch <= 1:
                 print(
                     f"  WARNING: OOM even with batch=1 on {len(batch)} pairs. "
-                    f"Score=0.5 as fallback (BM25 order maintained).",
+                    f"Score=0.5 as fallback (BM25 sorting maintained).",
                     flush=True,
                 )
                 # A neutral sigmoid score preserves first-stage order after sort ties.
@@ -518,7 +518,7 @@ if __name__ == "__main__":
     print(f"\nTotal pairs scored : {total_pairs}")
     print(f"Queries re-ranked  : {len(reranked_results)}")
     if missing_docs:
-        print(f"Pubkey not found : {missing_docs} (BM25 order maintained)")
+        print(f"Pubkey not found : {missing_docs} (BM25 sorting maintained)")
     coverage = len(reranked_results) / len(bm25_results) * 100
     print(f"Coverage           : {coverage:.1f}% ({len(reranked_results)}/{len(bm25_results)})")
 

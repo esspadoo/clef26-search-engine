@@ -1,41 +1,40 @@
 """
-Reranker_zerank1.py — zerank-1 / zerank-2 re-ranking dei risultati BM25
+Reranker_zerank1.py — zerank-1 / zerank-2 re-ranking of BM25 results
 ========================================================================
-zeroentropy/zerank-1 e zeroentropy/zerank-2 sono cross-encoder basati su
-Qwen3-4B con architettura e pesi custom (modeling_zeranker.py).
+zeroentropy/zerank-1 and zeroentropy/zerank-2 are cross-encoder based on
+Qwen3-4B with custom weigths and architecture (modeling_zeranker.py).
 
-Meccanismo ufficiale (da HuggingFace zeroentropy/zerank-1 e zerank-2):
-  1. Caricare con CrossEncoder("zeroentropy/zerank-1", trust_remote_code=True)
-     NON usare AutoModelForSequenceClassification direttamente: il parametro
-     score.weight verrebbe re-inizializzato casualmente invece di usare i
-     pesi addestrati nel checkpoint.
-  2. model.predict([(query, doc), ...]) → score float in [0, 1]
-     - ~1.0 = molto rilevante
-     - ~0.0 = irrilevante
-     Score già normalizzati: nessuna sigmoid necessaria.
-  3. CRITICO: CrossEncoder.predict() con batch_size > 1 crasha se il
-     tokenizer non ha pad_token definito (bug noto del modello). Soluzione:
-     mini-batching manuale coppia per coppia dentro predict_scores(),
-     NON affidarsi al parametro batch_size di CrossEncoder.predict().
+Official mechanism (from HuggingFace zeroentropy/zerank-1 e zerank-2):
+    1.  Load with CrossEncoder("zeroentropy/zerank-1", trust_remote_code=True)
+        do NOT use AutoModelForSequenceClassification directly: the score.weight
+        parameter would be randomly re-initialized instead of using the trained weights in the checkpoint.
+    2.  model.predict([(query, doc), ...]) → score float in [0, 1]
+        - ~1.0 = higly relevant
+        - ~0.0 = irrelevant
+        Scores are already normalized: no sigmoid is required.
+    3. CRITICAL: CrossEncoder.predict() with batch_size > 1 crashes if the tokenizer
+    does not have a defined pad_token (known model bug).
+    Solution: manual mini-batching pair by pair within predict_scores(),
+    do NOT rely on the batch_size parameter of CrossEncoder.predict().
 
-Differenze chiave rispetto a Nemotron:
-  - CrossEncoder (sentence-transformers), NON AutoModelForSequenceClassification
-  - Output già in [0,1]: nessuna sigmoid
-  - Mini-batching manuale per evitare crash su padding
-  - Per passare da zerank-1 a zerank-2: cambia solo MODEL_NAME
+Key differences compared to Nemotron:
+  - CrossEncoder (sentence-transformers), NOT AutoModelForSequenceClassification
+  - Output already in [0,1]: no sigmoid
+  - Manual mini-batching tu avoid crash on padding
+  - To switch from zerank-1 to zerank-2: only change the MODEL_NAME
 
-Richiede:
+Required:
   pip install sentence-transformers torch
 
-Legge:
-  - data/expanded_queries_*.json   (query, campo "original" o "text")
+Reads:
+  - data/expanded_queries_*.json   (query, fields "original" or "text")
   - data/collection_data.json      (corpus, title+abstract)
-  - results/bm25_results.json      (output Java: { qid → [pubkey, ...] })
+  - results/bm25_results.json      (Java output: { qid → [pubkey, ...] })
 
-Scrive:
-  - results/reranked_results_zerank.json  (stesso formato: { qid → [pubkey, ...] })
+Writes:
+  - results/reranked_results_zerank.json  (same format: { qid → [pubkey, ...] })
 
-Uso:
+Usage:
   python Reranker_zerank1.py
   python Reranker_zerank1.py --model zeroentropy/zerank-2 --top_k 100 --batch 16
 """
@@ -56,19 +55,19 @@ parser.add_argument("--papers",      default="../../../../../../data/collection_
 parser.add_argument("--bm25",        default="../../../../../../../results/bm25_results.json")
 parser.add_argument("--output",      default="../../../../../../../results/reranked_results_zerank.json")
 parser.add_argument("--model",       default="zeroentropy/zerank-1",
-                    help="Modello zerank da usare. "
-                         "Opzioni: zeroentropy/zerank-1, zeroentropy/zerank-2 (default: zerank-1). "
-                         "Entrambi hanno la stessa interfaccia: cambia solo questo argomento.")
+                    help="zerank model to use. "
+                         "Options: zeroentropy/zerank-1, zeroentropy/zerank-2 (default: zerank-1). "
+                         "Both have the same interface: they only differ by a few arguments.")
 parser.add_argument("--top_k",       type=int, default=100,
-                    help="Candidati BM25 da passare al re-ranker (default: 100)")
+                    help="BM25 candidates to pass to the re-ranker (default: 100)")
 parser.add_argument("--batch",       type=int, default=16,
-                    help="Coppie per iterazione di scoring (default: 16). "
+                    help="Pairs per scoring iteration (default: 16). "
                          "zerank-1 (4B BF16) ≈ 8-9 GB VRAM. "
-                         "Su L40S 48GB puoi alzare fino a 32-64.")
+                         "On L40S 48GB can be increased up to a 32-64.")
 parser.add_argument("--query_chunk", type=int, default=8,
-                    help="Query per chunk (default: 8).")
+                    help="Queries per chunk (default: 8).")
 parser.add_argument("--max_length",  type=int, default=512,
-                    help="Lunghezza massima token per coppia (default: 512).")
+                    help="Max token length per pair (default: 512).")
 
 
 # ──────────────────────────────────────────────────────────────
@@ -76,8 +75,8 @@ parser.add_argument("--max_length",  type=int, default=512,
 # ──────────────────────────────────────────────────────────────
 def sanity_check_scores(score_fn) -> bool:
     """
-    Verifica che il modello produca score discriminativi.
-    CrossEncoder zerank restituisce score in [0,1]: rilevante >> irrilevante.
+    Verify that the model produces discriminative scores.
+    The zerank CrossEncoder returns scores in [0, 1]: relevant >> irrelevant.
     """
     test_pairs = [
         ("neural network classification",
@@ -89,14 +88,14 @@ def sanity_check_scores(score_fn) -> bool:
         scores = score_fn(test_pairs)
         s0, s1 = float(scores[0]), float(scores[1])
         diff = abs(s0 - s1)
-        print(f"\n  [Sanity check] Score rilevante={s0:.4f} | Score irrilevante={s1:.4f} | Δ={diff:.4f}")
+        print(f"\n  [Sanity check] Relevant score={s0:.4f} | Irrelevant score={s1:.4f} | Δ={diff:.4f}")
         if diff < 0.05:
-            print("  WARNING: score quasi identici — controlla il modello/tokenizer!")
+            print("  WARNING: almost identical scores — check the model/tokenizer!")
             return False
         print("  [Sanity check] OK.")
         return True
     except Exception as e:
-        print(f"  WARNING: sanity check fallito: {e}")
+        print(f"  WARNING: sanity check failed: {e}")
         return False
 
 
@@ -105,23 +104,23 @@ def sanity_check_scores(score_fn) -> bool:
 # ──────────────────────────────────────────────────────────────
 def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
     """
-    Costruisce le coppie (query_text, doc_text) per un chunk di query.
-    Ritorna:
-      all_pairs : lista piatta di (str, str)
-      meta      : [(qid, valid_keys, n_pairs, fallback_candidates), ...]
-      missing   : n° doc non trovati nel corpus
+    Builds (query_text, doc_text) pairs for a chunk of queries.
+    Returns:
+        all_pairs : flat list of (str, str)
+        meta      : [(qid, valid_keys, n_pairs, fallback_candidates), ...]
+        missing   : number of docs not found in the corpus
     """
     all_pairs = []
     meta      = []
     missing   = 0
 
     for qid, candidate_pubkeys in query_items:
-        # Supporta sia chiavi int che str nel dict query_texts
+        # Supports both int and str keys in the query_texts dict
         query_text = query_texts.get(str(qid), query_texts.get(qid, ""))
         candidates = candidate_pubkeys[:top_k]
 
         if not query_text:
-            print(f"  WARNING: query text non trovato per qid={qid}, uso ordine BM25", flush=True)
+            print(f"  WARNING: query text not found for qid={qid}, using BM25 sorting", flush=True)
             meta.append((qid, [], 0, candidates))
             continue
 
@@ -143,8 +142,8 @@ def build_pairs_for_queries(query_items, paper_texts, query_texts, top_k):
 
 def scores_to_results(meta, scores_flat):
     """
-    Ricostruisce qid→[pubkey] dallo score array piatto.
-    Score in [0,1]: reverse=True mette i più rilevanti in cima.
+    Reconstructs qid→[pubkey] from the flat score array.
+    Scores in [0, 1]: reverse=True puts the most relevant ones at the top.
     """
     results = {}
     offset  = 0
@@ -161,17 +160,17 @@ def scores_to_results(meta, scores_flat):
 
 
 # ──────────────────────────────────────────────────────────────
-# Caricamento modello — CrossEncoder ufficiale zerank
+# Loading model — official zerank CrossEncoder
 # ──────────────────────────────────────────────────────────────
 def load_zerank(model_name: str, device: str, max_length: int):
     """
-    Carica zerank-1 o zerank-2 tramite CrossEncoder di sentence-transformers.
+    Loads zerank-1 or zerank-2 via sentence-transformers CrossEncoder.
 
-    CRITICO: usare trust_remote_code=True per caricare modeling_zeranker.py.
-    Senza di esso, transformers usa Qwen3ForSequenceClassification standard
-    e re-inizializza score.weight casualmente → score completamente casuali.
+    CRITICAL: Use trust_remote_code=True to load modeling_zeranker.py.
+    Without it, transformers uses the standard Qwen3ForSequenceClassification and
+    re-initializes score.weight randomly → completely random scores.
 
-    Output di model.predict(): score float già in [0,1], nessuna sigmoid necessaria.
+    model.predict() output: float scores already in [0, 1], no sigmoid required.
     """
     from sentence_transformers.cross_encoder import CrossEncoder
 
@@ -182,24 +181,24 @@ def load_zerank(model_name: str, device: str, max_length: int):
         max_length=max_length,
         device=device,
     )
-    # Assicura che il pad_token sia definito per evitare crash durante il padding
+    # Ensures that the pad_token is defined to avoid a crash during padding
     if model.tokenizer.pad_token is None:
         model.tokenizer.pad_token = model.tokenizer.eos_token
     if model.model.config.pad_token_id is None:
         model.model.config.pad_token_id = model.tokenizer.eos_token_id
 
-    print(f"  Modello caricato. Max length: {max_length}", flush=True)
+    print(f"  Modello loaded. Max length: {max_length}", flush=True)
 
     def score_pairs(pairs: list) -> list:
         """
-        Closure che incapsula il CrossEncoder.
-        Accetta lista di (query, doc) e ritorna lista di float in [0, 1].
+        Closure that encapsulates the CrossEncoder.
+        Accepts a list of (query, doc) and returns a list of floats in [0, 1].
 
-        NOTA: NON passare batch_size > 1 a model.predict() direttamente,
-        in quanto il tokenizer di zerank può non avere pad_token configurato
-        correttamente nella chiamata interna, causando crash con batch > 1.
-        Il mini-batching viene gestito esternamente in predict_scores().
-        Qui predict() viene chiamato su una coppia singola alla volta.
+        NOTE: DO NOT pass batch_size > 1 to model.predict() directly,
+        as the zerank tokenizer may not have pad_token configured
+        correctly in the internal call, causing crashes with batch > 1.
+        Mini-batching is handled externally in predict_scores().
+        Here predict() is called on a single pair at a time.
         """
         scores = model.predict(pairs)
         # predict() restituisce numpy array o lista, convertiamo a lista di float
@@ -211,18 +210,18 @@ def load_zerank(model_name: str, device: str, max_length: int):
 
 
 # ──────────────────────────────────────────────────────────────
-# Inferenza con gestione OOM e mini-batching manuale
+# Inference with OOM handling and manual mini-batching
 # ──────────────────────────────────────────────────────────────
 def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
     """
-    Itera le coppie in mini-batch, chiamando score_fn su ogni singola coppia.
+    Iterates through the pairs in mini-batches, calling score_fn on each single pair.
 
-    Il mini-batching è manuale e coppia per coppia: zerank con CrossEncoder
-    può crashare se il padding è applicato su batch > 1 senza pad_token.
-    Iteriamo a batch_size coppie per chiamata a score_fn, ma ogni coppia
-    viene processata individualmente dentro score_fn per sicurezza.
+    The mini-batching is manual and pair-by-pair: zerank with CrossEncoder
+    can crash if padding is applied to batch > 1 without a pad_token.
+    We iterate with batch_size pairs per call to score_fn, but each pair
+    is processed individually inside score_fn for safety.
 
-    Gestisce OOM dimezzando il batch e ripristinandolo al chunk successivo.
+    Handles OOM by halving the batch and restoring it at the next chunk.
     """
     all_scores    = []
     current_batch = batch_size
@@ -231,7 +230,7 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
     while i < len(pairs):
         batch = pairs[i: i + current_batch]
         try:
-            # Processamento coppia per coppia per evitare crash da padding
+            # Processing pair by pair to avoid crash from padding
             batch_scores = []
             for pair in batch:
                 s = score_fn([pair])
@@ -247,17 +246,17 @@ def predict_scores(score_fn, pairs: list, batch_size: int) -> list:
             torch.cuda.empty_cache()
             if current_batch <= 1:
                 print(
-                    f"  WARNING: OOM anche con batch=1. "
-                    f"Score=0.5 come fallback (ordine BM25 mantenuto).",
+                    f"  WARNING: OOM even with batch=1. "
+                    f"Score=0.5 as fallback (BM25 sorting maintained).",
                     flush=True,
                 )
-                # 0.5 = valore neutro in [0,1], non perturba l'ordine relativo
+                # 0.5 = neutral value in [0,1], doesn't change the relative order
                 all_scores.extend([0.5] * len(batch))
                 i += current_batch
                 current_batch = batch_size
             else:
                 current_batch = max(1, current_batch // 2)
-                print(f"  OOM → riduco batch a {current_batch} per questo chunk", flush=True)
+                print(f"  OOM → reducing batch to {current_batch} for this chunk", flush=True)
 
     return all_scores
 
@@ -277,14 +276,14 @@ def rerank_worker(
         max_length: int,
         result_queue: mp.Queue,
 ) -> None:
-    # CRITICO: isola la GPU prima di qualsiasi import CUDA
+    # CRITICAL: isolates GPU before any import CUDA
     os.environ["CUDA_VISIBLE_DEVICES"] = str(gpu_id)
     os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
 
     import torch
 
     device = "cuda:0"
-    print(f"[GPU {gpu_id}] {torch.cuda.get_device_name(0)} — caricamento modello...", flush=True)
+    print(f"[GPU {gpu_id}] {torch.cuda.get_device_name(0)} — loading model...", flush=True)
 
     score_fn = load_zerank(model_name, device, max_length)
 
@@ -331,15 +330,15 @@ if __name__ == "__main__":
     NUM_GPUS = torch.cuda.device_count()
     if NUM_GPUS == 0:
         DEVICE = "cpu"
-        print("Device: cpu (nessuna GPU CUDA trovata)")
+        print("Device: cpu (no CUDA GPU found)")
     else:
         DEVICE = "cuda:0"
-        print(f"Device: cuda — {NUM_GPUS} GPU disponibili:")
+        print(f"Device: cuda — {NUM_GPUS} GPU available:")
         for i in range(NUM_GPUS):
             print(f"  [{i}] {torch.cuda.get_device_name(i)}")
 
     # ── Carica dati ────────────────────────────────────────────
-    print(f"\nModello: {MODEL_NAME}")
+    print(f"\nModel: {MODEL_NAME}")
     print("Loading data...")
 
     with open(args.queries, "r", encoding="utf-8") as f:
@@ -362,7 +361,7 @@ if __name__ == "__main__":
     }
 
     # ── Sanity check sui dati ──────────────────────────────────
-    print(f"\nCorpus: {len(paper_texts)} documenti | "
+    print(f"\nCorpus: {len(paper_texts)} documents | "
           f"Queries: {len(query_texts)} | "
           f"BM25 results: {len(bm25_results)}")
 
@@ -370,29 +369,29 @@ if __name__ == "__main__":
     sample_candidates = bm25_results[sample_qid][:5]
     hits = sum(1 for pk in sample_candidates if str(pk) in paper_texts)
     print(f"Sanity check corpus — query '{sample_qid}': "
-          f"{hits}/{len(sample_candidates)} candidati trovati nel corpus")
+          f"{hits}/{len(sample_candidates)} candidates found in the corpus")
     if hits == 0:
-        print("ERRORE CRITICO: 0 candidati trovati. "
-              f"Tipo pubkey bm25={type(sample_candidates[0])}, "
-              f"tipo chiave corpus=str")
+        print("CRITICAL ERROR: 0 candidates found. "
+              f"BM25 pubkey type={type(sample_candidates[0])}, "
+              f"corpus key type=str")
 
     sample_qt = query_texts.get(str(sample_qid), "")
     print(f"Sanity check queries — qid='{sample_qid}': '{sample_qt[:80]}...'")
     if not sample_qt:
-        print("WARNING: query text vuoto. Controlla campo 'original'/'text' nel JSON query.")
+        print("WARNING: query text empty. Check field 'original'/'text' in the query JSON.")
 
     all_query_items = list(bm25_results.items())
     print(f"\nRe-ranking {len(bm25_results)} queries "
           f"(top_k={args.top_k}, batch={args.batch}, "
           f"query_chunk={args.query_chunk}, max_length={args.max_length})...")
 
-    # ── Singola GPU / CPU ───────────────────────────────────────
+    # ── Single GPU / CPU ───────────────────────────────────────
     if NUM_GPUS <= 1:
         score_fn = load_zerank(MODEL_NAME, DEVICE, args.max_length)
 
         ok = sanity_check_scores(score_fn)
         if not ok:
-            print("\nWARNING: sanity check fallito. Procedo comunque.\n")
+            print("\nWARNING: sanity check failed. Continuing anyway.\n")
 
         reranked_results: dict = {}
         missing_docs  = 0
@@ -463,22 +462,22 @@ if __name__ == "__main__":
         for p in processes:
             p.join()
 
-        # Ripristina ordine originale delle query
+        # Restore the original query sorting
         reranked_results = {
             qid: reranked_results[qid]
             for qid in bm25_results
             if qid in reranked_results
         }
 
-    # ── Report finale ──────────────────────────────────────────
+    # ── Final report ──────────────────────────────────────────
     print(f"\nTotal pairs scored : {total_pairs}")
     print(f"Queries re-ranked  : {len(reranked_results)}")
     if missing_docs:
-        print(f"Pubkey non trovati : {missing_docs} (ordine BM25 mantenuto)")
+        print(f"Pubkey not found : {missing_docs} (BM25 sorting maintained)")
     coverage = len(reranked_results) / len(bm25_results) * 100
     print(f"Coverage           : {coverage:.1f}% ({len(reranked_results)}/{len(bm25_results)})")
 
-    # ── Salva ──────────────────────────────────────────────────
+    # ── Storing ──────────────────────────────────────────────────
     out_dir = os.path.dirname(args.output)
     if out_dir:
         os.makedirs(out_dir, exist_ok=True)
@@ -486,5 +485,5 @@ if __name__ == "__main__":
     with open(args.output, "w", encoding="utf-8") as f:
         json.dump(reranked_results, f, indent=2, ensure_ascii=False)
 
-    print(f"\nSalvato → {args.output}")
-    print("Done. Ora esegui il Java evaluator puntando a reranked_results_zerank.json.")
+    print(f"\nStored → {args.output}")
+    print("Done. Now execute the Java evaluator on reranked_results_zerank.json.")
