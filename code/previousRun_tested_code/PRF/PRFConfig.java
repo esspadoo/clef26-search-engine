@@ -9,9 +9,12 @@ import java.util.Map;
  *
  * This class provides predefined parameter configurations for different use cases.
  * Use these as starting points, then tune based on your evaluation metrics.
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class PRFConfig {
-
     /**
      * Represents a PRF configuration
      */
@@ -22,6 +25,15 @@ public class PRFConfig {
         public final int topNTerms;
         public final int finalTopK;
 
+        /**
+         * Creates a PRF configuration with explicit tuning parameters.
+         *
+         * @param name the configuration name
+         * @param description the human-readable description of the configuration
+         * @param topKRelevant the number of top documents used for feedback
+         * @param topNTerms the number of expansion terms extracted from feedback documents
+         * @param finalTopK the number of documents returned by the second-pass search
+         */
         public Config(String name, String description, int topKRelevant, int topNTerms, int finalTopK) {
             this.name = name;
             this.description = description;
@@ -30,6 +42,11 @@ public class PRFConfig {
             this.finalTopK = finalTopK;
         }
 
+        /**
+         * Returns a compact textual representation of this configuration.
+         *
+         * @return a summary string containing the configuration parameters
+         */
         @Override
         public String toString() {
             return String.format(
@@ -101,7 +118,10 @@ public class PRFConfig {
     );
 
     /**
-     * Returns a configuration by name
+     * Returns a predefined configuration by name.
+     *
+     * @param name the configuration name to resolve
+     * @return the matching configuration, or {@link #BALANCED} when the name is unknown
      */
     public static Config getConfig(String name) {
         switch (name.toUpperCase()) {
@@ -120,7 +140,7 @@ public class PRFConfig {
     }
 
     /**
-     * List all available configurations
+     * Prints all predefined configurations to standard output.
      */
     public static void printAllConfigs() {
         System.out.println("=== Available PRF Configurations ===");
@@ -139,14 +159,25 @@ public class PRFConfig {
     }
 
     /**
-     * Create a custom configuration
+     * Creates a custom configuration.
+     *
+     * @param name the configuration name
+     * @param description the human-readable configuration description
+     * @param topKRelevant the number of top documents used for feedback
+     * @param topNTerms the number of expansion terms to extract
+     * @param finalTopK the number of documents returned by the final search
+     * @return a configuration built from the provided parameters
      */
     public static Config custom(String name, String description, int topKRelevant, int topNTerms, int finalTopK) {
         return new Config(name, description, topKRelevant, topNTerms, finalTopK);
     }
 
     /**
-     * Tune a configuration by adjusting recall parameter
+     * Tunes a configuration by scaling its recall-oriented parameters.
+     *
+     * @param base the base configuration to adapt
+     * @param recallScale the multiplicative factor applied to recall-oriented values
+     * @return a new configuration derived from the base one
      */
     public static Config tuneForRecall(Config base, double recallScale) {
         return new Config(
@@ -159,7 +190,11 @@ public class PRFConfig {
     }
 
     /**
-     * Tune a configuration by adjusting precision parameter
+     * Tunes a configuration by scaling its precision-oriented parameters.
+     *
+     * @param base the base configuration to adapt
+     * @param precisionScale the divisor used to make expansion more selective
+     * @return a new configuration derived from the base one
      */
     public static Config tuneForPrecision(Config base, double precisionScale) {
         return new Config(
@@ -172,7 +207,9 @@ public class PRFConfig {
     }
 
     /**
-     * Demo: Show how to use configurations
+     * Demonstrates how to inspect and use the available PRF configurations.
+     *
+     * @param args ignored command-line arguments
      */
     public static void main(String[] args) {
         System.out.println("PRF Configuration System");

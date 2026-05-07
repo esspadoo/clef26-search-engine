@@ -28,7 +28,9 @@ public class ExpandedQueryDoc_TEX extends QueryDoc {
      */
     public String sparse;
 
-
+    /**
+     * Additional keyword-oriented expansion terms generated for the query.
+     */
     public String keywords;
 
     /**

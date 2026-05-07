@@ -19,10 +19,16 @@ import java.util.stream.Collectors;
  * Supports both QueryDoc and subclasses (e.g., ExpandedQueryDoc).
  * Uses BM25 similarity and a weighted multi-field query (title + abstract).
  * </p>
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class SearcherV1 {
 
-    /** Shared custom analyzer for parsing queries. */
+    /**
+     * Shared custom analyzer for parsing queries.
+     */
     private static final MyEnglishAnalyzer_V2 ANALYZER = new MyEnglishAnalyzer_V2();
 
     /**
@@ -35,6 +41,7 @@ public class SearcherV1 {
      * @param titleBoost boost applied to the title field
      * @param topK       number of top documents to retrieve
      * @return map from query index → ranked list of pubkeys
+     * @throws IOException if the index cannot be opened or if the parallel search fails
      */
     public static Map<String, List<String>> search(
             Directory dir,

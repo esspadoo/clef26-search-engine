@@ -32,6 +32,10 @@ import java.util.List;
  * - Removes stopwords
  * - Applies stemming (KStem stemmer)
  * - Normalizes accents
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class MyEnglishAnalyzer_V2_1 extends Analyzer {
 
@@ -41,6 +45,12 @@ public class MyEnglishAnalyzer_V2_1 extends Analyzer {
     // regex per rimuovere menzioni (@)
     private static final Pattern MENTION_PATTERN = Pattern.compile("@\\w+");
 
+    /**
+     * Builds the tokenization pipeline used by this analyzer variant.
+     *
+     * @param fieldName the name of the field being analyzed
+     * @return the tokenizer together with the configured filter chain
+     */
     @Override
     protected TokenStreamComponents createComponents(String fieldName) {
 

@@ -22,6 +22,10 @@ import java.util.Map;
  * - Test parameter sensitivity
  * - Validate term extraction consistency
  * </p>
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class PRFValidator {
 
@@ -67,7 +71,11 @@ public class PRFValidator {
     }
 
     /**
-     * Tests PRF with various parameter combinations.
+     * Tests PRF with several parameter combinations to observe sensitivity.
+     *
+     * @param dir the Lucene index directory
+     * @param query the query used during the sensitivity experiment
+     * @throws IOException if the index cannot be accessed
      */
     public static void testParameterSensitivity(Directory dir, String query) throws IOException {
         System.out.println("=== PRF Parameter Sensitivity Test ===");
@@ -112,7 +120,11 @@ public class PRFValidator {
     }
 
     /**
-     * Tests PRF consistency across multiple runs (should be deterministic).
+     * Tests whether PRF produces deterministic results across repeated runs.
+     *
+     * @param dir the Lucene index directory
+     * @param query the query used during the consistency check
+     * @throws IOException if the index cannot be accessed
      */
     public static void testConsistency(Directory dir, String query) throws IOException {
         System.out.println("=== PRF Consistency Test ===");
@@ -150,7 +162,10 @@ public class PRFValidator {
     }
 
     /**
-     * Tests PRF with edge cases.
+     * Runs a small suite of edge-case PRF queries.
+     *
+     * @param dir the Lucene index directory
+     * @throws IOException if the index cannot be accessed
      */
     public static void testEdgeCases(Directory dir) throws IOException {
         System.out.println("=== PRF Edge Cases Test ===");
@@ -176,6 +191,13 @@ public class PRFValidator {
         testQuery(dir, fields, "SARS-CoV-2 pandemic 2020");
     }
 
+    /**
+     * Executes a single diagnostic PRF query and prints the observed outcome.
+     *
+     * @param dir the Lucene index directory
+     * @param fields the field weights used by the query parser
+     * @param query the query text to evaluate
+     */
     private static void testQuery(Directory dir, Map<String, Float> fields, String query) {
         System.out.println("Query: \"" + query + "\"");
         try {
@@ -194,7 +216,10 @@ public class PRFValidator {
     }
 
     /**
-     * Main test runner.
+     * Runs the full PRF validation suite from the command line.
+     *
+     * @param args ignored command-line arguments
+     * @throws Exception if the index cannot be prepared or a validation step fails unexpectedly
      */
     public static void main(String[] args) throws Exception {
         System.out.println("PRF Validation Test Suite");

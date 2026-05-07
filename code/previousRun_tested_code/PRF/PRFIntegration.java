@@ -10,11 +10,22 @@ import java.util.concurrent.*;
 /**
  * Integration guide and examples for using PRF with your existing pipeline.
  * This class shows how to add PRF to Main.java and other components.
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class PRFIntegration {
 
     /**
-     * Example 1: Simple replacement of BM25 search with PRF two-pass search
+     * Replaces a plain BM25 search with a PRF-based two-pass search.
+     *
+     * @param index the Lucene index to search
+     * @param queries the queries to execute
+     * @param titleBoost the boost applied to the title field
+     * @param topK the maximum number of results to retain for each query
+     * @return a map from query identifier to ranked document identifiers
+     * @throws IOException if PRF search fails for reasons other than per-query recoverable errors
      */
     public static Map<String, List<String>> integrateSimplePRF(
             Directory index,
@@ -62,7 +73,14 @@ public class PRFIntegration {
     }
 
     /**
-     * Example 2: Hybrid approach - combine BM25 and PRF results
+     * Combines BM25 results with PRF-expanded results for each query.
+     *
+     * @param index the Lucene index to search
+     * @param queries the queries to execute
+     * @param titleBoost the boost applied to the title field
+     * @param topK the maximum number of results to retain for each query
+     * @return a map from query identifier to merged document identifiers
+     * @throws IOException if the baseline BM25 search cannot be executed
      */
     public static Map<String, List<String>> hybridBM25andPRF(
             Directory index,
@@ -115,7 +133,14 @@ public class PRFIntegration {
     }
 
     /**
-     * Example 3: Configurable PRF with different strategies for different queries
+     * Applies PRF with a query-dependent configuration strategy.
+     *
+     * @param index the Lucene index to search
+     * @param queries the queries to execute
+     * @param titleBoost the boost applied to the title field
+     * @param topK the maximum number of results to retain for each query
+     * @return a map from query identifier to ranked document identifiers
+     * @throws IOException if PRF search fails for reasons other than per-query recoverable errors
      */
     public static Map<String, List<String>> adaptivePRF(
             Directory index,
@@ -161,7 +186,10 @@ public class PRFIntegration {
     }
 
     /**
-     * Helper: Select PRF configuration based on query characteristics
+     * Selects a PRF preset based on simple query characteristics.
+     *
+     * @param query the raw query text
+     * @return the preset that best matches the observed query shape
      */
     private static PRFConfig.Config selectConfig(String query) {
         int wordCount = query.trim().split("\\s+").length;
@@ -181,7 +209,14 @@ public class PRFIntegration {
     }
 
     /**
-     * Example 4: Parallel PRF execution for multiple queries
+     * Executes PRF for multiple queries in parallel.
+     *
+     * @param index the Lucene index to search
+     * @param queries the queries to execute
+     * @param titleBoost the boost applied to the title field
+     * @param topK the maximum number of results to retain for each query
+     * @return a map from query identifier to ranked document identifiers
+     * @throws IOException if the parallel execution is interrupted or fails
      */
     public static Map<String, List<String>> parallelPRF(
             Directory index,
@@ -253,6 +288,8 @@ public class PRFIntegration {
      *
      * Option D - Parallel approach:
      *   results = PRFIntegration.parallelPRF(index, queries, 1.0f, 100);
+     *
+     * @param args ignored command-line arguments
      */
     public static void main(String[] args) {
         System.out.println("PRF Integration Examples");

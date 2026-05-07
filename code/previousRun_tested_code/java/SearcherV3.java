@@ -20,6 +20,10 @@ import java.util.concurrent.*;
  * Supports both QueryDoc and subclasses (e.g., ExpandedQueryDoc).
  * Uses BM25 similarity and a weighted multi-field query (title + abstract).
  * </p>
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class SearcherV3 {
     /** Shared custom analyzer for parsing queries. */
@@ -211,11 +215,26 @@ public class SearcherV3 {
         return bq.clauses().isEmpty() ? parser.parse("") : bq;
     }
 
+    /**
+     * Builds a free-text query after removing inline structured filters from the raw input.
+     *
+     * @param text the raw query text
+     * @param parser the Lucene parser used to create the query
+     * @param filters the mutable map that collects extracted filters
+     * @return the parsed Lucene query for the remaining free-text portion
+     */
     private static Query buildSimpleQuery(String text, SimpleQueryParser parser, Map<String, String> filters) {
         String searchText = extractFilters(text, filters);
         return parser.parse(searchText);
     }
 
+    /**
+     * Extracts supported inline filters and returns the query text without the filter clauses.
+     *
+     * @param text the raw query text that may contain {@code venue:} or {@code author:} filters
+     * @param filters the map where extracted filter values are stored
+     * @return the cleaned query text with the structured filters removed
+     */
     private static String extractFilters(String text, Map<String, String> filters) {
         Matcher venueM = VENUE_PATTERN.matcher(text);
         if (venueM.find()) {
@@ -231,6 +250,13 @@ public class SearcherV3 {
         return text;
     }
 
+    /**
+     * Combines a free-text query with structured field filters when they are available.
+     *
+     * @param query the base Lucene query
+     * @param filters the structured filters extracted from the raw query text
+     * @return the original query if no filters are present, otherwise a boolean query with mandatory filters
+     */
     private static Query applyFilters(Query query, Map<String, String> filters) {
         if (filters.isEmpty()) return query;
         BooleanQuery.Builder bq = new BooleanQuery.Builder();

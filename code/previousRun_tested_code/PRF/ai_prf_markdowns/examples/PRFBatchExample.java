@@ -29,9 +29,19 @@ import java.util.concurrent.*;
  * Usage:
  *   java PRFBatchExample [papersPath] [queriesPath]
  * </p>
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class PRFBatchExample {
 
+    /**
+     * Runs the batch PRF comparison example from the command line.
+     *
+     * @param args command-line arguments containing the collection path and the queries path
+     * @throws Exception if loading data, indexing, searching, or writing the output fails
+     */
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
             System.out.println("Usage: java PRFBatchExample <papersPath> <queriesPath>");

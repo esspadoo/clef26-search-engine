@@ -29,6 +29,10 @@ import java.util.stream.Collectors;
  * This is particularly useful in medical/scientific domains where terminology variations
  * are common (e.g., "vaccine" vs "immunization").
  * </p>
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class PseudoRelevanceFeedback {
 
@@ -42,6 +46,13 @@ public class PseudoRelevanceFeedback {
         public final List<String> expandedTerms;  // Terms extracted from top documents
         public final String expandedQuery;        // Original query + expanded terms
 
+        /**
+         * Creates a container for the intermediate artifacts produced by a PRF iteration.
+         *
+         * @param topDocIds the identifiers returned by the first-pass search
+         * @param expandedTerms the feedback terms extracted from the top-ranked documents
+         * @param expandedQuery the original query augmented with the extracted terms
+         */
         public PRFResult(List<String> topDocIds, List<String> expandedTerms, String expandedQuery) {
             this.topDocIds = topDocIds;
             this.expandedTerms = expandedTerms;

@@ -17,18 +17,18 @@ import java.util.concurrent.*;
 /*
  * Entry point for the Information Retrieval pipeline.
  *
- * Modalità 1 — BM25 only (default):
+ * Mode 1 — BM25 only (default):
  *   java Main
- *   → esegue retrieval BM25, salva results/bm25_results.json, valuta e salva metriche
+ *   -> runs BM25 retrieval, saves results/bm25_results.json, evaluates, and saves metrics
  *
- * Modalità 2 — BM25 + re-ranking neurale:
+ * Mode 2 — BM25 + neural re-ranking:
  *   java Main [papersPath] [queriesPath] [rerankedResultsPath]
- *   → se rerankedResultsPath è fornito, valuta QUELLO invece dei risultati BM25
+ *   -> if rerankedResultsPath is provided, evaluates THAT instead of the BM25 results
  *
- * Flusso completo consigliato:
- *   1. java Main                          → produce results/bm25_results.json
- *   2. python Reranker.py                 → produce results/reranked_results.json
- *   3. java Main _ _ results/reranked_results.json   → valuta il re-ranking
+ * Recommended full workflow:
+ *   1. java Main                          -> produces results/bm25_results.json
+ *   2. python Reranker.py                 -> produces results/reranked_results.json
+ *   3. java Main _ _ results/reranked_results.json   -> evaluates the re-ranking
  */
 
 /**
@@ -65,7 +65,7 @@ public class Main {
         String papersPath  = args.length > 0 && !args[0].equals("_") ? args[0] : "code/data/collection_data.json";
         //String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/expanded_queries_multilingual_merged.json";
 
-        //per run dev_set EN
+        // For the EN dev_set run
         String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/Dev_set/ENexpanded_queries_bge_largeDEV.json";
         //String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/Dev_set/expanded_queries_bge_large_frDEV_en.json";
 

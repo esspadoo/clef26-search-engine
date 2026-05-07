@@ -26,9 +26,20 @@ import java.util.Map;
  * Example:
  *   java PRFExample code/data/collection_data.json "vaccine effectiveness"
  * </p>
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class PRFExample {
 
+
+    /**
+     * Runs a single-query PRF demonstration from the command line.
+     *
+     * @param args command-line arguments containing the collection path and the query text
+     * @throws Exception if loading data, indexing, searching, or writing the output fails
+     */
     public static void main(String[] args) throws Exception {
         if (args.length < 2) {
             System.out.println("Usage: java PRFExample <papersPath> <query>");

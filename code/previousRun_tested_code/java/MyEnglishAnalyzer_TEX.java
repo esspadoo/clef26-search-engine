@@ -27,12 +27,23 @@ import java.util.regex.Pattern;
  * - Removes stopwords
  * - Applies stemming (KStem stemmer)
  * - Normalizes accents
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class MyEnglishAnalyzer_TEX extends Analyzer {
     private static final Pattern URL_PATTERN = Pattern.compile("https?://\\S+\\s?");
     private static final Pattern MENTION_PATTERN = Pattern.compile("@\\w+\\s?");
     private static final Pattern HASHTAG_SYMBOL = Pattern.compile("#");
 
+    /**
+     * Preprocesses the incoming text before tokenization by removing URLs, mentions, and hashtag markers.
+     *
+     * @param fieldName the name of the field being analyzed
+     * @param reader the original character reader
+     * @return a reader wrapped with the configured character filters
+     */
     @Override
     protected Reader initReader(String fieldName, Reader reader) {
         Reader filter = new PatternReplaceCharFilter(URL_PATTERN, "", reader);
@@ -42,6 +53,12 @@ public class MyEnglishAnalyzer_TEX extends Analyzer {
         return filter;
     }
 
+    /**
+     * Builds the tokenization pipeline used after character-level normalization.
+     *
+     * @param fieldName the name of the field being analyzed
+     * @return the tokenizer together with the configured token filters
+     */
     @Override
     protected TokenStreamComponents createComponents(String fieldName) {
         Tokenizer tokenizer = new StandardTokenizer();
@@ -58,6 +75,11 @@ public class MyEnglishAnalyzer_TEX extends Analyzer {
         return new TokenStreamComponents(tokenizer, stream);
     }
 
+    /**
+     * Loads the custom stopword list used by this analyzer.
+     *
+     * @return a mutable stopword set, or an empty set when the custom stoplist is unavailable
+     */
     private CharArraySet loadStopWords() {
         CharArraySet stopWords = new CharArraySet(32, true);
         try {

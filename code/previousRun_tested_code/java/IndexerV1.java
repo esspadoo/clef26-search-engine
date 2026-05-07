@@ -25,10 +25,16 @@ import java.util.List;
  * A shared {@link StandardAnalyzer} is used, and documents are buffered in memory
  * to improve indexing performance.
  * </p>
+ *
+ * @author RETRIX
+ * @version 1.0
+ * @since 1.0
  */
 public class IndexerV1 {
 
-    /** Shared custom analyzer for tokenizing text fields. */
+    /**
+     * Shared custom analyzer for tokenizing text fields.
+     */
     private static final MyEnglishAnalyzer_TEX ANALYZER = new MyEnglishAnalyzer_TEX();
 
     /**
