@@ -121,7 +121,6 @@ paths as constants rather than command-line arguments.
 Use the FlagEmbedding environment:
 
 ```bash
-deactivate 2>/dev/null || true
 source code/environment/venv312FlagEmb/bin/activate
 
 python3 code/py/Bi_encoder_m3_hybrid.py \
