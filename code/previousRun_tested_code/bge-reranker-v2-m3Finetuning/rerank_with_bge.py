@@ -1,25 +1,25 @@
 """
 rerank_with_bge.py
 
-Inference con BGE-reranker-v2-m3 fine-tuned usando FlagReranker.
+Inference with BGE-reranker-v2-m3 fine-tuned using FlagReranker.
 
-IMPORTANTE: bge-reranker-v2-m3 NON usa prefissi sulle query.
-Le query vengono solo pulite (URL, hashtag, emoji rimossi).
-Questo è diverso dai bi-encoder BGE che usano prefissi tipo
+IMPORTANT: bge-reranker-v2-m3 does NOT use query prefixes.
+Queries are only cleaned (URLs, hashtags, emojis removed).
+This is different from BGE bi-encoders which use prefixes like
 "Represent this sentence...".
 
-Usa FlagReranker (FlagEmbedding) invece di CrossEncoder (sentence-transformers)
-per essere coerente con il training framework.
+Use FlagReranker (FlagEmbedding) instead of CrossEncoder (sentence-transformers)
+to be coherent with the trainig framework.
 
-Uso:
-  python rerank_with_bge.py \
-    --model_dir    models/bge-reranker-v2-m3-retrix \
-    --nemotron_run reranked_results_nemotron_topk400.json \
-    --collection   collection_data.json \
-    --queries      en_train.json \
-    --output       reranked_results_bge_ft_top100.json \
-    --rerank_depth 100 \
-    --batch_size   256
+Usage:
+    python rerank_with_bge.py \
+        --model_dir    models/bge-reranker-v2-m3-retrix \
+        --nemotron_run reranked_results_nemotron_topk400.json \
+        --collection   collection_data.json \
+        --queries      en_train.json \
+        --output       reranked_results_bge_ft_top100.json \
+        --rerank_depth 100 \
+        --batch_size   256
 """
 
 import json
@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 
 
 # ── Preprocessing ──────────────────────────────────────────────────────────────
-# IDENTICO a prepare_data_unified_v3.py — nessun prefisso, solo pulizia.
+# IDENTICAL to prepare_data_unified_v3.py — no prefix, only cleanup.
 
 def clean_text(text: str) -> str:
     text = re.sub(r"http\S+|www\S+", "", text)
@@ -66,8 +66,8 @@ def doc_text(item: dict, max_chars: int) -> str:
 
 def load_collection(path: str, max_chars: int) -> dict[str, str]:
     """
-    Autodetect formato 2026 (pubkey) vs 2025 (cord_uid).
-    Usa 'in' per il check — evita che pubkey=0 (falsy) cada su cord_uid.
+    Autodetect 2026 format (pubkey) vs 2025 format (cord_uid).
+    Use 'in' for the check — avoids that pubkey=0 (falsy) goes to cord_uid.
     """
     data   = json.load(open(path, encoding="utf-8"))
     corpus = {}
@@ -81,12 +81,12 @@ def load_collection(path: str, max_chars: int) -> dict[str, str]:
         text = doc_text(item, max_chars)
         if text:
             corpus[key] = text
-    log.info(f"Corpus: {len(corpus):,} documenti  ← {path}")
+    log.info(f"Corpus: {len(corpus):,} documents  ← {path}")
     return corpus
 
 
 def load_queries(path: str) -> dict[str, str]:
-    """Carica [{index, text, pubkey}]. Solo pulizia, nessun prefisso."""
+    """Loads [{index, text, pubkey}]. Only cleanup, no prefix."""
     data    = json.load(open(path, encoding="utf-8"))
     queries = {}
     for item in data:
@@ -107,18 +107,18 @@ def load_nemotron_run(path: str) -> dict[str, list[str]]:
 
 def load_reranker(model_dir: str, use_fp16: bool):
     """
-    Carica FlagReranker. Usa use_fp16=True per velocità su L40S.
-    FlagReranker gestisce internamente batching e device.
+    Loads FlagReranker. Use use_fp16=True for speed on L40S.
+    FlagReranker handles internally batching and device.
     """
     try:
         from FlagEmbedding import FlagReranker
         reranker = FlagReranker(model_dir, use_fp16=use_fp16)
-        log.info(f"FlagReranker caricato da {model_dir}")
+        log.info(f"FlagReranker loaded from {model_dir}")
         return reranker, "flag"
     except ImportError:
         log.warning(
-            "FlagEmbedding non trovato. Fallback su sentence-transformers CrossEncoder.\n"
-            "Per installare FlagEmbedding: pip install FlagEmbedding"
+            "FlagEmbedding not found. Fallback on sentence-transformers CrossEncoder.\n"
+            "To install FlagEmbedding: pip install FlagEmbedding"
         )
         from sentence_transformers.cross_encoder import CrossEncoder
         model = CrossEncoder(
@@ -129,7 +129,7 @@ def load_reranker(model_dir: str, use_fp16: bool):
 
 
 def score_pairs(reranker, mode: str, pairs: list[list[str]], batch_size: int) -> list[float]:
-    """Calcola score per una lista di [query, doc] pairs."""
+    """Copmutes score for a list of [query, doc] pairs."""
     if mode == "flag":
         try:
             scores = reranker.compute_score(pairs, batch_size=batch_size)
@@ -137,7 +137,7 @@ def score_pairs(reranker, mode: str, pairs: list[list[str]], batch_size: int) ->
                 return [float(scores)]
             return [float(s) for s in scores]
         except Exception as e:
-            log.warning(f"Errore FlagReranker: {e}. Provo batch_size=32.")
+            log.warning(f"FlagReranker error: {e}. Trying batch_size=32.")
             gc.collect()
             scores = reranker.compute_score(pairs, batch_size=32)
             if isinstance(scores, (float, int)):
@@ -154,7 +154,7 @@ def score_pairs(reranker, mode: str, pairs: list[list[str]], batch_size: int) ->
                 return [float(scores)]
             return scores.tolist()
         except torch.cuda.OutOfMemoryError:
-            log.warning("OOM. Provo batch_size=16.")
+            log.warning("OOM. Trying batch_size=16.")
             torch.cuda.empty_cache()
             gc.collect()
             scores = reranker.predict(
@@ -168,12 +168,12 @@ def score_pairs(reranker, mode: str, pairs: list[list[str]], batch_size: int) ->
 
 def sanity_check(results: dict, nemotron_run: dict, rerank_depth: int):
     if not results:
-        log.error("SANITY CHECK FAILED: output vuoto!")
+        log.error("SANITY CHECK FAILED: empty output!")
         return
     coverage = len(results) / max(1, len(nemotron_run))
     avg_len  = sum(len(v) for v in results.values()) / len(results)
     log.info(f"Sanity check: {len(results):,} queries ({coverage:.1%} coverage), "
-             f"avg {avg_len:.1f} doc/query (atteso ≤{rerank_depth})")
+             f"avg {avg_len:.1f} doc/query (expected ≤{rerank_depth})")
     sample_qid = next(iter(results))
     log.info(f"  Sample qid={sample_qid} top-3: {results[sample_qid][:3]}")
 
@@ -182,7 +182,7 @@ def sanity_check(results: dict, nemotron_run: dict, rerank_depth: int):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Reranking con BGE-reranker-v2-m3 fine-tuned (FlagReranker)"
+        description="Reranking with BGE-reranker-v2-m3 fine-tuned (FlagReranker)"
     )
     parser.add_argument("--model_dir",     required=True)
     parser.add_argument("--nemotron_run",  required=True)
@@ -191,21 +191,21 @@ def main():
     parser.add_argument("--output",        required=True)
     parser.add_argument("--rerank_depth",  type=int, default=100)
     parser.add_argument("--batch_size",    type=int, default=256,
-                        help="FlagReranker è più veloce di CrossEncoder, "
-                             "batch_size alto è ok (default 256)")
+                        help="FlagReranker is faster than CrossEncoder, "
+                             "high batch_size is ok (default 256)")
     parser.add_argument("--max_doc_chars", type=int, default=4000)
     parser.add_argument("--no_fp16",       action="store_true",
-                        help="Disabilita fp16 (usa bf16 o fp32)")
+                        help="Disables fp16 (usa bf16 o fp32)")
     args = parser.parse_args()
 
     use_fp16 = not args.no_fp16
     log.info(f"use_fp16={use_fp16}")
 
-    # ── Carica modello ─────────────────────────────────────────────────────────
+    # ── Loads model ─────────────────────────────────────────────────────────
     reranker, mode = load_reranker(args.model_dir, use_fp16=use_fp16)
-    log.info(f"Modalità inference: {mode}")
+    log.info(f"Inference mode: {mode}")
 
-    # ── Carica dati ────────────────────────────────────────────────────────────
+    # ── Loads data ────────────────────────────────────────────────────────────
     corpus       = load_collection(args.collection, args.max_doc_chars)
     queries      = load_queries(args.queries)
     nemotron_run = load_nemotron_run(args.nemotron_run)
@@ -236,9 +236,9 @@ def main():
         results[qid] = [doc_id for doc_id, _ in ranked]
 
     if n_missing_q:
-        log.warning(f"Query mancanti: {n_missing_q}")
+        log.warning(f"Missing queries: {n_missing_q}")
     if n_empty_docs:
-        log.warning(f"Query senza doc nel corpus: {n_empty_docs}")
+        log.warning(f"Query with no doc in the corpus: {n_empty_docs}")
 
     sanity_check(results, nemotron_run, args.rerank_depth)
 

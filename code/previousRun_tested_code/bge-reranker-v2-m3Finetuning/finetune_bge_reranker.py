@@ -1,28 +1,28 @@
 """
 finetune_bge_reranker.py
 
-Fine-tuning di BAAI/bge-reranker-v2-m3 con FlagEmbedding ufficiale.
+Fine-tuning of BAAI/bge-reranker-v2-m3 with official FlagEmbedding.
 
-Modulo corretto (confermato dalla doc ufficiale):
-  FlagEmbedding.finetune.reranker.encoder_only.base
+Correct module (confirmed by official doc):
+    FlagEmbedding.finetune.reranker.encoder_only.base
 
-Parametri chiave (dalla doc ufficiale per encoder_only):
-  --learning_rate       6e-5   (NON 2e-5 che è per i decoder)
-  --train_group_size    N+1    (1 pos + N neg, deve corrispondere ai dati)
-  --query_max_len       512
-  --passage_max_len     512
-  --pad_to_multiple_of  8
-  --dataloader_drop_last True
+Key parameters (from official doc for encoder_only):
+    --learning_rate       6e-5   (NOT 2e-5 which is for decoders)
+    --train_group_size    N+1    (1 pos + N neg, must match the data)
+    --query_max_len       512
+    --passage_max_len     512
+    --pad_to_multiple_of  8
+    --dataloader_drop_last True
 
-Installazione:
-  pip install FlagEmbedding
+Installation:
+    pip install FlagEmbedding
 
 Uso:
-  python finetune_bge_reranker.py \
-    --train_file       training_data/train_groups.jsonl \
-    --dev_file         training_data/dev_groups.jsonl \
-    --output_dir       models/bge-reranker-v2-m3-retrix \
-    --train_group_size 6   # = 1 + num_hard_neg usato in prepare_data
+    python finetune_bge_reranker.py \
+        --train_file       training_data/train_groups.jsonl \
+        --dev_file         training_data/dev_groups.jsonl \
+        --output_dir       models/bge-reranker-v2-m3-retrix \
+        --train_group_size 6   # = 1 + num_hard_neg used in prepare_data
 """
 
 import logging
@@ -44,11 +44,11 @@ def check_flag_embedding():
     try:
         import FlagEmbedding  # noqa: F401
         version = importlib.metadata.version("FlagEmbedding")
-        log.info(f"FlagEmbedding trovato: {version}")
+        log.info(f"FlagEmbedding found: {version}")
         return True
     except ImportError:
         log.error(
-            "FlagEmbedding non trovato. Installa con:\n"
+            "FlagEmbedding not found. Install with:\n"
             "  pip install FlagEmbedding"
         )
         return False
@@ -61,22 +61,22 @@ def count_lines(path: str) -> int:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Fine-tuning BGE-reranker-v2-m3 con FlagEmbedding encoder_only"
+        description="Fine-tuning BGE-reranker-v2-m3 with FlagEmbedding encoder_only"
     )
     parser.add_argument("--train_file",       required=True)
     parser.add_argument("--dev_file",         required=True,
-                        help="Usato solo per log. FlagEmbedding non fa eval durante il training.")
+                        help="Only used for logging. FlagEmbedding doesn't eval during training.")
     parser.add_argument("--output_dir",       default="models/bge-reranker-v2-m3-retrix")
     parser.add_argument("--model_name",       default="BAAI/bge-reranker-v2-m3")
     parser.add_argument("--train_group_size", type=int, default=6,
-                        help="1 + num_hard_neg usato in prepare_data (default 6 = 1+5)")
+                        help="1 + num_hard_neg used in prepare_data (default 6 = 1+5)")
     parser.add_argument("--epochs",           type=int,   default=2)
     parser.add_argument("--batch_size",       type=int,   default=4,
-                        help="Per GPU. Con L40S 48GB puoi provare 4-8.")
+                        help="Per GPU. With L40S 48GB you can try 4-8.")
     parser.add_argument("--grad_accum",       type=int,   default=4,
                         help="Gradient accumulation. Effective batch = batch_size * grad_accum.")
     parser.add_argument("--lr",               type=float, default=6e-5,
-                        help="Learning rate ufficiale per encoder_only (default 6e-5)")
+                        help="Official learning rate for encoder_only (default 6e-5)")
     parser.add_argument("--query_max_len",    type=int,   default=512)
     parser.add_argument("--passage_max_len",  type=int,   default=512)
     parser.add_argument("--warmup_ratio",     type=float, default=0.1)
@@ -84,7 +84,7 @@ def main():
     parser.add_argument("--logging_steps",    type=int,   default=100)
     parser.add_argument("--seed",             type=int,   default=42)
     parser.add_argument("--num_gpus",         type=int,   default=1,
-                        help="Numero di GPU per torchrun (default 1)")
+                        help="Nomber of GPUs per torchrun (default 1)")
     args = parser.parse_args()
 
     if not check_flag_embedding():
@@ -92,18 +92,18 @@ def main():
 
     n_train = count_lines(args.train_file)
     n_dev   = count_lines(args.dev_file)
-    log.info(f"Train: {n_train:,} gruppi | Dev: {n_dev:,} gruppi (solo per riferimento)")
+    log.info(f"Train: {n_train:,} groups | Dev: {n_dev:,} groups (only for reference)")
     log.info(f"train_group_size: {args.train_group_size}  "
              f"(1 pos + {args.train_group_size - 1} neg per query)")
     log.info(f"Effective batch size: {args.batch_size} x {args.grad_accum} = "
              f"{args.batch_size * args.grad_accum}")
-    log.info(f"Numero GPU: {args.num_gpus}")
+    log.info(f"Number of GPUs: {args.num_gpus}")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Lanciato con torchrun perché FlagEmbedding usa dist.get_rank()
-    # che richiede il process group inizializzato
+    # Launched with torchrun because FlagEmbedding uses dist.get_rank()
+    # which requires an initialized process group
     cmd = [
         "torchrun",
         "--nproc_per_node", str(args.num_gpus),
@@ -135,15 +135,15 @@ def main():
         "--seed",                        str(args.seed),
     ]
 
-    log.info("Avvio training con torchrun + FlagEmbedding encoder_only...")
-    log.info("Comando:\n  " + " \\\n  ".join(cmd))
+    log.info("Launching training with torchrun + FlagEmbedding encoder_only...")
+    log.info("Command:\n  " + " \\\n  ".join(cmd))
 
     result = subprocess.run(cmd, check=False)
 
     if result.returncode != 0:
         log.error(
-            f"\nTraining fallito (exit code {result.returncode}).\n\n"
-            "Prova a eseguire il comando direttamente:\n\n"
+            f"\nTraining failed (exit code {result.returncode}).\n\n"
+            "Try executing the command directly:\n\n"
             f"  torchrun --nproc_per_node {args.num_gpus} \\\n"
             f"    -m FlagEmbedding.finetune.reranker.encoder_only.base \\\n"
             f"    --model_name_or_path {args.model_name} \\\n"
@@ -172,8 +172,8 @@ def main():
         )
         sys.exit(1)
 
-    log.info(f"\n✓ Training completato. Modello salvato in {output_dir}")
-    log.info(f"\nPer usarlo:")
+    log.info(f"\n✓ Training complete. Modello saved in {output_dir}")
+    log.info(f"\nIn order to use it:")
     log.info(f"  python rerank_with_bge.py \\")
     log.info(f"    --model_dir    {output_dir} \\")
     log.info(f"    --nemotron_run reranked_results_nemotron_topk400.json \\")
