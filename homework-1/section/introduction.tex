@@ -17,7 +17,7 @@ Team Retrix approaches this problem with a four-stage sequential pipeline.
     
     \item The expanded queries are fed into \texttt{BAAI/bge-m3} \cite{bge-m3-hf} operating in hybrid mode, which combines dense inner-product search via FAISS \cite{faiss_documentation} with sparse lexical matching and ColBERT multi-vector scoring to produce an initial ranked list of candidates.
 
-    \item Finally, the top candidates are re-ranked by a neural cross-encoder, in our case nvidia/llama-nemotron-rerank-1b-v2 \cite{nvidia_llama_nemotron_rerank_1b_v2_2026}, fine-tuned on the English training dataset of the CLEF CheckThat! Task 1 2026 and all the queries' datasets of the  CLEF CheckThat! SubTask 4b 2025.
+    \item Finally, the top candidates are re-ranked by a neural cross-encoder, in our case nvidia/llama-nemotron-rerank-1b-v2, fine-tuned on the English training dataset of the CLEF CheckThat! Task 1 2026 and all the queries' datasets of the  CLEF CheckThat! SubTask 4b 2025.
 \end{enumerate}  
 
 The paper is organized as follows: Section~\ref{sec:related} discusses the most relevant research directions related to this task; Section~\ref{sec:methodology} describes in more detail our approach; Section~\ref{sec:setup} explains our experimental setup; Section~\ref{sec:results} discusses our main findings; finally, Section~\ref{sec:conclusion} draws some conclusions and outlooks for future work.
