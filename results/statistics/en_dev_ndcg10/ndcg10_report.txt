@@ -1,0 +1,14 @@
+Boxplot of nDCG@10 measures for the submitted systems on English DEV
+
+Metric: nDCG@10
+
+ANOVA (system effect):
+  sum_sq = 3.652777
+  df     = 2.000000
+  F      = 103.988772
+  p      = 0.000000
+
+Tukey HSD pairwise comparisons:
+  nemotron_lora_top1000_en_dev vs nemotron_top1000_baseline_en_dev | diff=-0.021400 | p_adj=0.044800 | CI=[-0.042400, -0.000400] | reject=True
+  nemotron_lora_top1000_en_dev vs nemotron_top100_baseline_en_dev | diff=-0.043300 | p_adj=0.000000 | CI=[-0.064300, -0.022200] | reject=True
+  nemotron_top1000_baseline_en_dev vs nemotron_top100_baseline_en_dev | diff=-0.021900 | p_adj=0.039200 | CI=[-0.042900, -0.000800] | reject=True
