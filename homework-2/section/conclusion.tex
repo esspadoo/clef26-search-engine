@@ -1,6 +1,15 @@
 \section{Conclusions and Future Work}
 \label{sec:conclusion}
 
-Provide a summary of what are the main achievements and findings. 
+The results of the described system support three main conclusions.
 
-Discuss future work, e.g. what you may try next and/or how your approach could be further developed.
+First, analyzer and BM25 tuning provide a useful lexical baseline, especially thanks to its light computing print, with the best analyzer-focused run reaching 0.503 MRR@5 and 0.796 Recall@100 in the English run analysis.
+
+Second, moving to BGE-M3 hybrid retrieval produces a stronger candidate generator: the retained configuration, \texttt{bge\_m3\_hybrid\_513}, reaches 0.557 MRR@5 and 0.839 Recall@100.
+
+Third, reranking the hybrid candidates with \texttt{nvidia/llama-nemotron-rerank-1b-v2} gives the largest observed improvement among the reported single-stage runs, reaching 0.702 MRR@5 and 0.911 Recall@100 when reranking the top 1000 candidates. Alternative rerankers such as Qwen3-reranker-4B and \texttt{Alibaba-NLP/gte-reranker-modernbert-base} also improve over retrieval alone, but remain below the Nemotron runs in the reported MRR@5 values.
+
+The development results show that fine-tuning the Nemotron reranker is promising. Fine-tuning improves the performance by a small but appreciable amount (average of +0.03 of MRR@5 in our experiments). Nevertheless we recognize the limits of our knowledge, so a higher-quality fine-tuning, not only for the reranker, can bring better results is certainly possible.
+
+\section {Declaration on Generative AI}
+During the writing of this paper the authors used Grammarly and DeepL for grammar and spelling checks and Claude Sonnet 4.6 for writing-style improvement, citation management and formatting assistance. After using these tools, the authors reviewed and edited the content as needed and take full responsibility for the publications content.

@@ -2,6 +2,21 @@
 
 \usepackage{acronym}
 \usepackage{subcaption}
+\usepackage{float}
+
+\usepackage[most]{tcolorbox}
+\newtcolorbox{promptbox}{
+  colback=gray!5!white,
+  colframe=gray!75!black,
+  left=5pt,
+  right=5pt,
+  top=5pt,
+  bottom=5pt,
+  arc=2pt,
+  boxrule=0.5pt,
+  fonttitle=\bfseries,
+  title=LLM Prompt
+}
 
 \renewcommand{\acffont}[1]{\textsl{#1}}
 
@@ -13,156 +28,86 @@
 %%
 %% Rights management information.
 %% CC-BY is default license.
-\copyrightyear{2026}
-\copyrightclause{Copyright for this paper by its authors.\\
+  \copyrightyear{2026}
+  \copyrightclause{Copyright for this paper by its authors.\\
   Use permitted under Creative Commons License Attribution 4.0
   International (CC BY 4.0).}
 
 %%
 %% This command is for the conference information
-\conference{CLEF 2026: Conference and Labs of the Evaluation Forum, September 21--24, 2026, Jena, Germany}
+  \conference{``Search Engines'', course at the master degree in ``Computer Engineering'', Department of Information Engineering, and at the master degree in ``Data Science'', Department of Mathematics ``Tullio Levi-Civita'', University of Padua, Italy. Academic Year 2025/2026}
 
 %%
 %% The "title" command
-\title{SEUPD@CLEF: Team <Acronym> on <Short Description>}
-
-\title[mode=sub]{Notebook for the CheckThat! Lab at CLEF 2026}
+  \title{SEUPD@CLEF: Team RETRIX on Source Retrieval for Scientific Web Claims}
+  \title[mode=sub]{Notebook for the CheckThat! Lab at CLEF 2026}
 
 %%
 %% The "author" command and its associated commands are used to define
 %% the authors and their affiliations.
-\author[1]{Name Surname}[%
-email=name.surname@studenti.unipd.it
-]
+  \author[1]{Fabio Baldan}[%
+    email=fabio.baldan.1@studenti.unipd.it
+  ]
 
-\author[1]{Name Surname}[%
-email=name.surname@studenti.unipd.it
-]
+  \author[1]{Davide Donati}[%
+    email=davide.donati@studenti.unipd.it
+  ]
 
-\author[1]{Name Surname}[%
-email=name.surname@studenti.unipd.it
-]
+  \author[1]{Alvise Garberino}[%
+    email=alvise.garberino@studenti.unipd.it
+  ]
 
-\author[1]{Nicola Ferro}[%
-orcid=0000-0001-9219-6239,
-email=nicola.ferro@unipd.it,
-url=https://www.dei.unipd.it/~ferro/,
-]
+  \author[1]{Giancarlo Padoan}[%
+    email=giancarlo.padoan@studenti.unipd.it
+  ]
+
+  \author[1]{Marco Tessari}[%
+    email=marco.tessari.8@studenti.unipd.it
+  ]
 
 
-\address[1]{University of Padua, Italy}
+  \address[1]{University of Padua, Italy}
 
 
 %%
 %% The abstract is a short summary of the work to be presented in the
 %% article.
-\begin{abstract}
-  A clear and well-documented \LaTeX{} document is presented as an
-  article formatted for publication by CEUR-WS in a conference
-  proceedings. Based on the ``ceurart'' document class, this article
-  presents and explains many of the common variations, as well as many
-  of the formatting elements an author may use in the preparation of
-  the documentation of their work.
-\end{abstract}
+%%
+%% The abstract is a short summary of the work to be presented in the
+%% article.
+  \begin{abstract}
+    We present the results of the retrix group for the CheckThat! 2026 - Task 1, in which the goal is to identify the scientific paper implicitly referenced in a social media post. The input consists of short, noisy and usually informal posts that mention scientific findings without providing explicit links or explicit citations. In our pipeline, first we translate the non-English posts, then we expand them using an embedding model and the terms of the top 5 documents (ranked by similarity). After that, the first research is an hybrid retrieval system that combines dense FAISS search with sparse lexical matching and ColBERT multi-vector scoring ($s = 0.5\,s_\text{dense} + 0.15\,s_\text{sparse} + 0.35\,s_\text{colbert}$). Finally a neural re-ranking with a fine-tuned cross-encoder model is performed.
+  \end{abstract}
 
 %%
 %% Keywords. The author(s) should pick words that accurately describe
 %% the work being presented. Separate the keywords with commas.
-\begin{keywords}
-  keyword 1 \sep
-  keyword 2 \sep
-  keyword 3 
-\end{keywords}
+  \begin{keywords}
+    Fact Checking \sep Information Retrieval \sep Scientific Document Retrieval \sep Social media fact verification \sep CLEF \sep Neural Re-ranking \sep Cross Encoder
+  \end{keywords}
 
 %%
 %% This command processes the author and affiliation and title
 %% information and builds the first part of the formatted document.
-\maketitle
+  \maketitle
 
 
-\input{section/introduction}
+  \input{section/introduction}
 
-\input{section/related}
+  \input{section/related}
 
-\input{section/methodology}
+  \input{section/methodology}
 
-\input{section/setup}
+  \input{section/setup}
 
-\input{section/results}
+  \input{section/results}
 
-\input{section/conclusion}
-
-
-\section{Misc [TO BE REMOVED]}
-
-\subsection{Tex Files}
-
-Put your \LaTeX files into the \texttt{section} folder as shown in the examples above.
-
-\subsection{Figures}
-
-Put your figures into the \texttt{figure} folder and put the caption under the figure. Example of reference to Figure~\ref{fig:sample-figure}.
-
-\begin{figure}
-  \centering
-  \includegraphics[width=0.8\linewidth]{figure/sample.pdf}
-  \caption{1907 Franklin Model D roadster. Photograph by Harris \& Ewing, Inc. [Public domain], via Wikimedia Commons. (\url{https://goo.gl/VLCRBB}).}
-  \label{fig:sample-figure}
-\end{figure}
-
-\subsection{Tables}
-
-Put the caption above the table. Example of reference to Table~\ref{tab:sample-table}.
-
-\begin{table}
-  \caption{Frequency of Special Characters}
-  \label{tab:sample-table}
-  \centering
-  \begin{tabular}{|c|c|l|}
-    \toprule
-    Non-English or Math&Frequency&Comments\\
-    \midrule
-    \O & 1 in 1,000& For Swedish names\\
-    $\pi$ & 1 in 5& Common in math\\
-    \$ & 4 in 5 & Used in business\\
-    $\Psi^2_1$ & 1 in 40,000& Unexplained usage\\
-  \bottomrule
-\end{tabular}
-\end{table}
-
-See the \texttt{booktab} packaged documentation for further options.
-
-\subsection{Bibliography}
-
-Example of citations:
-\begin{itemize}
-	\item name: \citet{Salton1968}
-	\item parenthesis: \citep{Salton1968}
-\end{itemize}
-
-An initial list of references is provided in the files \texttt{bibliography.bib} and \texttt{proceedings.bib} that you can expand.
-
-See the \texttt{natbib} packaged documentation for further options.
-
-\subsection{Acronyms}
-
-Use the 
-
-\begin{verbatim}
- \ac{acronym}
- \end{verbatim}
-
-command to insert acronyms, eg. \ac{AP}. The command will expand the acronym the first time it is used.
-
-An initial list of acronyms is provided in the file \texttt{acronyms.tex} that you can expand.
-
-See the \texttt{acronym} packaged documentation for further options.
-
+  \input{section/conclusion}
 
 %% Define the bibliography file to be used
-\bibliography{bibliography,proceedings}
+  \bibliography{bibliography,proceedings}
 
-\input{acronyms}
+  \input{acronyms}
 
 
 \end{document}
