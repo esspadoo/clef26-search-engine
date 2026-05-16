@@ -2,7 +2,7 @@
 \label{sec:methodology}
 
 We started from a lexical baseline based on Apache Lucene BM25 and progressively moved to a multi-stage neural pipeline.
-Early experiments focused on analyzer choices, stopword lists and BM25 variants; these runs were useful to establish a stable baseline, but they also showed that lexical overlap alone is insufficient for this task.
+Early experiments focused on analyzer choices, stopword lists and BM25 variants. These runs were useful to establish a stable baseline but they also showed that lexical overlap alone is insufficient for this task.
 \newline
 We adopted a four-stage pipeline (Figure~\ref{fig:pipeline}) for the proposed information retrieval system, consisting of:
 \begin{itemize}
@@ -68,7 +68,7 @@ Following the translation stage, each query is processed by a deterministic quer
     \]
 \end{itemize}
 The final expanded query is constructed by concatenating three components: the cleaned translated query, the noun and proper-noun-based keyword set extracted directly from the query and the expansion terms induced from the retrieved document neighbourhood.
-This output expanded query is then used by the downstream retrieval pipeline.\\
+This output expanded query is then used by the downstream retrieval pipeline.
 
 Before confirming this as query expansion strategy, we have also tried to use two LLM models, \texttt{meta-llama/Llama-3.2-1B} and \texttt{openai/gpt-oss-20b} with the following prompt:
 \begin{promptbox}
