@@ -36,18 +36,18 @@ For the runs performed in the \texttt{dev\_set} we provide a separate multilingu
 To validate whether the observed gains on the English development split are stable across queries, we compared three
 directly comparable systems: the Nemotron baseline reranking the top 100 candidates, the Nemotron baseline reranking
 the top 1000 candidates, and the fine-tuned Nemotron LoRA reranking the top 1000 candidates.
-For each system we collected per-query MRR@5, nDCG@10, and AP scores on the same 3,905 queries, generated boxplots,
+For each system we collected per-query MRR@5, nDCG@10, and AP scores on the same 3905 queries, generated boxplots,
 fitted a blocked two-way ANOVA with system and query identifier as factors, and then applied Tukey HSD post-hoc
 comparisons at $\alpha = 0.05$.
 
 The ANOVA shows a significant system effect for all three metrics: MRR@5 ($F=76.58$, $p<0.001$),
-nDCG@10 ($F=103.99$, $p<0.001$), and AP ($F=89.47$, $p<0.001$). The corresponding mean per-query scores improve from
+nDCG@10 ($F=103.99$, $p<0.001$), and AP ($F=89.47$, $p<0.001$); the corresponding mean per-query scores improve from
 0.675 to 0.692 to 0.716 for MRR@5, from 0.705 to 0.727 to 0.748 for nDCG@10, and from 0.682 to 0.701 to 0.724 for AP
 when moving from Nemotron top-100, to Nemotron top-1000, to the fine-tuned LoRA run.
 
-Tukey HSD clarifies which differences drive this effect. For MRR@5, the fine-tuned LoRA system is significantly better
+Tukey HSD clarifies which differences drive this effect, for MRR@5 the fine-tuned LoRA system is significantly better
 than both baselines ($p=0.0299$ against top-1000 and $p=0.0001$ against top-100), whereas the gap between the two
-non-fine-tuned baselines is not significant ($p=0.2047$). For nDCG@10 and AP, all pairwise comparisons are significant,
+non-fine-tuned baselines is not significant ($p=0.2047$); for nDCG@10 and AP, all pairwise comparisons are significant,
 which indicates that both increasing the reranking depth from 100 to 1000 candidates and fine-tuning the reranker
 produce consistent gains over the same set of topics. This analysis does not prove generalization beyond English DEV,
 but it does show that the improvements observed on that split are not due to a small number of outlier queries.
