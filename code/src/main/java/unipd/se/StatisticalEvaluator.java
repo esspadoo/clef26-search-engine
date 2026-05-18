@@ -141,6 +141,9 @@ public final class StatisticalEvaluator {
             double qPrecision5 = precisionAtK(ranked, goldSet, 5);
             double qPrecision10 = precisionAtK(ranked, goldSet, 10);
 
+            double qF1At1 = qRecall1 + qPrecision1 > 0
+                    ? 2.0 * qRecall1 * qPrecision1 / (qRecall1 + qPrecision1)
+                    : 0.0;
             double qMrr5 = rank > 0 && rank <= 5 ? 1.0 / rank : 0.0;
             double qAp = averagePrecision(ranked, goldSet);
             double qNdcg5 = ndcgAtK(ranked, goldSet, relCount, 5);
@@ -171,6 +174,7 @@ public final class StatisticalEvaluator {
             row.put("precision@1", qPrecision1);
             row.put("precision@5", qPrecision5);
             row.put("precision@10", qPrecision10);
+            row.put("f1@1", qF1At1);
             row.put("mrr@5", qMrr5);
             row.put("ap", qAp);
             row.put("ndcg@5", qNdcg5);
