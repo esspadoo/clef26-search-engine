@@ -74,6 +74,9 @@ tomcat-logs/
 # Ignore everything in data folder
 data/*
 
+#Virtual environments
+myenv/
+
 # But do NOT ignore these specific files
 !/data/collection_data.json
 !/data/expanded_queries.json

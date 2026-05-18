@@ -18,12 +18,22 @@ Example:
       --metric mrr5 \
       --outdir results/statistics/en_dev_mrr5 \
       --title "English DEV - MRR@5"
+
+    python3 code/py/anova_tukey_boxplot.py \
+      --inputs \
+        results/statistics/nemotron_top100_baseline_en_dev.json \
+        results/statistics/nemotron_top1000_baseline_en_dev.json \
+        results/statistics/nemotron_lora_top1000_en_dev.json \
+      --all-metrics \
+      --outdir results/statistics/en_dev_all_metrics \
+      --title "English DEV"
 """
 
 from __future__ import annotations
 
 import argparse
 import csv
+from dataclasses import dataclass
 from itertools import combinations
 import json
 import math
@@ -32,11 +42,41 @@ from pathlib import Path
 from typing import Iterable
 
 
-METRIC_TO_JSON_KEY = {
-    "mrr5": "mrr@5",
-    "ndcg10": "ndcg@10",
-    "ap": "ap",
+@dataclass(frozen=True)
+class MetricSpec:
+    """Configuration for a per-query metric exported by StatisticalEvaluator."""
+
+    json_key: str | None
+    label: str
+
+
+METRIC_SPECS = {
+    "recall1": MetricSpec("hit@1", "Recall@1"),
+    "recall5": MetricSpec("hit@5", "Recall@5"),
+    "recall10": MetricSpec("hit@10", "Recall@10"),
+    "recall100": MetricSpec("hit@100", "Recall@100"),
+    "precision1": MetricSpec("precision@1", "Precision@1"),
+    "precision5": MetricSpec("precision@5", "Precision@5"),
+    "precision10": MetricSpec("precision@10", "Precision@10"),
+    "f1_1": MetricSpec(None, "F1@1"),
+    "mrr5": MetricSpec("mrr@5", "MRR@5"),
+    "ap": MetricSpec("ap", "AP / MAP"),
+    "ndcg5": MetricSpec("ndcg@5", "nDCG@5"),
+    "ndcg10": MetricSpec("ndcg@10", "nDCG@10"),
+    "ndcg100": MetricSpec("ndcg@100", "nDCG@100"),
 }
+
+ALL_METRICS = tuple(METRIC_SPECS)
+
+METRIC_ALIASES = {
+    "hit1": "recall1",
+    "hit5": "recall5",
+    "hit10": "recall10",
+    "hit100": "recall100",
+    "map": "ap",
+}
+
+METRIC_CHOICES = sorted((*METRIC_SPECS, *METRIC_ALIASES, "all"))
 
 INSTALL_HINT = "python3 -m pip install pandas matplotlib statsmodels scipy"
 
@@ -56,9 +96,20 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--metric",
-        choices=sorted(METRIC_TO_JSON_KEY),
+        choices=METRIC_CHOICES,
         default="mrr5",
-        help="Per-query metric to analyze.",
+        help=(
+            "Per-query metric to analyze. Use 'all' or --all-metrics to run "
+            "every supported metric."
+        ),
+    )
+    parser.add_argument(
+        "--all-metrics",
+        action="store_true",
+        help=(
+            "Generate CSV, ANOVA, Tukey, report, and boxplot artifacts for all "
+            "supported metrics. Outputs are written to one subdirectory per metric."
+        ),
     )
     parser.add_argument(
         "--outdir",
@@ -88,7 +139,42 @@ def require_dependency(module_name: str, install_hint: str) -> None:
         ) from exc
 
 
-def load_rows(path: Path, json_metric_key: str) -> list[dict]:
+def resolve_metric_name(metric_name: str) -> str:
+    return METRIC_ALIASES.get(metric_name, metric_name)
+
+
+def metric_value(item: dict, metric_name: str, path: Path) -> float:
+    spec = METRIC_SPECS[metric_name]
+    if spec.json_key is not None:
+        if spec.json_key not in item:
+            available = ", ".join(sorted(item))
+            raise SystemExit(
+                f"Metric '{metric_name}' expects key '{spec.json_key}', but it "
+                f"was not found in {path}. Available per-query keys: {available}"
+            )
+        return float(item[spec.json_key])
+
+    if metric_name == "f1_1":
+        if "f1@1" in item:
+            return float(item["f1@1"])
+        if "hit@1" not in item or "precision@1" not in item:
+            available = ", ".join(sorted(item))
+            raise SystemExit(
+                "Metric 'f1_1' requires either 'f1@1' or both 'hit@1' and "
+                f"'precision@1' in {path}. Available per-query keys: {available}"
+            )
+        recall = float(item["hit@1"])
+        precision = float(item["precision@1"])
+        return (
+            2.0 * recall * precision / (recall + precision)
+            if recall + precision > 0.0
+            else 0.0
+        )
+
+    raise SystemExit(f"Unsupported derived metric: {metric_name}")
+
+
+def load_rows(path: Path, metric_name: str) -> list[dict]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     metadata = payload.get("metadata", {})
     per_query = payload.get("per_query", [])
@@ -100,7 +186,7 @@ def load_rows(path: Path, json_metric_key: str) -> list[dict]:
             {
                 "qid": str(item["qid"]),
                 "system": system_name,
-                "score": float(item[json_metric_key]),
+                "score": metric_value(item, metric_name, path),
                 "rank": int(item.get("first_relevant_rank", -1)),
             }
         )
@@ -296,8 +382,12 @@ def run_tukey(
 
         for group1, group2 in combinations(systems, 2):
             diff = float(system_means[group2] - system_means[group1])
-            q_stat = abs(diff) / std_error if std_error > 0 else math.inf
-            p_adj = float(studentized_range.sf(q_stat, system_count, df_error))
+            if std_error > 0:
+                q_stat = abs(diff) / std_error
+                p_adj = float(studentized_range.sf(q_stat, system_count, df_error))
+            else:
+                q_stat = 0.0 if diff == 0.0 else math.inf
+                p_adj = 1.0 if diff == 0.0 else 0.0
             lower = diff - margin
             upper = diff + margin
             reject = abs(diff) > margin
@@ -382,6 +472,57 @@ def write_report(
     out_txt.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
+def metric_title(metric_name: str, title: str | None, multiple_metrics: bool) -> str:
+    metric_label = METRIC_SPECS[metric_name].label
+    if title is None:
+        return f"System comparison on {metric_label}"
+    if multiple_metrics:
+        return f"{title} - {metric_label}"
+    return title
+
+
+def run_metric_analysis(
+    input_paths: list[Path],
+    metric_name: str,
+    outdir: Path,
+    title: str,
+    alpha: float,
+) -> None:
+    outdir.mkdir(parents=True, exist_ok=True)
+
+    rows: list[dict] = []
+    for input_path in input_paths:
+        rows.extend(load_rows(input_path, metric_name))
+
+    if not rows:
+        raise SystemExit("No per-query rows were found in the provided JSON files.")
+
+    validate_same_query_set(rows)
+
+    metric_label = METRIC_SPECS[metric_name].label
+
+    long_csv = outdir / f"{metric_name}_per_query_long.csv"
+    summary_csv = outdir / f"{metric_name}_summary.csv"
+    boxplot_png = outdir / f"{metric_name}_boxplot.png"
+    anova_csv = outdir / f"{metric_name}_anova.csv"
+    tukey_csv = outdir / f"{metric_name}_tukey.csv"
+    report_txt = outdir / f"{metric_name}_report.txt"
+
+    write_long_csv(rows, long_csv)
+    write_summary_csv(rows, summary_csv)
+    build_boxplot(rows, boxplot_png, title, metric_label)
+    anova_summary = run_anova(rows, anova_csv)
+    tukey_rows = run_tukey(rows, alpha, tukey_csv, anova_summary)
+    write_report(report_txt, metric_label, title, anova_summary, tukey_rows)
+
+    print(f"Saved long-form scores to: {long_csv}")
+    print(f"Saved summary table to:   {summary_csv}")
+    print(f"Saved boxplot to:         {boxplot_png}")
+    print(f"Saved ANOVA table to:     {anova_csv}")
+    print(f"Saved Tukey HSD to:       {tukey_csv}")
+    print(f"Saved text report to:     {report_txt}")
+
+
 def main() -> None:
     args = parse_args()
 
@@ -402,46 +543,19 @@ def main() -> None:
         INSTALL_HINT,
     )
 
-    outdir = Path(args.outdir)
-    outdir.mkdir(parents=True, exist_ok=True)
+    input_paths = [Path(input_path) for input_path in args.inputs]
+    if args.all_metrics or args.metric == "all":
+        metrics = list(ALL_METRICS)
+    else:
+        metrics = [resolve_metric_name(args.metric)]
 
-    json_metric_key = METRIC_TO_JSON_KEY[args.metric]
-    rows: list[dict] = []
-    for input_path in args.inputs:
-        rows.extend(load_rows(Path(input_path), json_metric_key))
+    multiple_metrics = len(metrics) > 1
+    base_outdir = Path(args.outdir)
 
-    if not rows:
-        raise SystemExit("No per-query rows were found in the provided JSON files.")
-
-    validate_same_query_set(rows)
-
-    metric_label = {
-        "mrr5": "MRR@5",
-        "ndcg10": "nDCG@10",
-        "ap": "AP",
-    }[args.metric]
-    title = args.title or f"System comparison on {metric_label}"
-
-    long_csv = outdir / f"{args.metric}_per_query_long.csv"
-    summary_csv = outdir / f"{args.metric}_summary.csv"
-    boxplot_png = outdir / f"{args.metric}_boxplot.png"
-    anova_csv = outdir / f"{args.metric}_anova.csv"
-    tukey_csv = outdir / f"{args.metric}_tukey.csv"
-    report_txt = outdir / f"{args.metric}_report.txt"
-
-    write_long_csv(rows, long_csv)
-    write_summary_csv(rows, summary_csv)
-    build_boxplot(rows, boxplot_png, title, metric_label)
-    anova_summary = run_anova(rows, anova_csv)
-    tukey_rows = run_tukey(rows, args.alpha, tukey_csv, anova_summary)
-    write_report(report_txt, metric_label, title, anova_summary, tukey_rows)
-
-    print(f"Saved long-form scores to: {long_csv}")
-    print(f"Saved summary table to:   {summary_csv}")
-    print(f"Saved boxplot to:         {boxplot_png}")
-    print(f"Saved ANOVA table to:     {anova_csv}")
-    print(f"Saved Tukey HSD to:       {tukey_csv}")
-    print(f"Saved text report to:     {report_txt}")
+    for metric_name in metrics:
+        outdir = base_outdir / metric_name if multiple_metrics else base_outdir
+        title = metric_title(metric_name, args.title, multiple_metrics)
+        run_metric_analysis(input_paths, metric_name, outdir, title, args.alpha)
 
 
 if __name__ == "__main__":

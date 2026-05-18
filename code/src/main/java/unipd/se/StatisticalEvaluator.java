@@ -37,62 +37,6 @@ import java.util.*;
  * @version 1.0
  * @since 1.0
  */
-
-
-// TODO:
-/**
- * PRIMA SI ESEGUONO QUESTI:
- * mvn -q -DskipTests compile
- *
- * mkdir -p results/statistics .tmp-stats-home/.cache .tmp-stats-home/.config/matplotlib
- *
- * mvn -q exec:java \
- *   -Dexec.mainClass=unipd.se.StatisticalEvaluator \
- *   -Dexec.args="code/data/Dev_set/en_dev.json runs/reranked_results_nemotron_topk100BASELINE_DEV.json results/statistics/nemotron_top100_baseline_en_dev.json nemotron_top100_baseline_en_dev"
- *
- * mvn -q exec:java \
- *   -Dexec.mainClass=unipd.se.StatisticalEvaluator \
- *   -Dexec.args="code/data/Dev_set/en_dev.json runs/reranked_results_nemotron_topk1000BASELINE_DEV.json results/statistics/nemotron_top1000_baseline_en_dev.json nemotron_top1000_baseline_en_dev"
- *
- * mvn -q exec:java \
- *   -Dexec.mainClass=unipd.se.StatisticalEvaluator \
- *   -Dexec.args="code/data/Dev_set/en_dev.json runs/reranked_results_nemotronFTAarsen20252026_Lora_enDEVtopk1000_onbiEncoderTopk1000.json results/statistics/nemotron_lora_top1000_en_dev.json nemotron_lora_top1000_en_dev"
- *
- *
- * Poi per generare ANOVA, Tukey e boxplot per MRR@5, nDCG@10 e AP, si eseguono questi:
- *
- *
- * HOME="$PWD/.tmp-stats-home" MPLBACKEND=Agg MPLCONFIGDIR="$PWD/.tmp-stats-home/.config/matplotlib" XDG_CACHE_HOME="$PWD/.tmp-stats-home/.cache" \
- * python3 code/py/anova_tukey_boxplot.py \
- *   --inputs \
- *     results/statistics/nemotron_top100_baseline_en_dev.json \
- *     results/statistics/nemotron_top1000_baseline_en_dev.json \
- *     results/statistics/nemotron_lora_top1000_en_dev.json \
- *   --metric mrr5 \
- *   --outdir results/statistics/en_dev_mrr5 \
- *   --title "English DEV - MRR@5"
- *
- * HOME="$PWD/.tmp-stats-home" MPLBACKEND=Agg MPLCONFIGDIR="$PWD/.tmp-stats-home/.config/matplotlib" XDG_CACHE_HOME="$PWD/.tmp-stats-home/.cache" \
- * python3 code/py/anova_tukey_boxplot.py \
- *   --inputs \
- *     results/statistics/nemotron_top100_baseline_en_dev.json \
- *     results/statistics/nemotron_top1000_baseline_en_dev.json \
- *     results/statistics/nemotron_lora_top1000_en_dev.json \
- *   --metric ndcg10 \
- *   --outdir results/statistics/en_dev_ndcg10 \
- *   --title "English DEV - nDCG@10"
- *
- * HOME="$PWD/.tmp-stats-home" MPLBACKEND=Agg MPLCONFIGDIR="$PWD/.tmp-stats-home/.config/matplotlib" XDG_CACHE_HOME="$PWD/.tmp-stats-home/.cache" \
- * python3 code/py/anova_tukey_boxplot.py \
- *   --inputs \
- *     results/statistics/nemotron_top100_baseline_en_dev.json \
- *     results/statistics/nemotron_top1000_baseline_en_dev.json \
- *     results/statistics/nemotron_lora_top1000_en_dev.json \
- *   --metric ap \
- *   --outdir results/statistics/en_dev_ap \
- *   --title "English DEV - AP"
- *
- */
 public final class StatisticalEvaluator {
 
     /**
@@ -197,6 +141,9 @@ public final class StatisticalEvaluator {
             double qPrecision5 = precisionAtK(ranked, goldSet, 5);
             double qPrecision10 = precisionAtK(ranked, goldSet, 10);
 
+            double qF1At1 = qRecall1 + qPrecision1 > 0
+                    ? 2.0 * qRecall1 * qPrecision1 / (qRecall1 + qPrecision1)
+                    : 0.0;
             double qMrr5 = rank > 0 && rank <= 5 ? 1.0 / rank : 0.0;
             double qAp = averagePrecision(ranked, goldSet);
             double qNdcg5 = ndcgAtK(ranked, goldSet, relCount, 5);
@@ -227,6 +174,7 @@ public final class StatisticalEvaluator {
             row.put("precision@1", qPrecision1);
             row.put("precision@5", qPrecision5);
             row.put("precision@10", qPrecision10);
+            row.put("f1@1", qF1At1);
             row.put("mrr@5", qMrr5);
             row.put("ap", qAp);
             row.put("ndcg@5", qNdcg5);

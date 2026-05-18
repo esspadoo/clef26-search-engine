@@ -31,16 +31,223 @@ The results show a consistent progression from lexical retrieval toward neural r
 
 For the runs performed in the \texttt{dev\_set} we provide a separate multilingual check rather than a single aggregate score. On the English development split, the non-fine-tuned Nemotron baseline reaches 0.675 MRR@5 and 0.835 Recall@100 when reranking the top 100 candidates; 0.692 MRR@5 and 0.909 Recall@100 when reranking the top 1000 candidates. The fine-tuned Nemotron LoRA run on the same English development split reaches 0.716 MRR@5 and 0.913 Recall@100. The corresponding fine-tuned development runs reach 0.76 MRR@5 and 0.929 Recall@100 for French and 0.67 MRR@5 and 0.889 Recall@100 for German with the top-2000 candidate setting.
 
-\subsection{Ablation / Run Analysis}
+\subsection{Evaluation Evidence and Metrics}
+\label{sub:results-evidence}
 
-\paragraph{Analyzer tuning:}
-We initially explored stronger English analyzers and several stemming and stopword variants in order to improve lexical matching between short social-media posts and scientific abstracts. This family peaks at an MRR@5 of 0.503 with \texttt{MyEnglishAnalyzer\_V2}, while the other analyzer variants remain around the 0.45-0.50 range. These runs were useful in validating the preprocessing choices but they also showed that text normalization alone is not enough to bridge the semantic gap between informal claims and academic documents. Analyzer tuning yields measurable improvements but its impact is limited when compared with semantic retrieval and neural reranking.
+We report three complementary forms of evidence. First, we use the labeled English run-analysis split to compare retrieval and reranking configurations over 14,977 queries. This is the largest labeled split available to us and is therefore the most reliable source for per-query statistical analysis. Second, we validate the final fine-tuned reranker on the labeled multilingual development splits: English, French, and German. Third, we report diagnostics for the official TEST submission. The official TEST data contain query identifiers and texts, but no gold \texttt{pubkey}; consequently, effectiveness metrics on the official TEST split are left as explicit TODO values until the official qrels or gold labels are available.
 
-\paragraph{Hybrid retrieval without reranking:}
-A shift from analyzer-focused experiments to hybrid retrieval leads to a substantially larger improvement. The two best retrieval-only systems, reported in Table~\ref{tab:main-results} as Hybrid A and Hybrid B, both reach an MRR@5 of about 0.557 with recall@100 between 0.837 and 0.839. The difference between them lies in the balance between the dense and ColBERT components while the sparse contribution is kept fixed. This indicates that combining dense, sparse and ColBERT-style signals already produces a strong candidate set before any reranking is applied. At the same time the very small difference between the two configurations suggests that, once the hybrid formulation is in place, the exact internal weighting matters less than the transition away from purely lexical retrieval. Hybrid retrieval is the first major step change in effectiveness and provides the strongest retrieval-only foundation for the full pipeline.
+The primary metric is MRR@5, following the task objective. We also report Recall@100 to measure whether the correct paper remains in the candidate set, and MAP and nDCG@10 to describe the quality of the ranking beyond the first reciprocal-rank hit. Since each query has a single gold publication in the available labeled files, per-query MRR@5 is zero unless the gold paper appears in the first five positions, and is $1/r$ when the first relevant paper appears at rank $r \leq 5$.
 
-\paragraph{Single-stage reranking with Nemotron:}
-Adding \texttt{nvidia/llama-nemotron-rerank-1b-v2} on top of the hybrid candidates produces the largest isolated gain in MRR@5. The representative Nemotron runs increase from the 0.557 range of the retrieval-only systems to 0.694 and 0.702, while recall@100 also rises from about 0.839 to as high as 0.911. We also observe a limited but consistent benefit from increasing the number of candidates exposed to the reranker: moving from the top-400 to the top-1000 setting slightly improves both MRR@5 and recall@100. This suggests that the reranker can exploit a broader candidate pool enduring the additional noise bringing further, although diminishing, gains. In our experiments, the threshold at which the MRR no longer showed signs of improvement was around topk=2500; however, it is also true that it is unlikely to find many more relevant documents that are easy to detect at those depths.
+\subsection{Run Comparison on the Labeled English Split}
+\label{sub:run-comparison}
 
-\paragraph{Alternative rerankers:}
-To verify that the gains were not tied to a single model, we also evaluated other rerankers, including \texttt{Qwen/Qwen3-Reranker-4B} and \\\texttt{Alibaba-NLP/gte-reranker-modernbert-base}. Both models clearly outperform the retrieval-only baseline in terms of MRR@5, reaching values of 0.662 and 0.652, respectively. However, they remain below the Nemotron runs, especially on MRR@5, which suggests weaker ranking quality in the first positions of the final list. Even so these experiments confirm that the hybrid retriever produces candidate sets that can be improved by different neural rerankers. Alternative rerankers validate the overall pipeline design but Nemotron is the strongest first-stage reranker among the models we tested.
+Table~\ref{tab:run-comparison} compares the main evaluated configurations. The hybrid runs differ in the linear weights assigned to dense, sparse, and ColBERT-style BGE-M3 signals. The reranking runs use the retained hybrid candidate generator \texttt{H513} and rerank increasingly deep candidate pools with \texttt{nvidia/llama-nemotron-rerank-1b-v2}. The $\Delta$ column is computed against \texttt{H513}, because this is the hybrid configuration used by the submitted reranking pipeline.
+
+\begin{table*}[htbp]
+    \centering
+    \footnotesize
+    \caption{Run comparison on the labeled English split with 14,977 queries. Values are computed from ranked outputs and the corresponding gold labels.}
+    \label{tab:run-comparison}
+    \begin{tabular}{p{1.6cm} p{2.4cm} p{5.8cm} r r r r r}
+        \toprule
+        Run & Family & Configuration & MRR@5 & Recall@100 & MAP & nDCG@10 & $\Delta$ MRR@5 \\
+        \midrule
+        H424 & Hybrid & BGE-M3 weights $0.40/0.20/0.40$ & 0.5067 & 0.8277 & 0.5201 & 0.5531 & -0.0500 \\
+        H514 & Hybrid & BGE-M3 weights $0.50/0.10/0.40$ & 0.5141 & 0.8327 & 0.5273 & 0.5595 & -0.0426 \\
+        H414 & Hybrid & BGE-M3 weights $0.45/0.10/0.45$ & 0.5171 & 0.8327 & 0.5302 & 0.5621 & -0.0396 \\
+        H513 & Hybrid & BGE-M3 weights $0.50/0.15/0.35$ & 0.5567 & 0.8392 & 0.5688 & 0.5956 & 0.0000 \\
+        H315 & Hybrid & BGE-M3 weights $0.35/0.15/0.50$ & 0.5572 & 0.8365 & 0.5692 & 0.5957 & +0.0005 \\
+        N100 & Reranking & H513 candidates reranked with Nemotron, top-100 retained & 0.6847 & 0.8392 & 0.6909 & 0.7146 & +0.1280 \\
+        N500 & Reranking & H513 candidates reranked with Nemotron, top-500 retained & 0.7010 & 0.8986 & 0.7096 & 0.7342 & +0.1443 \\
+        N1000 & Reranking & H513 candidates reranked with Nemotron, top-1000 retained & \textbf{0.7018} & \textbf{0.9109} & \textbf{0.7111} & \textbf{0.7357} & \textbf{+0.1451} \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+The weakest configuration among the reported runs is \texttt{H424}, with MRR@5 of 0.5067. Increasing the dense component while keeping a moderate sparse contribution is beneficial: \texttt{H513} improves MRR@5 by 0.0500 over \texttt{H424} and also reaches the best Recall@100 among the hybrid-only runs. \texttt{H315} has a marginally higher MRR@5 than \texttt{H513}, but its Recall@100 is lower. For this reason, \texttt{H513} is the more appropriate candidate generator for the full pipeline, where the goal of retrieval is to expose as many plausible documents as possible to the reranker.
+
+The largest improvement is introduced by neural reranking. Moving from \texttt{H513} to \texttt{N1000} increases MRR@5 from 0.5567 to 0.7018, an absolute gain of 0.1451 and a relative improvement of 26.1\%. The gain is not only an early-rank effect: Recall@100 also rises from 0.8392 to 0.9109 when reranking a deeper candidate pool. The difference between \texttt{N500} and \texttt{N1000} is much smaller in MRR@5, only 0.0008, but \texttt{N1000} keeps a higher Recall@100. This indicates diminishing returns in early precision after roughly 500 reranked candidates, while deeper reranking still helps recover relevant documents in the tail.
+
+Additional aggregate experiments were available for reranker variants whose full ranked outputs are not all available. We include the most informative rows in Table~\ref{tab:aggregate-rerankers}, but we do not use them in the paired statistical tests because per-query scores cannot be reconstructed for those runs.
+
+\begin{table*}[htbp]
+    \centering
+    \footnotesize
+    \caption{Additional aggregate reranker rows. These values are reported for completeness but are excluded from paired tests unless their ranked outputs are restored.}
+    \label{tab:aggregate-rerankers}
+    \begin{tabular}{p{3.0cm} p{6.8cm} r r r r}
+        \toprule
+        Run family & Configuration & MRR@5 & Recall@100 & MAP & nDCG@10 \\
+        \midrule
+        Cascaded reranking & Nemotron top-400 followed by fine-tuned ModernBERT top-100 & \textbf{0.7662} & 0.8929 & \textbf{0.7720} & \textbf{0.7905} \\
+        Cascaded reranking & Nemotron top-400 followed by fine-tuned BGE-reranker-v2-m3 top-100 & 0.7414 & 0.8929 & 0.7481 & 0.7695 \\
+        Single reranker & Nemotron top-1000 on H513 candidates & 0.7018 & \textbf{0.9109} & 0.7111 & 0.7357 \\
+        Alternative reranker & Qwen3-reranker-4B on H513 candidates & 0.6624 & 0.8392 & 0.6696 & 0.6953 \\
+        Alternative reranker & GTE/ModernBERT reranking on Nemotron top-400 candidates & 0.6529 & 0.8888 & 0.6636 & 0.6878 \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+This second table changes the interpretation of the best aggregate configuration. Among the runs for which complete ranked outputs are available, \texttt{N1000} is the strongest. Among the aggregate-only experiments, however, the cascaded ModernBERT reranker reaches MRR@5 of 0.7662, improving over \texttt{N1000} by 0.0644. Its Recall@100 is lower than \texttt{N1000}, because it operates on a shallower retained candidate set, but it is much better at promoting the correct paper into the first positions. This suggests that a second reranking stage can improve early precision, at the cost of additional computation and possible loss of deep-candidate coverage. The Qwen3 and GTE/ModernBERT alternatives improve over hybrid retrieval but remain below the Nemotron and cascaded reranking variants in MRR@5.
+
+\subsection{Multilingual Development Validation}
+\label{sub:multilingual-dev}
+
+Table~\ref{tab:multilingual-dev} reports the final fine-tuned Nemotron LoRA reranker on the multilingual development splits. These data are closer to the official multilingual TEST setting than the English-only run-analysis split, because they include translated French and German queries. The confidence intervals are normal-approximation 95\% intervals over per-query MRR@5 values; they are descriptive rather than official task intervals.
+
+\begin{table*}[htbp]
+    \centering
+    \footnotesize
+    \caption{Fine-tuned Nemotron LoRA validation on labeled development data. The final two columns report rank-bucket counts for strong successes and unresolved failures.}
+    \label{tab:multilingual-dev}
+    \begin{tabular}{l r r r r r r r}
+        \toprule
+        Split & Queries & MRR@5 & 95\% CI & Recall@100 & MAP & nDCG@10 & Rank 1 / Missing \\
+        \midrule
+        EN DEV & 3905 & 0.7160 & [0.7030, 0.7290] & 0.9129 & 0.7243 & 0.7483 & 2574 / 241 \\
+        FR DEV & 702  & 0.7599 & [0.7310, 0.7888] & 0.9288 & 0.7672 & 0.7894 & 496 / 50 \\
+        DE DEV & 386  & 0.6736 & [0.6305, 0.7168] & 0.8860 & 0.6820 & 0.7080 & 237 / 44 \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+The development results suggest that the final pipeline generalizes reasonably across languages after translation, but not uniformly. French is the strongest development split, with MRR@5 of 0.7599 and Recall@100 of 0.9288. German is the weakest, with MRR@5 of 0.6736 and the widest confidence interval because it has only 386 labeled queries. This lower German score is a warning for the official TEST set: the German portion is smaller than English but still accounts for 876 of the 8172 test queries, and translation or morphology errors can have a visible effect on aggregate performance.
+
+\subsection{Official Test-Set Submission}
+\label{sub:test-results}
+
+The official TEST data consist of 8172 unlabeled queries: 6076 in English, 1220 in French, and 876 in German. The submitted systems use the same four-stage pipeline described in Section~\ref{sec:methodology}: translate non-English queries into English, expand the query, retrieve candidates with BGE-M3 hybrid retrieval, and rerank with the fine-tuned Nemotron LoRA cross-encoder. Each submitted row contains the final top-5 predicted publication identifiers.
+
+Because the official TEST data available to us do not include gold \texttt{pubkey}s, Table~\ref{tab:test-submission-diagnostics} reports submission diagnostics rather than effectiveness. These diagnostics are still useful: they verify that every test query was processed and that the final top-5 lists have the required shape.
+
+\begin{table}[htbp]
+    \centering
+    \footnotesize
+    \caption{Official TEST submission diagnostics. A complete top-5 row is a query with exactly five unique submitted \texttt{pubkey} predictions.}
+    \label{tab:test-submission-diagnostics}
+    \begin{tabular}{l r r r r r}
+        \toprule
+        Language & Queries & TSV rows & Complete top-5 rows & Mean preds/query & Duplicate rows \\
+        \midrule
+        EN & 6076 & 6076 & 6076 & 5.0 & 0 \\
+        FR & 1220 & 1220 & 1220 & 5.0 & 0 \\
+        DE & 876  & 876  & 876  & 5.0 & 0 \\
+        \midrule
+        Total & 8172 & 8172 & 8172 & 5.0 & 0 \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\linewidth]{hw2_test_submission_diagnostics.pdf}
+    \caption{Diagnostic view of the official TEST submission by language. This figure verifies submission coverage and list validity, not retrieval effectiveness.}
+    \label{fig:test-submission-diagnostics}
+\end{figure}
+
+Operationally, the submission is complete: all 8172 official test queries have one submitted row, every row has exactly five predictions, and no row contains duplicate predictions. The stored reranked TEST outputs contain 100 candidates per query for each language before TSV truncation. The main unresolved question is therefore ranking correctness, not file completeness. Based on the development results in Table~\ref{tab:multilingual-dev}, the most plausible risk is a performance drop on translated German and French queries, especially when the translation changes technical expressions or when expansion terms drift toward a semantically related but incorrect paper.
+
+\begin{table}[htbp]
+    \centering
+    \footnotesize
+    \caption{Official TEST effectiveness metrics. These values are intentionally left as TODO placeholders because gold labels for the official TEST split are not available.}
+    \label{tab:test-effectiveness-todo}
+    \begin{tabular}{l c c c c}
+        \toprule
+        Language & MRR@5 & Recall@100 & MAP & nDCG@10 \\
+        \midrule
+        EN & TODO & TODO & TODO & TODO \\
+        FR & TODO & TODO & TODO & TODO \\
+        DE & TODO & TODO & TODO & TODO \\
+        Aggregate & TODO & TODO & TODO & TODO \\
+        \bottomrule
+    \end{tabular}
+\end{table}
+
+\subsection{Statistical Analysis}
+\label{sub:statistical-analysis}
+
+We separate descriptive evidence from hypothesis testing. The descriptive part characterizes the distribution of per-query MRR@5 scores, while the paired tests compare systems on the same queries. This is important because aggregate metrics alone hide whether an improvement is broad across many queries or concentrated in a smaller number of large corrections. The tests below are restricted to runs for which ranked outputs are available; the aggregate-only rows in Table~\ref{tab:aggregate-rerankers} should be tested in the same way once their per-query outputs are restored.
+
+\subsubsection*{Descriptive statistics}
+
+Table~\ref{tab:mrr-descriptive-stats} reports per-query MRR@5 statistics for the retained hybrid run and the Nemotron reranking depths. The reranker changes the distribution, not only the mean: the median rises from 0.5 for \texttt{H513} to 1.0 for all Nemotron runs, and the first quartile rises from 0.0 to 0.25 after reranking. This means that at least 75\% of queries receive a non-zero MRR@5 score after reranking, whereas the hybrid-only system still has a first quartile of zero.
+
+\begin{table*}[htbp]
+    \centering
+    \footnotesize
+    \caption{Descriptive statistics of per-query MRR@5 on the labeled English split. Confidence intervals use the normal approximation over queries.}
+    \label{tab:mrr-descriptive-stats}
+    \begin{tabular}{l r r r r r r r r}
+        \toprule
+        Run & Mean & Median & Std. dev. & Variance & Min & Q1 & Q3 & 95\% CI \\
+        \midrule
+        H513  & 0.5567 & 0.5 & 0.4614 & 0.2129 & 0.0 & 0.00 & 1.00 & [0.5493, 0.5641] \\
+        N100  & 0.6847 & 1.0 & 0.4303 & 0.1852 & 0.0 & 0.25 & 1.00 & [0.6778, 0.6916] \\
+        N500  & 0.7010 & 1.0 & 0.4229 & 0.1788 & 0.0 & 0.25 & 1.00 & [0.6943, 0.7078] \\
+        N1000 & 0.7018 & 1.0 & 0.4223 & 0.1784 & 0.0 & 0.25 & 1.00 & [0.6950, 0.7086] \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+\begin{figure}[htbp]
+    \centering
+    \includegraphics[width=0.85\linewidth]{hw2_mrr5_distribution.pdf}
+    \caption{Per-query MRR@5 distribution for the retained hybrid run and Nemotron reranking depths. The box shows the interquartile range, the orange line marks the median, and the black square marks the mean.}
+    \label{fig:mrr5-distribution}
+\end{figure}
+
+Figure~\ref{fig:mrr5-distribution} makes the same shift visible graphically. The hybrid run has a wide distribution with many zero-valued queries; the reranked runs concentrate more mass at rank 1. The standard deviation remains high because MRR@5 is discrete and bounded: a query contributes either 0, 0.2, 0.25, 0.333, 0.5, or 1.0. Therefore, even when the mean improves, the distribution remains heterogeneous across queries.
+
+\subsubsection*{Rank-bucket and error analysis}
+
+Table~\ref{tab:rank-bucket-analysis} compares where the gold document appears for \texttt{H513} and \texttt{N1000}. This table separates three error types. If the gold paper is missing, the candidate generator failed to retrieve it. If it appears after rank 100, the deep reranking run has found it but not within the Recall@100 cutoff. If it appears between ranks 6 and 100, the system has enough candidate evidence but fails the top-5 objective.
+
+\begin{table*}[htbp]
+    \centering
+    \footnotesize
+    \caption{Rank buckets for the retained hybrid run and the best reranked run on the labeled English split. Percentages are computed over 14,977 queries.}
+    \label{tab:rank-bucket-analysis}
+    \begin{tabular}{l r r r r r r}
+        \toprule
+        Run & Rank 1 & Ranks 2--5 & Ranks 6--10 & Ranks 11--100 & Rank $>100$ & Missing \\
+        \midrule
+        H513  & 7459 (49.8\%) & 2280 (15.2\%) & 715 (4.8\%) & 2114 (14.1\%) & 0 (0.0\%) & 2409 (16.1\%) \\
+        N1000 & 9697 (64.7\%) & 2057 (13.7\%) & 598 (4.0\%) & 1291 (8.6\%) & 405 (2.7\%) & 929 (6.2\%) \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+The main strength of reranking is the increase in rank-1 hits: \texttt{N1000} places the gold paper first for 9697 queries, compared with 7459 for \texttt{H513}. It also reduces completely missing cases from 2409 to 929. The remaining errors are informative. The 1291 queries in ranks 11--100 are not retrieval failures; they are ranking failures where the correct paper is present but too low for MRR@5. The 929 missing queries remain the most serious class of failure, because the reranker cannot recover a publication that is absent from the candidate list. These cases are likely associated with severe vocabulary mismatch, translation drift, or claims whose wording emphasizes entities and context not present in the title and abstract.
+
+\subsubsection*{Paired comparisons}
+
+Table~\ref{tab:paired-tests} reports paired sign tests on per-query MRR@5 differences. The sign test is less assumption-heavy than a paired t-test because it uses only the direction of per-query changes. We also report the mean difference and a normal-approximation confidence interval for the magnitude of the improvement. Since the same queries are evaluated for each pair of systems, the comparisons are paired.
+
+\begin{table*}[htbp]
+    \centering
+    \footnotesize
+    \caption{Paired comparisons on per-query MRR@5. Positive/negative/tied counts indicate how often the second run improves, worsens, or matches the first run on the same query.}
+    \label{tab:paired-tests}
+    \begin{tabular}{l r r r r r}
+        \toprule
+        Comparison & Mean $\Delta$ & Relative $\Delta$ & 95\% CI & Pos./Neg./Tie & Sign-test $p$ \\
+        \midrule
+        H513 $\rightarrow$ N1000 & +0.1451 & +26.1\% & [0.1396, 0.1505] & 3952 / 667 / 10358 & $<0.001$ \\
+        N100 $\rightarrow$ N500 & +0.0164 & +2.4\% & [0.0139, 0.0188] & 682 / 499 / 13796 & $<0.001$ \\
+        N500 $\rightarrow$ N1000 & +0.0008 & +0.1\% & [-0.0003, 0.0018] & 203 / 263 / 14511 & 0.005 \\
+        H315 $\rightarrow$ H513 & -0.0005 & -0.1\% & [-0.0017, 0.0008] & 464 / 473 / 14040 & 0.769 \\
+        \bottomrule
+    \end{tabular}
+\end{table*}
+
+The comparison between \texttt{H513} and \texttt{N1000} is both statistically and practically meaningful: the confidence interval is far from zero, and many more queries improve than worsen. The comparison between \texttt{N100} and \texttt{N500} is smaller but still meaningful, confirming that exposing more candidates to the reranker helps. By contrast, \texttt{N500} versus \texttt{N1000} is not practically stable for MRR@5. The mean difference is slightly positive, but the confidence interval crosses zero and more individual queries worsen than improve. The value of \texttt{N1000} is therefore mainly its higher Recall@100, not a clear early-rank advantage. Finally, \texttt{H315} and \texttt{H513} are statistically indistinguishable in MRR@5, so the choice of \texttt{H513} is justified by its slightly stronger candidate-generation recall rather than by early precision.
+
+ANOVA and Tukey HSD are appropriate when complete per-query scores are available for several systems evaluated on the same query set. For the current official TEST split, however, ANOVA, Tukey HSD, Wilcoxon signed-rank tests, or bootstrap confidence intervals over effectiveness metrics cannot be computed until gold labels are available. Once official qrels are released, the appropriate analysis is a paired per-query test between submitted systems on MRR@5, supplemented by bootstrap confidence intervals and a rank-bucket error table like Table~\ref{tab:rank-bucket-analysis}.
+
+\subsection{Reproducibility and Remaining TODOs}
+\label{sub:results-reproducibility}
+
+All aggregate metrics, per-query summaries, confidence intervals, rank buckets, and figures in this section were generated from the ranked outputs and gold labels available for the labeled splits. The same deterministic procedure was used for all systems included in the paired statistical analysis, and the implementation is released together with the system code referenced in Section~\ref{sec:setup}.
+
+The remaining TODO is the official TEST effectiveness table, Table~\ref{tab:test-effectiveness-todo}. To fill it, the official TEST queries must be augmented with gold \texttt{pubkey}s or accompanied by qrels. The required fields are query identifier, gold \texttt{pubkey}, and the ordered predicted \texttt{pubkey} list for each submitted run. After that, MRR@5, Recall@100, MAP, nDCG@10, confidence intervals, and paired significance tests can be computed with the same per-query procedure used in this section.
