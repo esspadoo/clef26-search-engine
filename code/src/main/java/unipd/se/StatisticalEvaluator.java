@@ -28,7 +28,7 @@ import java.util.*;
  * mvn exec:java \
  *   -Dexec.mainClass=unipd.se.StatisticalEvaluator \
  *   -Dexec.args="code/data/Dev_set/en_dev.json \
- *                runs/reranked_results_nemotron_topk1000BASELINE_DEV.json \
+ *                runs/dev/reranked/reranked_results_nemotron_topk1000BASELINE_DEV.json \
  *                results/statistics/nemotron_top1000_baseline_en_dev.json \
  *                nemotron_top1000_baseline_en_dev"
  * </pre>
@@ -380,7 +380,7 @@ public final class StatisticalEvaluator {
                   mvn exec:java \\
                     -Dexec.mainClass=unipd.se.StatisticalEvaluator \\
                     -Dexec.args="code/data/Dev_set/en_dev.json \\
-                                 runs/reranked_results_nemotron_topk1000BASELINE_DEV.json \\
+                                 runs/dev/reranked/reranked_results_nemotron_topk1000BASELINE_DEV.json \\
                                  results/statistics/nemotron_top1000_baseline_en_dev.json \\
                                  nemotron_top1000_baseline_en_dev"
                 """);
