@@ -6,7 +6,7 @@ Early experiments focused on analyzer choices, stopword lists, and BM25 variants
 \newline
 We adopted a four-stage pipeline (Figure~\ref{fig:pipeline}) for the proposed information retrieval system, consisting of:
 \begin{itemize}
-    \item \textbf{Query Translation}: queries in French or German are first translated into English.
+    \item \textbf{Query translation}: queries in French or German are first translated into English.
     \item \textbf{Query expansion}: we expanded the English query with additional context to bridge the gap between informal and domain specific language.
     \item \textbf{Retrieval}: we retrieved relevant documents from the corpus using the expanded query.
     \item \textbf{Reranking}: we reranked the retrieved documents based on their relevance to the original query.
