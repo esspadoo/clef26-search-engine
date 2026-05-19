@@ -16,7 +16,7 @@ The development results show that fine-tuning the Nemotron reranker is promising
 
 Several directions emerge for future improvement. First, deploying a fine-tuned German translation model could mitigate morphological drift and improve the performance of non-English queries. Second, implementing and validating the cascaded reranking configuration documented in Table~\ref{tab:aggregate-rerankers} could yield the highest observed MRR@5 (0.766) on English data, though at increased computational cost.
 
-Third, in-depth analysis of the 929 completely missing queries (6.2\% of the English split) could reveal systematic failure modesâ€”such as claims referencing methodology or findings not mentioned in paper abstracts, or highly paraphrased social-media versions that bear little lexical resemblance to the original publication.
+Third, in-depth analysis of the 929 completely missing queries (6.2\% of the English split) could reveal systematic failure modes—such as claims referencing methodology or findings not mentioned in paper abstracts, or highly paraphrased social-media versions that bear little lexical resemblance to the original publication.
 
 Fourth, incorporating additional document representations such as author lists, publication venues, keywords, or full-text content could enable richer retrieval and reranking signals for claims mentioning specific research groups, conferences, or specialized domains.
 
