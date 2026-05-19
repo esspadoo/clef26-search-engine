@@ -2,7 +2,7 @@
 \label{sec:methodology}
 
 We started from a lexical baseline based on Apache Lucene BM25 and progressively moved to a multi-stage neural pipeline.
-Early experiments focused on analyzer choices, stopword lists and BM25 variants. These runs were useful to establish a stable baseline but they also showed that lexical overlap alone is insufficient for this task.
+Early experiments focused on analyzer choices, stopword lists, and BM25 variants. These runs were useful for establishing a stable baseline, but they also showed that lexical overlap alone is insufficient for this task.
 \newline
 We adopted a four-stage pipeline (Figure~\ref{fig:pipeline}) for the proposed information retrieval system, consisting of:
 \begin{itemize}
@@ -11,9 +11,9 @@ We adopted a four-stage pipeline (Figure~\ref{fig:pipeline}) for the proposed in
     \item \textbf{Retrieval}: we retrieved relevant documents from the corpus using the expanded query.
     \item \textbf{Reranking}: we reranked the retrieved documents based on their relevance to the original query.
 \end{itemize}
-For each of these stages, we experimented with different models, choosing the ones that performed better in relation to the others.
+For each of these stages, we experimented with different models and kept the ones that performed best.
 
-In the following sections all the four stages are precisely explained.
+The following sections explain the four stages in detail.
 
 \begin{figure}[htbp]
     \centering
@@ -23,7 +23,7 @@ In the following sections all the four stages are precisely explained.
 \end{figure}
 
 \subsection{Query translation} \label{sub:querytransl}
-In the preliminary stage of out pipeline non-English queries (French and German) are translated into English. This is done query by query using the model \texttt{utter-project/EuroLLM-9B-Instruct-2512} with the following prompt:
+In the preliminary stage of our pipeline, non-English queries (French and German) are translated into English. This is done query by query using the model \texttt{utter-project/EuroLLM-9B-Instruct-2512} with the following prompt:
 \begin{promptbox}
     \small
     \ttfamily
@@ -39,9 +39,9 @@ In the preliminary stage of out pipeline non-English queries (French and German)
         \{\textbf{Query original text $x$}\}
     \end{flushleft}
 \end{promptbox}
-Given $x$ as the original query text, the model predict probabilities for the next token with \cite{huggingface_transformers_generation}:
+Given $x$ as the original query text, the model predicts probabilities for the next token with \cite{huggingface_transformers_generation}:
 $$P(y_t=i\mid y_{<t},x)=\operatorname{softmax}(z_t/T)_i$$
-Looking at our model configuration, the prediction becomes greedy, following \cite{utter_project_eurollm_9b_instruct_2512}: $$y_t=\arg\max_i P(y_t=i\mid y_{<t},x)$$
+With our model configuration, the prediction becomes greedy, following \cite{utter_project_eurollm_9b_instruct_2512}: $$y_t=\arg\max_i P(y_t=i\mid y_{<t},x)$$
 The resulting English queries are then fed into the following step of our pipeline.
 
 \subsection{Query Expansion} \label{sub:query-expansion}
@@ -70,7 +70,7 @@ Following the translation stage, each query is processed by a deterministic quer
 The final expanded query is constructed by concatenating three components: the cleaned translated query, the noun and proper-noun-based keyword set extracted directly from the query and the expansion terms induced from the retrieved document neighbourhood.
 This output expanded query is then used by the downstream retrieval pipeline.
 
-Before confirming this as query expansion strategy, we have also tried to use two LLM models, \texttt{meta-llama/Llama-3.2-1B} and \texttt{openai/gpt-oss-20b} with the following prompt:
+Before settling on this query expansion strategy, we also tried two LLM models, \texttt{meta-llama/Llama-3.2-1B} and \texttt{openai/gpt-oss-20b}, with the following prompt:
 \begin{promptbox}
     \small
     \ttfamily
@@ -185,7 +185,7 @@ We then evaluated dense retrieval with several bi-encoder models. Among these, \
 
 However, the best results in our analysis were obtained with a simpler configuration in which BGE-M3 hybrid retrieval used the same expanded query, described in the previous section, for all three retrieval modes. We then tested several weighting configurations. Among them, the run labelled \texttt{bge\_m3\_hybrid\_513} was retained because it provided the strongest recall-oriented trade-off among the retrievers evaluated without reranking. This configuration used weights of $0.5$, $0.15$ and $0.35$ for dense, sparse, and ColBERT scoring, respectively, with a multiplier of $3$ and a maximum hybrid input length of $384$.
 
-A closely related configuration with a larger ColBERT weight achieved a nearly identical MRR@5 but a lower Recall@100. We therefore preferred the configuration that better matched the role of retrieval as a candidate generator. This choice was further confirmed by downstream experiments: reranking candidates from \texttt{bge\_m3\_hybrid\_513} consistently outperformed the corresponding BM25-based reranked runs. In addition, increasing the reranked candidate depth from a few hundred documents to between $1000$ and $2500$ documents permitted to increase the final recall by serving to the neural reranker a bigger candidate-pool to rerank.
+A closely related configuration with a larger ColBERT weight achieved a nearly identical MRR@5 but a lower Recall@100. We therefore preferred the configuration that better matched the role of retrieval as a candidate generator. This choice was further confirmed by downstream experiments: reranking candidates from \texttt{bge\_m3\_hybrid\_513} consistently outperformed the corresponding BM25-based reranked runs. In addition, increasing the reranked candidate depth from a few hundred documents to between $1000$ and $2500$ documents increased the final recall by giving the neural reranker a larger candidate pool.
 
 We also experimented with a learned fusion strategy for the hybrid signals. In particular, the experimental setup included a LightGBM LambdaMART option that builds features from the dense, sparse, and ColBERT scores, together with normalized score variants and dense-rank features, and then learns how to combine them. However, the retained retrieval configuration uses simpler linear fusion, which is easier to reproduce and aligns well with the recall-oriented role of this stage.
 
