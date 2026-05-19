@@ -138,12 +138,6 @@ Because the official TEST data available to us do not include gold \texttt{pubke
     \end{tabular}
 \end{table}
 
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=0.85\linewidth]{hw2_test_submission_diagnostics.pdf}
-    \caption{Diagnostic view of the official TEST submission by language. This figure verifies submission coverage and list validity, not retrieval effectiveness.}
-    \label{fig:test-submission-diagnostics}
-\end{figure}
 
 Operationally, the submission is complete: all 8172 official test queries have one submitted row, every row has exactly five predictions, and no row contains duplicate predictions. The stored reranked TEST outputs contain 100 candidates per query for each language before TSV truncation. The main unresolved question is therefore ranking correctness, not file completeness. Based on the development results in Table~\ref{tab:multilingual-dev}, the most plausible risk is a performance drop on translated German and French queries, especially when the translation changes technical expressions or when expansion terms drift toward a semantically related but incorrect paper.
 
@@ -189,15 +183,6 @@ Table~\ref{tab:mrr-descriptive-stats} reports per-query MRR@5 statistics for the
         \bottomrule
     \end{tabular}
 \end{table*}
-
-\begin{figure}[htbp]
-    \centering
-    \includegraphics[width=0.85\linewidth]{hw2_mrr5_distribution.pdf}
-    \caption{Per-query MRR@5 distribution for the retained hybrid run and Nemotron reranking depths. The box shows the interquartile range, the orange line marks the median, and the black square marks the mean.}
-    \label{fig:mrr5-distribution}
-\end{figure}
-
-Figure~\ref{fig:mrr5-distribution} makes the same shift visible graphically. The hybrid run has a wide distribution with many zero-valued queries; the reranked runs concentrate more mass at rank 1. The standard deviation remains high because MRR@5 is discrete and bounded: a query contributes either 0, 0.2, 0.25, 0.333, 0.5, or 1.0. Therefore, even when the mean improves, the distribution remains heterogeneous across queries.
 
 \subsubsection*{Rank-bucket and error analysis}
 
