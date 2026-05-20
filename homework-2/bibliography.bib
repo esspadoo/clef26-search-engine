@@ -46,24 +46,8 @@
 @misc{bge_large_model_card,
 	title = {BAAI bge-large-en / bge-large-en-v1.5 Model Card},
 	author = {{BAAI}},
-	url = {https://huggingface.co/BAAI/bge-large-en},
+	url = {https://huggingface.co/BAAI/bge-large-en-v1.5},
 	year = {2024}
-}
-
-@article{chen2024bgem3,
-	title = {BGE M3-Embedding: Multi-Lingual, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation},
-	author = {Chen, Jianlv and Xiao, Shitao and Zhang, Peitian and Luo, Kun and Lian, Defu and Liu, Zheng},
-	journal = {arXiv preprint arXiv:2402.03216},
-	year = {2024},
-	url = {https://arxiv.org/abs/2402.03216}
-}
-
-@misc{khattab2020colbert,
-	title = {ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT},
-	author = {Khattab, Omar and Zaharia, Matei},
-	booktitle = {SIGIR},
-	year = {2020},
-	url = {https://arxiv.org/abs/2004.12832}
 }
 
 @misc{hu2022lora,
@@ -72,6 +56,14 @@
 	booktitle = {ICLR},
 	year = {2022},
 	url = {https://arxiv.org/abs/2106.09685}
+}
+
+@misc{khattab2020colbert,
+	title = {ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT},
+	author = {Khattab, Omar and Zaharia, Matei},
+	booktitle = {SIGIR},
+	year = {2020},
+	url = {https://arxiv.org/abs/2004.12832}
 }
 
 @book{manning2008ir,
@@ -21640,16 +21632,6 @@
 	url = {https://aclanthology.org/2020.emnlp-main.550/},
 	year = {2020}}
 
-@inproceedings{KhattabZaharia2020,
-	author = {Khattab, O. and Zaharia, M.},
-	booktitle = {{Proceedings of the 43rd International ACM SIGIR Conference on Research and Development in Information Retrieval (SIGIR 2020)}},
-	doi = {10.1145/3397271.3401075},
-	pages = {39--48},
-	publisher = {{ACM Press, New York, USA}},
-	title = {{ColBERT: Efficient and Effective Passage Search via Contextualized Late Interaction over BERT}},
-	url = {https://doi.org/10.1145/3397271.3401075},
-	year = {2020}}
-
 @inproceedings{NogueiraEtAl2020,
 	author = {Nogueira, R. and Jiang, Z. and Pradeep, R. and Lin, J.},
 	address = {Online},
@@ -21713,18 +21695,6 @@
 	url={https://arxiv.org/abs/2505.18366},
 }
 
-@misc{eurollm-9b-instruct,
-	author       = {{Unbabel and Instituto Superior Técnico and Instituto de Telecomunicações and University of Edinburgh and Aveni and University of Paris-Saclay and University of Amsterdam and Naver Labs and Sorbonne Université}},
-	title        = {{EuroLLM-9B-Instruct: A 9B Parameter Multilingual Transformer LLM for European and Relevant Languages}},
-	year         = {2026},
-	howpublished = {Hugging Face},
-	url          = {https://huggingface.co/utter-project/EuroLLM-9B-Instruct},
-	note         = {Accessed: 07-05-2026},
-	language     = {Multilingual (34 languages including all EU official languages)},
-	license      = {Apache License 2.0}
-}
-
-
 @misc{bge-large-en-v1.5,
 	author       = {{BAAI (Beijing Academy of Artificial Intelligence)}},
 	title        = {{BGE-large-en-v1.5: A General Embedding Model for English}},
@@ -21759,18 +21729,6 @@
 }
 
 
-@inproceedings{ChenEtAl2024,
-	author    = {Jianlv Chen and Shitao Xiao and Peitian Zhang and Kun Luo and Defu Lian and Zheng Liu},
-	title     = {{M3-Embedding}: Multi-Linguality, Multi-Functionality, Multi-Granularity Text Embeddings Through Self-Knowledge Distillation},
-	booktitle = {Findings of the Association for Computational Linguistics: {ACL} 2024},
-	pages     = {2318--2335},
-	year      = {2024},
-	address   = {Bangkok, Thailand},
-	publisher = {Association for Computational Linguistics},
-	doi       = {10.18653/v1/2024.findings-acl.137}
-}
-
-
 @inproceedings{LavrenkoEtAl2001,
 	author    = {Victor Lavrenko and W. Bruce Croft},
 	title     = {Relevance Based Language Models},
@@ -21791,17 +21749,6 @@
 	address   = {Online and Punta Cana, Dominican Republic},
 	publisher = {Association for Computational Linguistics},
 	doi       = {10.18653/v1/2021.emnlp-main.453}
-}
-
-
-
-
-@misc{HuEtAl2022,
-	author    = {Edward J. Hu and Yelong Shen and Phillip Wallis and Zeyuan Allen-Zhu and Yuanzhi Li and Shean Wang and Lu Wang and Weizhu Chen},
-	title     = {{LoRA}: Low-Rank Adaptation of Large Language Models},
-	booktitle = {International Conference on Learning Representations ({ICLR})},
-	year      = {2022},
-	url       = {https://openreview.net/forum?id=nZeVKeeFYf9}
 }
 
 
@@ -21881,4 +21828,35 @@
     pages     = {1656--1671},
     address   = {Online},
     doi       = {10.18653/v1/2020.acl-main.151}
+}
+
+
+@misc{static-retrieval-mrl-en-v1,
+	author = {Tom Aarsen},
+	title = {{static-retrieval-mrl-en-v1}: Static Embeddings with BERT Tokenizer Finetuned for Retrieval with Matryoshka Loss},
+	year = {2025},
+	howpublished = {Hugging Face},
+	url = {https://huggingface.co/sentence-transformers/static-retrieval-mrl-en-v1},
+	note = {Accessed: 07-05-2026},
+	language = {en},
+	license = {apache-2.0}
+}
+
+@inproceedings{reimers-2019-sentence-bert,
+    title = "Sentence-BERT: Sentence Embeddings using Siamese BERT-Networks",
+    author = "Reimers, Nils and Gurevych, Iryna",
+    booktitle = "Proceedings of the 2019 Conference on Empirical Methods in Natural Language Processing",
+    month = "11",
+    year = "2019",
+    publisher = "Association for Computational Linguistics",
+    url = "https://arxiv.org/abs/1908.10084",
+}
+
+@misc{kusupati2024matryoshka,
+    title={Matryoshka Representation Learning},
+    author={Aditya Kusupati and Gantavya Bhatt and Aniket Rege and Matthew Wallingford and Aditya Sinha and Vivek Ramanujan and William Howard-Snyder and Kaifeng Chen and Sham Kakade and Prateek Jain and Ali Farhadi},
+    year={2024},
+    eprint={2205.13147},
+    archivePrefix={arXiv},
+    primaryClass={cs.LG}
 }

@@ -70,7 +70,7 @@ Following the translation stage, each query is processed by a deterministic quer
 The final expanded query is constructed by concatenating three components: the cleaned translated query, the noun and proper-noun-based keyword set extracted directly from the query and the expansion terms induced from the retrieved document neighbourhood.
 This output expanded query is then used by the downstream retrieval pipeline.
 
-Before settling on this query expansion strategy, we also tried two LLM models, \texttt{meta-llama/Llama-3.2-1B} and \texttt{openai/gpt-oss-20b}, with the following prompt:
+Before settling on this query expansion strategy, we also tried two LLM models to see if they could improve our performance, \texttt{meta-llama/Llama-3.2-1B} and \texttt{openai/gpt-oss-20b}, with the following prompt:
 \begin{promptbox}
     \small
     \ttfamily
@@ -142,7 +142,7 @@ All input queries are converted into plain English, either because they are orig
 We chose \textbf{BAAI/bge-m3} because it is well suited to this retrieval setting. The model can produce dense vectors, sparse lexical weights and ColBERT-style multi-vector representations from the same encoder.\\
 This allows the retriever to combine broad semantic matching, exact term evidence and fine-grained token-level matching without switching between unrelated encoders.\\
 For the dense representation, the document or query embedding is obtained from the normalized
-CLS representation \cite{chen2024bgem3}:
+CLS representation \cite{bge-m3}:
 \[
     e=\operatorname{norm}(H[0])
 \]
@@ -173,7 +173,7 @@ The number of candidates passed to the hybrid rescoring stage is:
 
 This deliberately large candidate set favours recall, which is more important than precision at this stage.
 
-Second, the dense candidates are rescored using the sparse and ColBERT-style representations. The sparse component rewards important overlapping terms, while the ColBERT-style component captures local token correspondences that may be lost when each document is represented by a single dense vector~\cite{KhattabZaharia2020}.
+Second, the dense candidates are rescored using the sparse and ColBERT-style representations. The sparse component rewards important overlapping terms, while the ColBERT-style component captures local token correspondences that may be lost when each document is represented by a single dense vector \cite{khattab2020colbert}.
 The ColBERT-style late-interaction score is computed as \cite{khattab2020colbert}:
 \[
     s_{colbert}(q,d)=\frac{1}{N_q}\sum_{i=1}^{N_q}\max_{1\le j\le N_d} q_i^\top d_j
@@ -220,11 +220,10 @@ In practice, reranking deeper candidate pools (500--2500 documents) consistently
 We also evaluated alternative rerankers, including Qwen3 and GTE-ModernBERT variants
 
 \subsection{Fine-tuning the Reranker} \label{sub:finetuning}
-To improve the Nemotron reranker on the domain-specific characteristics of the CheckThat! task, we fine-tuned \texttt{nvidia/llama-nemotron-rerank-1b-v2} using Parameter-Efficient Fine-Tuning (PEFT) with Low-Rank Adaptation (LoRA)
-on data from both the 2025 and 2026 editions of the task.
+To improve the Nemotron reranker on the domain-specific characteristics of the CheckThat! task, we fine-tuned \texttt{nvidia/llama-nemotron-rerank-1b-v2} using Parameter-Efficient Fine-Tuning (PEFT) with Low-Rank Adaptation (LoRA) on data from both the 2025 and 2026 editions of the task.
 
 \subsubsection*{Training data and hard-negative mining}
-Training examples are query-document pairs with binary labels: a positive document is the gold source paper associated with the query, while negative documents are hard negatives mined automatically using \texttt{sentence-transformers/static-retrieval-mrl-en-v1}. Hard negatives are selected from the range $[5, 50]$ nearest neighbors (by embedding similarity) that satisfy $\text{score} \leq 0.85$ and lie at least $0.05$ below the positive score in cosine similarity (absolute margin) preventing trivially easy or falsely relevant negatives from polluting training that would under-mine the effectiveness of the fine-tuning.
+Training examples are query-document pairs with binary labels: a positive document is the gold source paper associated with the query, while negative documents are hard negatives mined automatically using \texttt{sentence-transformers/static-retrieval-mrl-en-v1} \cite{static-retrieval-mrl-en-v1, reimers-2019-sentence-bert, kusupati2024matryoshka}. Hard negatives are selected from the range $[5, 50]$ nearest neighbors (by embedding similarity) that satisfy $\text{score} \leq 0.85$ and lie at least $0.05$ below the positive score in cosine similarity (absolute margin) preventing trivially easy or falsely relevant negatives from polluting training that would under-mine the effectiveness of the fine-tuning.
 
 Training data combines two years of the task:
 \begin{itemize}
