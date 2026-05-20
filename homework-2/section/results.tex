@@ -184,7 +184,7 @@ baseline but below the retained fine-tuned model.
 
 \begin{figure*}[t]
     \centering
-    \begin{subfigure}[t]{0.65\textwidth}
+    \begin{subfigure}[t]{\textwidth}
         \centering
         \includegraphics[width=\linewidth]{../results/statistics/en_train_all_systems/plots/mean_metric_overview.png}
         \caption{English TRAIN.}
@@ -192,7 +192,7 @@ baseline but below the retained fine-tuned model.
 
     \vspace{0.8em}
 
-    \begin{subfigure}[t]{0.65\textwidth}
+    \begin{subfigure}[t]{.75\textwidth}
         \centering
         \includegraphics[width=\linewidth]{../results/statistics/en_dev_all_systems/plots/mean_metric_overview.png}
         \caption{English DEV.}
@@ -343,13 +343,13 @@ reranking more candidates with the untuned model.
 
 \begin{figure*}[htbp]
     \centering
-    \begin{subfigure}[t]{0.49\textwidth}
+    \begin{subfigure}[t]{0.4\textwidth}
         \centering
         \includegraphics[width=\linewidth]{../results/statistics/en_train_all_systems/plots/mrr5/mrr5_baseline_delta.png}
         \caption{English TRAIN, relative to \texttt{bge\_m3\_hybrid\_315}.}
     \end{subfigure}
     \hfill
-    \begin{subfigure}[t]{0.49\textwidth}
+    \begin{subfigure}[t]{0.59\textwidth}
         \centering
         \includegraphics[width=\linewidth]{../results/statistics/en_dev_all_systems/plots/mrr5/mrr5_baseline_delta.png}
         \caption{English DEV, relative to the GTE/ModernBERT baseline.}
