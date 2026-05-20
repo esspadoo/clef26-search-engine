@@ -171,9 +171,41 @@ Operationally, the submission is complete: all 8172 official test queries have o
 
 We separate descriptive evidence from hypothesis testing. The descriptive part characterizes the distribution of per-query MRR@5 scores, while the paired tests compare systems on the same queries. This is important because aggregate metrics alone hide whether an improvement is broad across many queries or concentrated in a smaller number of large corrections. The tests below are restricted to runs for which ranked outputs are available; the aggregate-only rows in Table~\ref{tab:aggregate-rerankers} should be tested in the same way once their per-query outputs are restored.
 
+The full plot sets generated for the English \texttt{train\_set} and \texttt{dev\_set} make the same progression visible
+at a glance. Figure~\ref{fig:stat-overview} summarizes the mean scores for all reported metrics. On the English training split,
+the hybrid retrievers form a tight cluster around MRR@5 $\approx 0.51$--$0.56$ and Recall@100 $\approx 0.83$--$0.84$, whereas
+every reranked variant moves the full metric profile upward. The strongest overall training run remains the top-1000 Nemotron reranker,
+which combines the highest MRR@5, MAP, and nDCG values with Recall@100 above 0.91. On the English development split,
+the same pattern holds on a smaller comparison set: the fine-tuned Nemotron LoRA run is the strongest system on every
+reported metric, while the untuned Nemotron baselines and the alternative LoRA run remain clearly above the GTE/ModernBERT
+baseline but below the retained fine-tuned model.
+
+\begin{figure*}[t]
+    \centering
+    \begin{subfigure}[t]{0.65\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{../results/statistics/en_train_all_systems/plots/mean_metric_overview.png}
+        \caption{English TRAIN.}
+    \end{subfigure}
+
+    \vspace{0.8em}
+
+    \begin{subfigure}[t]{0.65\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{../results/statistics/en_dev_all_systems/plots/mean_metric_overview.png}
+        \caption{English DEV.}
+    \end{subfigure}
+    \caption{Overview heatmaps of the mean metric values produced by the statistical-analysis runs.
+                Each cell reports the average per-query score for one system and metric.}
+    \label{fig:stat-overview}
+\end{figure*}
+
 \subsubsection*{Descriptive statistics}
 
-Table~\ref{tab:mrr-descriptive-stats} reports per-query MRR@5 statistics for the retained hybrid run and the Nemotron reranking depths. The reranker changes the distribution, not only the mean: the median rises from 0.5 for \texttt{H513} to 1.0 for all Nemotron runs, and the first quartile rises from 0.0 to 0.25 after reranking. This means that at least 75\% of queries receive a non-zero MRR@5 score after reranking, whereas the hybrid-only system still has a first quartile of zero.
+Table~\ref{tab:mrr-descriptive-stats} reports per-query MRR@5 statistics for the retained hybrid run and the Nemotron
+reranking depths. The reranker changes the distribution, not only the mean: the median rises from 0.5 for \texttt{H513}
+to 1.0 for all Nemotron runs, and the first quartile rises from 0.0 to 0.25 after reranking. This means that at least 75\%
+of queries receive a non-zero MRR@5 score after reranking, whereas the hybrid-only system still has a first quartile of zero.
 
 \begin{table*}[htbp]
     \centering
@@ -193,6 +225,39 @@ Table~\ref{tab:mrr-descriptive-stats} reports per-query MRR@5 statistics for the
     \end{tabular}%
     }
 \end{table*}
+
+Figure~\ref{fig:mrr-mean-ci} provides a direct visual comparison across the English statistical-analysis runs; on the training split the confidence
+intervals of \texttt{H315} and \texttt{H513} nearly coincide, confirming that the two retained hybrid settings are essentially
+tied on MRR@5 even though they differ slightly in Recall@100. The same figure also shows that the gain from reranking is
+not marginal: the Nemotron family shifts the mean from roughly 0.56 to roughly 0.69--0.70. On the development split,
+the fine-tuned Nemotron LoRA model reaches 0.716 MRR@5 with a 95\% interval of [0.703, 0.729], clearly above the GTE/ModernBERT
+baseline and modestly above the untuned Nemotron runs.
+
+\begin{figure*}[htbp]
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{../results/statistics/en_train_all_systems/plots/mrr5/mrr5_mean_ci.png}
+        \caption{English TRAIN.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{../results/statistics/en_dev_all_systems/plots/mrr5/mrr5_mean_ci.png}
+        \caption{English DEV.}
+    \end{subfigure}
+    \caption{Mean MRR@5 with normal-approximation 95\% confidence intervals for the English TRAIN and DEV statistical-analysis runs.}
+    \label{fig:mrr-mean-ci}
+\end{figure*}
+
+The distributional plot in Figure~\ref{fig:mrr-boxplot-train} makes the change in query-level behavior easier to interpret. The hybrid runs all retain a first quartile at zero and a median near 0.5, which means that many queries still miss the correct paper in the top ranks. By contrast, the deeper Nemotron rerankers move the median to 1.0 and the first quartile to 0.25, so the improvement is not limited to a few outliers: a broad portion of the query set benefits from reranking.
+
+\begin{figure*}[htbp]
+    \centering
+    \includegraphics[width=0.88\textwidth]{../results/statistics/en_train_all_systems/plots/mrr5/mrr5_boxplot.png}
+    \caption{Per-query MRR@5 distribution on the English TRAIN split. The reranked systems shift both the median and the lower quartile upward relative to the hybrid-only runs.}
+    \label{fig:mrr-boxplot-train}
+\end{figure*}
 
 \subsubsection*{Rank-bucket and error analysis}
 
@@ -258,7 +323,54 @@ Table~\ref{tab:paired-tests} reports paired sign tests on per-query MRR@5 differ
     }
 \end{table*}
 
-The comparison between \texttt{H513} and \texttt{N1000} is both statistically and practically meaningful: the confidence interval is far from zero, and many more queries improve than worsen. The comparison between \texttt{N100} and \texttt{N500} is smaller but still meaningful, confirming that exposing more candidates to the reranker helps. By contrast, \texttt{N500} versus \texttt{N1000} is not practically stable for MRR@5. The mean difference is slightly positive, but the confidence interval crosses zero and more individual queries worsen than improve. The value of \texttt{N1000} is therefore mainly its higher Recall@100, not a clear early-rank advantage. Finally, \texttt{H315} and \texttt{H513} are statistically indistinguishable in MRR@5, so the choice of \texttt{H513} is justified by its slightly stronger candidate-generation recall rather than by early precision.
+The comparison between \texttt{H513} and \texttt{N1000} is both statistically and practically meaningful: the confidence
+interval is far from zero, and many more queries improve than worsen. The comparison between \texttt{N100} and \texttt{N500}
+is smaller but still meaningful, confirming that exposing more candidates to the reranker helps. By contrast, \texttt{N500}
+versus \texttt{N1000} is not practically stable for MRR@5. The mean difference is slightly positive, but the confidence
+interval crosses zero and more individual queries worsen than improve. The value of \texttt{N1000} is therefore mainly
+its higher Recall@100, not a clear early-rank advantage. Finally, \texttt{H315} and \texttt{H513} are statistically
+indistinguishable in MRR@5, so the choice of \texttt{H513} is justified by its slightly stronger candidate-generation
+recall rather than by early precision.
+
+The plot-based paired comparisons tell the same story. Figure~\ref{fig:mrr-baseline-delta} reports the mean MRR@5 gain
+over a reference baseline for each split. On the training split, all Nemotron rerankers improve substantially over the
+baseline retriever, with gains between roughly +0.128 and +0.145 MRR@5; the largest shift is again the top-1000 reranker.
+On the development split, every Nemotron-based system improves over the GTE/ModernBERT baseline, but the fine-tuned LoRA
+model produces the largest mean gain, approximately +0.082 MRR@5. This confirms that fine-tuning helps beyond simply
+reranking more candidates with the untuned model.
+
+\begin{figure*}[htbp]
+    \centering
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{../results/statistics/en_train_all_systems/plots/mrr5/mrr5_baseline_delta.png}
+        \caption{English TRAIN, relative to \texttt{bge\_m3\_hybrid\_315}.}
+    \end{subfigure}
+    \hfill
+    \begin{subfigure}[t]{0.49\textwidth}
+        \centering
+        \includegraphics[width=\linewidth]{../results/statistics/en_dev_all_systems/plots/mrr5/mrr5_baseline_delta.png}
+        \caption{English DEV, relative to the GTE/ModernBERT baseline.}
+    \end{subfigure}
+    \caption{Mean MRR@5 difference versus the reference baseline on the English TRAIN and DEV splits. Error bars show the
+                95\% confidence interval of the paired mean difference.}
+    \label{fig:mrr-baseline-delta}
+\end{figure*}
+
+Figure~\ref{fig:mrr-significance-train} summarizes the Holm-corrected pairwise Wilcoxon results for MRR@5 on the English
+training split. Most cells are significant after correction, which means that the major differences visible in the
+aggregate tables are also supported at query level. The most informative exceptions are exactly the close cases discussed
+above: \texttt{H315} versus \texttt{H513} is not significant, \texttt{nemotron\_topk400} versus \texttt{rer\_bge\_m3\_hybrid\_513\_nemotron}
+is not significant, and the contrast between the top-500 and top-1000 Nemotron rerankers is only marginal after Holm correction ($p=0.050$).
+
+\begin{figure*}[htbp]
+    \centering
+    \includegraphics[width=0.78\textwidth]{../results/statistics/en_train_all_systems/plots/mrr5/mrr5_holm_pvalues.png}
+    \caption{Holm-adjusted pairwise Wilcoxon $p$-values for MRR@5 on the English TRAIN split. Red cells indicate statistically
+                reliable differences after multiple-comparison correction; green cells indicate that the two systems cannot
+                be separated reliably on per-query MRR@5.}
+    \label{fig:mrr-significance-train}
+\end{figure*}
 
 ANOVA and Tukey HSD should only be used after checking their assumptions; for discrete per-query MRR@5 scores, paired non-parametric tests and bootstrap confidence intervals are usually the safer choice. For the current official TEST split, however, ANOVA, Tukey HSD, Wilcoxon signed-rank tests, or bootstrap confidence intervals over effectiveness metrics cannot be computed until gold labels are available. Once official qrels are released, the appropriate analysis is a paired per-query test between submitted systems on MRR@5, supplemented by bootstrap confidence intervals and a rank-bucket error table like Table~\ref{tab:rank-bucket-analysis}.
 
