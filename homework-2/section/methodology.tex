@@ -135,23 +135,25 @@ The largest weight is assigned to the dense score because it provides the main s
 
 
 \subsection{Reranking} \label{sub:reranking}
-
-The reranking stage receives the candidate list produced by the hybrid retriever and reorders it using cross-encoder models. Its goal is to improve early precision, especially MRR@5, while preserving as much recall as possible from the first stage.
-
 \subsubsection*{Cross-encoder scoring}
 Our strongest single-stage reranker is \texttt{nvidia/llama-nemotron-rerank-1b-v2}, a 1B-parameter LLaMA-based model fine-tuned as a sequence classifier. For each query-document pair, we build an input sequence using the official NVIDIA prompt template:
 \begin{promptbox}
     \small\ttfamily
     question:\{query\} \textbackslash n \textbackslash n passage:\{passage\}
 \end{promptbox}
-The model computes a scalar logit $z \in \mathbb{R}$ through a linear classification head applied to the final hidden state, and the relevance score is obtained by applying a sigmoid:
+The model computes a scalar logit $z \in \mathbb{R}$ through a linear classification head applied to the final hidden state and the relevance score is obtained by applying a sigmoid:
 \[
     s(q, d) = \sigma(z) = \frac{1}{1 + e^{-z}}
 \]
 Documents are then sorted in descending order of $s(q, d)$.
-In practice, reranking deeper candidate pools (500--2500 documents) consistently produced better final results than shallower pools, confirming the importance of high recall at the retrieval stage to compensate for miss-labeling from weaker previous retrieval-stages. At this stage, queries are evaluated against the corpus of the documents taking into account their title, abstract and author.
+In practice, reranking deeper candidate pools (500-2500 documents) consistently produced better final results than shallower pools, confirming the importance of high recall at the retrieval stage to compensate for miss-labeling from weaker previous retrieval-stages. At this stage, queries are evaluated against the corpus of the documents taking into account their title, abstract and author.
 
-We also evaluated alternative rerankers, including Qwen3 and GTE-ModernBERT variants
+We also evaluated alternative rerankers, including Qwen3 and GTE-ModernBERT variants.
+
+DA AGGIUNGERE TABELLA
+DA AGGIUNGERE TABELLA
+DA AGGIUNGERE TABELLA
+DA AGGIUNGERE TABELLA
 
 \subsection{Fine-tuning the Reranker} \label{sub:finetuning}
 To improve the Nemotron reranker on the domain-specific characteristics of the CheckThat! task, we fine-tuned \texttt{nvidia/llama-nemotron-rerank-1b-v2} using Parameter-Efficient Fine-Tuning (PEFT) with Low-Rank Adaptation (LoRA) on data from both the 2025 and 2026 editions of the task.
