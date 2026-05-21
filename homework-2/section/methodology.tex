@@ -2,18 +2,15 @@
 \label{sec:methodology}
 
 We started from a lexical baseline based on Apache Lucene BM25 and progressively moved to a multi-stage neural pipeline.
-Early experiments focused on analyzer choices, stopword lists, and BM25 variants. These runs were useful for establishing a stable baseline, but they also showed that lexical overlap alone is insufficient for this task.
+Early experiments focused on analyzer choices, stopword lists, and BM25 variants.
 \newline
 We adopted a four-stage pipeline (Figure~\ref{fig:pipeline}) for the proposed information retrieval system, consisting of:
 \begin{itemize}
     \item \textbf{Query translation}: queries in French or German are first translated into English.
-    \item \textbf{Query expansion}: we expanded the English query with additional context to bridge the gap between informal and domain specific language.
-    \item \textbf{Retrieval}: we retrieved relevant documents from the corpus using the expanded query.
-    \item \textbf{Reranking}: we reranked the retrieved documents based on their relevance to the original query.
+    \item \textbf{Query expansion}: queries are expanded with additional context to bridge the gap between informal and domain specific language.
+    \item \textbf{Retrieval}: relevant documents are retrieved from the corpus using the expanded query.
+    \item \textbf{Reranking}: the retrieved documents are reranked based on their relevance to the original query.
 \end{itemize}
-For each of these stages, we experimented with different models and kept the ones that performed best.
-
-The following sections explain the four stages in detail.
 
 \begin{figure}[htbp]
     \centering
@@ -46,7 +43,7 @@ The resulting English queries are then fed into the following step of our pipeli
 
 \subsection{Query Expansion} \label{sub:query-expansion}
 
-Following the translation stage, each query is processed by a deterministic query-expansion module designed to reduce query–document vocabulary mismatch between short user claims and the terminology used in the scientific corpus. The module does not rely on generative LLM-based paraphrasing. Instead, it combines lexical feature extraction with dense semantic retrieval and neighborhood-based term induction. This design is consistent with the established role of query expansion in mitigating vocabulary mismatch in information retrieval and with the use of embedding models for semantic search.
+Following the translation stage, each query is processed by a deterministic query-expansion module designed to reduce query–document vocabulary mismatch between short user claims and the terminology used in the scientific corpus. The module does not rely on generative LLM-based paraphrasing. Instead, it combines lexical feature extraction with dense semantic retrieval and neighborhood-based term induction. 
 
 \begin{itemize}
     \item The translated English query is first analyzed with spaCy’s \texttt{en\_core\_web\_sm} pipeline, which provides token-level linguistic annotations, including stop-word indicators and coarse-grained part-of-speech labels from the Universal POS tag set. Candidate lexical anchors are then identified by retaining tokens tagged as NOUN or PROPN while excluding stop words and tokens shorter than three characters. The resulting set is deduplicated to produce a compact lexical signature that captures the principal nominal content of the query.
@@ -56,7 +53,7 @@ Following the translation stage, each query is processed by a deterministic quer
     Because embeddings \(e = \frac{v}{\lVert v\rVert_2}\) are L2-normalized \(e_q^\top e_d = \cos(q,d)\) \cite{bge_large_model_card}.\\
     The five highest-scoring documents are retained as the local semantic neighborhood used for expansion.
 
-    In the described implementation, candidate expansion terms are extracted from the retrieved documents after lowercasing, ASCII normalization, mention and hashtag removal, stop-word filtering, and exclusion of short tokens. The candidate pool is aggregated across the retrieved neighborhood and assigned coarse weights derived from the semantic similarity of the source documents, so that terms originating from more similar neighbors contribute more strongly. Terms already present in the query are removed and the fifteen highest-ranking candidates are retained as explicit expansion terms.
+    In the described implementation, candidate expansion terms are extracted from the retrieved documents after lowercasing, ASCII normalization, mention's and hashtag's symbols removal, stop-word filtering, and exclusion of short tokens. The candidate pool is aggregated across the retrieved neighborhood and assigned weights derived from the semantic similarity of the source documents so that terms originating from more similar neighbors contribute more strongly. Terms already present in the query are removed and the fifteen highest-ranking candidates are retained as explicit expansion terms.
     \[
         K=\operatorname{unique}\{\ell(t): POS(t)\in\{\mathrm{NOUN},\mathrm{PROPN}\},\neg stop(t), |t|>2\}
     \]
@@ -70,74 +67,11 @@ Following the translation stage, each query is processed by a deterministic quer
 The final expanded query is constructed by concatenating three components: the cleaned translated query, the noun and proper-noun-based keyword set extracted directly from the query and the expansion terms induced from the retrieved document neighbourhood.
 This output expanded query is then used by the downstream retrieval pipeline.
 
-Before settling on this query expansion strategy, we also tried two LLM models to see if they could improve our performance, \texttt{meta-llama/Llama-3.2-1B} and \texttt{openai/gpt-oss-20b}, with the following prompt:
-\begin{promptbox}
-    \small
-    \ttfamily
-    \begin{flushleft}
-        \textit{system:} ``Reasoning: \{reasoning\_effort\}''\\
-        You are a strict JSON-only retrieval query expansion generator.\\
-        Return the final answer only as valid JSON.\\[0.8em]
-
-        \textit{user:} You generate retrieval-specific query expansions.\\[0.5em]
-
-        Return only one valid JSON object with exactly these string fields:\\
-        \{\\
-        \hspace*{1em}``keywords'': ``\ldots'',\\
-        \hspace*{1em}``sparse'': ``\ldots'',\\
-        \hspace*{1em}``embedding'': ``\ldots'',\\
-        \hspace*{1em}``colbert'': ``\ldots'',\\
-        \hspace*{1em}``expanded'': ``\ldots''\\
-        \}\\[0.8em]
-
-        Rules:\\
-        -- Do not include markdown, code fences, emoji, commentary, arrays, or nested objects.\\
-        -- All five values must be strings.\\
-        -- Do not hallucinate facts.\\
-        -- Do not translate unless translation is already present in the query.\\
-        -- Preserve original-language terms.\\
-        -- \texttt{keywords}: compact important terms only; entities, nouns, technical terms, names, locations, dates, identifiers, acronyms, modifiers; no sentence.\\
-        -- \texttt{sparse}: lexical BM25/SPLADE-style expansion; exact-match terms, synonyms, acronyms, aliases, spelling and morphology variants; phrase fragments separated by spaces or semicolons; no long prose.\\
-        -- \texttt{embedding}: concise HyDE/query2doc-style natural-language semantic pseudo-document; include intent, context, and likely relevant-document framing.\\
-        -- \texttt{colbert}: concise late-interaction expansion; preserve important tokens and entities; add focused context and aliases; avoid synonym spam.\\
-        -- \texttt{expanded}: readable general-purpose merged expansion string combining the useful hints from the other fields.
-    \end{flushleft}
-\end{promptbox}
-This approach, which used a different expansion for each retrieval representation, did not improve performance. We therefore retained the simpler and more effective configuration based on a single expanded query. Section~\ref{sub:retrieval} describes in more detail how these expansion strategies were evaluated during retrieval.
-%Originally, we experimented with PRF-style expansion using semantic retrieval with \texttt{BAAI/bge-large-en-v1.5}.
-% We then explored different methods for expansion,
-% including Pseudo-Relevance Feedback (PRF) and similarity with static word embeddings using Word2Vec,
-% testing these on both the original and the preliminary expanded queries.\newline
-
-% In the final architecture, we used a multilingual LLM-based expansion script (\texttt{query\_expansion\_multilingual.py},
-% default model \texttt{meta-llama/Llama-3.2-1B}) to generate multiple retrieval-oriented views of each query.
-% The model is prompted to produce distinct representations,
-% tailored to our multi-stage retrieval needs:
-% \begin{itemize}
-%     \item \textit{sparse}: A list of domain-specific keywords and technical synonyms (e.g., scientific nomenclature)
-%     designed to maximize lexical overlap and mitigate the vocabulary mismatch in BM25-based retrieval.
-%     \item \textit{dense}: A semantically enriched re-phrasing of the claim that provides a broader context, allowing the
-%     bi-encoder in the next step of the architecture to produce more robust embeddings in the high-dimensional vector space.
-%     \item \textit{ColBERT}: A structured, formal version of the claim (e.g., ``Serum levels and ICU admission'') that provides coherent
-%     token sequences for fine-grained late-interaction scoring.
-% \end{itemize}
-
-% This multi-view expansion ensures that the downstream hybrid retriever can leverage both high-precision lexical matches
-% and broad semantic overlaps. By generating these representations simultaneously within a single inference step of
-% the same LLM,
-% we maintain a coherent relationship between the different query ``views'', effectively providing a unified but multi-faceted
-% context for the retrieval pipeline.\newline
-
-% The resulting expanded queries are then fed into the multi-stage retrieval framework described next.
 
 \subsection{Retrieval} \label{sub:retrieval}
-The retrieval stage is designed as a high-recall candidate-generation step between query expansion and neural reranking. Its objective is not to make the final relevance decision but to ensure that the true source paper is included in a sufficiently large candidate set for the subsequent, more computationally expensive cross-encoder stage. For this reason, after experimenting with a Lucene BM25 baseline, BGE-M3 using dense vectors only and other bi-encoder models, the final pipeline adopts \textbf{BAAI/bge-m3} in a hybrid retrieval setting.
+The retrieval stage is designed as a high-recall candidate-generation step between query expansion and neural reranking. Its objective is not to make the final relevance decision but to ensure that the true source paper is included in a sufficiently large candidate set for the subsequent, more computationally expensive cross-encoder stage. For this reason, after experimenting with a Lucene BM25 baseline, the final pipeline adopts \textbf{BAAI/bge-m3} in a hybrid retrieval setting.
 
-This choice reflects the nature of the task. Social media claims often contain informal paraphrases, hashtags, named entities, numerical values and fragments of scientific terminology. Therefore, relying exclusively on exact lexical overlap or exclusively on dense semantic similarity may discard useful evidence. Hybrid retrieval is better suited to this setting because it combines complementary retrieval signals and can offer higher accuracy and stronger generalization capabilities~\cite{bge-m3}.
-
-The retriever searches the fixed paper collection provided by the task organizers. Each paper is represented at document level by concatenating its title and abstract and the retrieved unit is always the paper \texttt{pubkey}. We did not split papers into smaller chunks because the task requires identifying the source publication rather than retrieving a specific evidence passage. Using one representation per paper also avoids an additional chunk-to-document aggregation step. Although the collection includes metadata such as venue and authors, this hybrid retrieval stage uses only titles and abstracts to speed up the inference time.
-
-All input queries are converted into plain English, either because they are originally written in English or because they are translated before retrieval, see Section~\ref{sub:querytransl}. They are then expanded using the procedure described in Sections~\ref{sub:query-expansion}.
+The retriever searches the fixed paper collection provided by the task organizers. Each paper is represented at document level by concatenating its title and abstract (batch size = 1024) and the retrieved unit is always the paper \texttt{pubkey}. Although the collection includes metadata such as venue and authors, this hybrid retrieval stage uses only titles and abstracts to speed up the inference time.
 
 We chose \textbf{BAAI/bge-m3} because it is well suited to this retrieval setting. The model can produce dense vectors, sparse lexical weights and ColBERT-style multi-vector representations from the same encoder.\\
 This allows the retriever to combine broad semantic matching, exact term evidence and fine-grained token-level matching without switching between unrelated encoders.\\
@@ -181,7 +115,7 @@ The ColBERT-style late-interaction score is computed as \cite{khattab2020colbert
 
 The final configuration was selected through a series of development runs. We first tuned the lexical baseline by varying the Lucene analyzer, stop-word lists, stemming strategy and BM25 searcher variants. These experiments improved the classical baseline but also highlighted its limitations for this task: even with query expansion and reranking, BM25-based candidate generation remained more dependent on surface-level lexical overlap than desired.
 
-We then evaluated dense retrieval with several bi-encoder models. Among these, \textbf{BAAI/bge-m3} achieved the strongest performance and improved the semantic coverage of the candidate set, particularly for paraphrased and multilingual claims. We also tested BGE-M3 in a hybrid retrieval setting, using a setup that differed slightly from the final configuration. In those experiments, sparse, dense, and ColBERT-style retrieval were performed using dedicated query expansions tailored to each retrieval mode. More specifically, each query was represented through three complementary views: an embedding view for semantic matching, a sparse view for lexical and term-based evidence, and a ColBERT view for fine-grained token-level interaction.
+We then evaluated dense retrieval with several bi-encoder models. Among these, \textbf{BAAI/bge-m3} achieved the strongest performance and improved the semantic coverage of the candidate set, particularly for paraphrased and multilingual claims. We also tested BGE-M3 in a hybrid retrieval setting, using a setup that differed slightly from the final configuration. In those experiments, sparse, dense and ColBERT-style retrieval were performed using dedicated query expansions tailored to each retrieval mode. More specifically, each query was represented through three complementary views: an embedding view for semantic matching, a sparse view for lexical and term-based evidence, and a ColBERT view for fine-grained token-level interaction.
 
 However, the best results in our analysis were obtained with a simpler configuration in which BGE-M3 hybrid retrieval used the same expanded query, described in the previous section, for all three retrieval modes. We then tested several weighting configurations. Among them, the run labelled \texttt{bge\_m3\_hybrid\_513} was retained because it provided the strongest recall-oriented trade-off among the retrievers evaluated without reranking. This configuration used weights of $0.5$, $0.15$ and $0.35$ for dense, sparse, and ColBERT scoring, respectively, with a multiplier of $3$ and a maximum hybrid input length of $384$.
 
@@ -201,23 +135,25 @@ The largest weight is assigned to the dense score because it provides the main s
 
 
 \subsection{Reranking} \label{sub:reranking}
-
-The reranking stage receives the candidate list produced by the hybrid retriever and reorders it using cross-encoder models. Its goal is to improve early precision, especially MRR@5, while preserving as much recall as possible from the first stage.
-
 \subsubsection*{Cross-encoder scoring}
 Our strongest single-stage reranker is \texttt{nvidia/llama-nemotron-rerank-1b-v2}, a 1B-parameter LLaMA-based model fine-tuned as a sequence classifier. For each query-document pair, we build an input sequence using the official NVIDIA prompt template:
 \begin{promptbox}
     \small\ttfamily
     question:\{query\} \textbackslash n \textbackslash n passage:\{passage\}
 \end{promptbox}
-The model computes a scalar logit $z \in \mathbb{R}$ through a linear classification head applied to the final hidden state, and the relevance score is obtained by applying a sigmoid:
+The model computes a scalar logit $z \in \mathbb{R}$ through a linear classification head applied to the final hidden state and the relevance score is obtained by applying a sigmoid:
 \[
     s(q, d) = \sigma(z) = \frac{1}{1 + e^{-z}}
 \]
 Documents are then sorted in descending order of $s(q, d)$.
-In practice, reranking deeper candidate pools (500--2500 documents) consistently produced better final results than shallower pools, confirming the importance of high recall at the retrieval stage to compensate for miss-labeling from weaker previous retrieval-stages. At this stage, queries are evaluated against the corpus of the documents taking into account their title, abstract and author.
+In practice, reranking deeper candidate pools (500-2500 documents) consistently produced better final results than shallower pools, confirming the importance of high recall at the retrieval stage to compensate for miss-labeling from weaker previous retrieval-stages. At this stage, queries are evaluated against the corpus of the documents taking into account their title, abstract and author.
 
-We also evaluated alternative rerankers, including Qwen3 and GTE-ModernBERT variants
+We also evaluated alternative rerankers, including Qwen3 and GTE-ModernBERT variants.
+
+DA AGGIUNGERE TABELLA
+DA AGGIUNGERE TABELLA
+DA AGGIUNGERE TABELLA
+DA AGGIUNGERE TABELLA
 
 \subsection{Fine-tuning the Reranker} \label{sub:finetuning}
 To improve the Nemotron reranker on the domain-specific characteristics of the CheckThat! task, we fine-tuned \texttt{nvidia/llama-nemotron-rerank-1b-v2} using Parameter-Efficient Fine-Tuning (PEFT) with Low-Rank Adaptation (LoRA) on data from both the 2025 and 2026 editions of the task.
