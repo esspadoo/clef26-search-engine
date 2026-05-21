@@ -150,27 +150,22 @@ In practice, reranking deeper candidate pools (500-2500 documents) consistently 
 
 We also evaluated alternative rerankers, including Qwen3 and GTE-ModernBERT variants.
 
-DA AGGIUNGERE TABELLA
-DA AGGIUNGERE TABELLA
-DA AGGIUNGERE TABELLA
-DA AGGIUNGERE TABELLA
-
 \subsection{Fine-tuning the Reranker} \label{sub:finetuning}
 To improve the Nemotron reranker on the domain-specific characteristics of the CheckThat! task, we fine-tuned \texttt{nvidia/llama-nemotron-rerank-1b-v2} using Parameter-Efficient Fine-Tuning (PEFT) with Low-Rank Adaptation (LoRA) on data from both the 2025 and 2026 editions of the task.
 
 \subsubsection*{Training data and hard-negative mining}
-Training examples are query-document pairs with binary labels: a positive document is the gold source paper associated with the query, while negative documents are hard negatives mined automatically using \texttt{sentence-transformers/static-retrieval-mrl-en-v1} \cite{static-retrieval-mrl-en-v1, reimers-2019-sentence-bert, kusupati2024matryoshka}. Hard negatives are selected from the range $[5, 50]$ nearest neighbors (by embedding similarity) that satisfy $\text{score} \leq 0.85$ and lie at least $0.05$ below the positive score in cosine similarity (absolute margin) preventing trivially easy or falsely relevant negatives from polluting training that would under-mine the effectiveness of the fine-tuning.
+Training examples are query-document pairs with binary labels: a positive document is the gold source paper associated with the query, while negative documents are hard negatives mined using \texttt{sentence-transformers/static-retrieval-mrl-en-v1} \cite{static-retrieval-mrl-en-v1, reimers-2019-sentence-bert, kusupati2024matryoshka}. Hard negatives are selected from the range $[5, 50]$ nearest neighbors (by embedding similarity) that satisfy $\text{score} \leq 0.85$ and lie at least $0.05$ below the positive score in cosine similarity (absolute margin) preventing trivially easy or falsely relevant negatives from polluting training that would under-mine the effectiveness of the fine-tuning.
 
 Training data combines two years of the task:
 \begin{itemize}
-    \item \textbf{2026 data}: split 90\% training / 10\% development. The development set is drawn exclusively from 2026 data for consistency with the official CT26 Task~1 evaluation protocol. Due to time-constraints we used just the en\_train datasets but we suppose that also German and French translated queries datasets could improve the quality of the fine-tuning;
-    \item \textbf{2025 data}: all available topics (dev, test-gold, and train splits) are used entirely for training, never for development.
+    \item \textbf{2026 data}: split 90\% training / 10\% development. The development set is drawn exclusively from 2026 data for consistency with the official CT26 Task~1 evaluation protocol. Due to time-constraints we used just the en\_train dataset but we suppose that also German and French translated queries datasets could improve the quality of the fine-tuning;
+    \item \textbf{2025 data}: all available topics (dev, test-gold and train splits) are used entirely for training.
 \end{itemize}
 This design ensures that the dev set used to track MRR@5 during training is distribution-aligned with the contest test queries. Each training record contains one query, one positive passage and up to five hard negatives.
 
 \subsubsection*{LoRA architecture}
 To fine-tune the 1B-parameter base model with limited GPU memory, we apply LoRA~\cite{hu2022lora} with rank $r = 16$ and scaling factor $\alpha = 32$. Adapters are inserted into all attention and feed-forward projection layers:
-\texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj}, \texttt{o\_proj}, \texttt{gate\_proj}, \texttt{up\_proj}, and \texttt{down\_proj}.
+\texttt{q\_proj}, \texttt{k\_proj}, \texttt{v\_proj}, \texttt{o\_proj}, \texttt{gate\_proj}, \texttt{up\_proj} and \texttt{down\_proj}.
 The classification head (\texttt{score}) is included in
 \texttt{modules\_to\_save} and is fully updated during training. The task type is \texttt{SEQ\_CLS}, matching the sequence-classification objective of the reranker.
 
@@ -185,13 +180,13 @@ positive ($y=1$) and negative ($y=0$) pairs in each batch:
 where $B$ is the effective batch size and $\sigma$ is the sigmoid function. Gradient accumulation over 4 steps is used to simulate a larger effective batch size of 32 without additional memory overhead.
 
 \subsubsection*{Optimization}
-The model is trained with AdamW, a learning rate of $2 \times 10^{-5}$, a linear warmup over 10\% of the total training steps, and gradient clipping at norm 1.0. Training runs for 3 epochs with bfloat16 mixed precision and gradient checkpointing enabled to reduce VRAM usage. The checkpoint with the best MRR@5 on the 2026 development set is retained.
+The model is trained with AdamW, a learning rate of $2 \times 10^{-5}$, a linear warmup over 10\% of the total training steps and gradient clipping at norm 1.0. Training runs for 3 epochs with bfloat16 mixed precision and gradient checkpointing enabled to reduce VRAM usage. The checkpoint with the best MRR@5 on the 2026 development set is retained.
 
 \subsubsection*{Inference}
 At inference time, the LoRA adapter weights are merged into the base model via \texttt{merge\_and\_unload()} before scoring, so no PEFT overhead is incurred during evaluation. The scoring procedure and prompt format are identical to those of the base reranker (Section~\ref{sub:reranking}) and the fine-tuned model is used as a drop-in replacement in the reranking stage.
 
 \subsection{Evaluation}
-We evaluate systems on the CheckThat! Task 1 query sets by matching retrieved \texttt{pubkey}s against the gold \texttt{pubkey} for each query. The official optimization target is MRR@5, which we use as the primary score during model and parameter selection. In parallel, we track Recall@100 to monitor candidate-generation quality and to verify that reranking gains do not come from overly aggressive filtering.
+We evaluate systems on the CheckThat! Task 1 query sets by matching retrieved \texttt{pubkey}s against the gold \texttt{pubkey} for each query. The official the evaluation metric for the task is MRR@5. We also tracked Recall@100 to monitor candidate-generation quality and to verify that reranking gains do not come from overly aggressive filtering.
 
 For internal analysis, our evaluator also computes additional ranking metrics (e.g., Recall@1/5/10/100, Precision@1/5/10,
 MAP, and nDCG@k). This broader view is useful to interpret trade-offs between recall-oriented retrieval settings and
