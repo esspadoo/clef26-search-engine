@@ -43,7 +43,9 @@ The primary metric is MRR@5, following the task objective. We also report Recall
 \subsection{Run Comparison on the Labeled English Split}
 \label{sub:run-comparison}
 
-Table~\ref{tab:run-comparison} compares the main evaluated configurations. The hybrid runs differ in the linear weights assigned to dense, sparse, and ColBERT-style BGE-M3 signals. The reranking runs use the retained hybrid candidate generator \texttt{H513} and rerank increasingly deep candidate pools with \texttt{nvidia/llama-nemotron-rerank-1b-v2}. The $\Delta$ column is computed against \texttt{H513}, because this is the hybrid configuration used by the submitted reranking pipeline.
+In this section, we further analyze the effects of varying the parameters and pool depth of the main pipeline components.
+All modified parameters are reported in Table~\ref{tab:run-comparison}.
+The hybrid runs differ in the linear weights assigned to dense, sparse, and ColBERT-style BGE-M3 signals. The reranking runs use the retained hybrid candidate generator \texttt{H513} and rerank increasingly deep candidate pools with \texttt{nvidia/llama-nemotron-rerank-1b-v2}. The $\Delta$ column is computed against \texttt{H513}, because this is the hybrid configuration used by the submitted reranking pipeline.
 
 \begin{table*}[htbp]
     \centering
