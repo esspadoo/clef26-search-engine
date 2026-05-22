@@ -7,24 +7,22 @@ First, analyzer and BM25 tuning provide a useful lexical baseline, especially th
 
 Second, moving to BGE-M3 hybrid retrieval produces a stronger candidate generator: the retained configuration, \texttt{bge\_m3\_hybrid\_513}, reaches 0.557 MRR@5 and 0.839 Recall@100.
 
-Third, reranking the hybrid candidates with \texttt{nvidia/llama-nemotron-rerank-1b-v2} gives the largest observed improvement among the reported single-stage runs, reaching 0.702 MRR@5 and 0.911 Recall@100 when reranking the top 1000 candidates. Alternative rerankers such as Qwen3-reranker-4B and \texttt{Alibaba-NLP/gte-reranker-modernbert-base} also improve over retrieval alone, but remain below the Nemotron runs in the reported MRR@5 values.
+Third, reranking the hybrid candidates with \texttt{nvidia/llama-nemotron-rerank-1b-v2} gives the largest observed improvement among the reported single-stage runs, reaching 0.702 MRR@5 and 0.911 Recall@100 when reranking the top 1000 candidates. Alternative rerankers such as \texttt{Qwen3-reranker-4B} and \texttt{Alibaba-NLP/gte-reranker-modernbert-base} also improve results, but remain below the Nemotron runs in the reported MRR@5 values.
 
-The development results show that fine-tuning the Nemotron reranker is promising. Fine-tuning improves performance by a small but appreciable amount (an average gain of 0.03 MRR@5 points in our experiments). Nevertheless, stronger fine-tuning, not only of the reranker, could plausibly yield better results.
+The development results show that fine-tuning the Nemotron reranker is promising. Fine-tuning improves performance by a small but appreciable amount (an average gain of 0.03 MRR@5 points in our experiments).
 
 
 \subsection{Future Work}
+Several directions emerge for future improvement. 
+First, analyzing and spending more time for a better fine-tuning of the reranker and all other components of the system could bring better results. A lot of techniques like data augmentation can be experimented and there is room for improvement.
 
-Several directions emerge for future improvement. First, deploying a fine-tuned German translation model could mitigate morphological drift and improve the performance of non-English queries. Second, implementing and validating the cascaded reranking configuration documented in Table~\ref{tab:aggregate-rerankers} could yield the highest observed MRR@5 (0.766) on English data, though at increased computational cost.
+A second direction concerns the queries that remain entirely missing after reranking. These cases cannot be recovered by any reranker because the correct publication is absent from the candidate set. Manual inspection of a sample suggests three dominant failure patterns: claims referencing quantitative findings not mentioned in the abstract, implicit references that name no concrete entities and translation drift that changes the intended meaning of domain-specific terms. Addressing the first two patterns would probably require to manage content beyond title, abstract and authors but also other metadata. Addressing the translation failure pattern points toward a dedicated post-editing step or a domain-adapted translation model fine-tuned on biomedical text.
 
-Third, in-depth analysis of the 929 completely missing queries (6.2\% of the English split) could reveal systematic failure modes such as claims referencing methodology or findings not mentioned in paper abstracts, or highly paraphrased social-media versions that bear little lexical resemblance to the original publication.
+Finally, the German dataset achieves MRR@5 of 0.68 in the evaluation results: a wide gap relative to English and French. Controlled ablations that isolate translation errors from retrieval errors would clarify how much of this gap is attributable to the translation stage versus vocabulary mismatch in the retrieval stage itself.
 
-Fourth, incorporating additional document representations such as author lists, publication venues, keywords, or full-text content could enable richer retrieval and reranking signals for claims mentioning specific research groups, conferences, or specialized domains.
-
-Fifth, ensemble approaches that combine predictions from multiple independently fine-tuned rerankers with learned fusion weights might improve robustness and generalization across the multilingual test set.
-
-Finally, analyzing the relationship between query characteristics (length, language, entity density, paraphrase ratio) and retrieval difficulty could inform targeted improvements for challenging query subsets.
 
 \section {Declaration on Generative AI}
 During the writing of this paper the authors used Grammarly and DeepL for grammar and spelling checks and Claude Sonnet 4.6 for writing-style improvement, citation management, and formatting assistance. After using these tools, the authors reviewed and edited the content as needed and take full responsibility for the publication content.
+
 
 \clearpage
