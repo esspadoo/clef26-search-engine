@@ -20,10 +20,10 @@ In the analyzer rows, \texttt{MyEnglishAnalyzer\_V2} denotes the Lucene analyzer
         Analyzer tuning & Analyzer V1.12 & BM25 retrieval with KStem and an EBSCOhost/MEDLINE/CINAHL stoplist variant & 0.450 & 0.783 \\
         Retrieval only & Hybrid A & BGE-M3 hybrid retrieval with dense, sparse, and ColBERT weights of $0.35$, $0.15$, and $0.50$ & 0.557 & 0.837 \\
         Retrieval only & Hybrid B & BGE-M3 hybrid retrieval with dense, sparse, and ColBERT weights of $0.50$, $0.15$, and $0.35$ & 0.557 & 0.839 \\
-        Best model reranking & Nemotron top-400 & \texttt{bge\_m3\_hybrid\_513} candidates reranked with \nolinkurl{nvidia/llama-nemotron-rerank-1b-v2} & 0.694 & 0.893 \\
+        Best model reranking & Nemotron top-100 & \texttt{bge\_m3\_hybrid\_513} candidates reranked with \nolinkurl{nvidia/llama-nemotron-rerank-1b-v2} & 0.691 & 0.839 \\
         Best model reranking & Nemotron top-1000 & \texttt{bge\_m3\_hybrid\_513} candidates reranked with \nolinkurl{nvidia/llama-nemotron-rerank-1b-v2} & 0.702 & 0.911 \\
-        Alternative rerankers & Qwen3-4B & \texttt{bge\_m3\_hybrid\_513} candidates reranked with Qwen3-reranker-4B & 0.662 & 0.839 \\
-        Alternative rerankers & GTE-ModernBERT & \texttt{bge\_m3\_hybrid\_513} candidates reranked with \nolinkurl{Alibaba-NLP/gte-reranker-modernbert-base} & 0.652 & 0.852 \\
+        Alternative rerankers & Qwen3-4B top-100 & \texttt{bge\_m3\_hybrid\_513} candidates reranked with Qwen3-reranker-4B & 0.662 & 0.839 \\
+        Alternative rerankers & GTE-ModernBERT top-100 & \texttt{bge\_m3\_hybrid\_513} candidates reranked with \nolinkurl{Alibaba-NLP/gte-reranker-modernbert-base} & 0.652 & 0.852 \\
         \bottomrule
     \end{tabular}%
     }
@@ -37,11 +37,11 @@ For the runs performed on the \texttt{dev\_set}, we provide a separate multiling
 \subsection{Evaluation Evidence and Metrics}
 \label{sub:results-evidence}
 
-We report three complementary forms of evidence. First, we use the labeled English run-analysis split to compare retrieval and reranking configurations over 14,977 queries. This is the largest labeled split available to us and is therefore the most reliable source for per-query statistical analysis. Second, we validate the final fine-tuned reranker on the labeled multilingual development splits: English, French, and German. Third, we evaluate the final official TEST submission on the gated TEST release available in our local workspace, whose JSON files include the gold \texttt{pubkey} field; this lets us report both submission-shape diagnostics and effectiveness metrics for the final multilingual runs.
+We report three complementary forms of evidence. First, we use the TRAIN English run-analysis split to compare retrieval and reranking configurations over 14,977 queries. This is the largest labeled split available to us and is therefore the most reliable source for per-query statistical analysis. Second, we validate the final fine-tuned reranker on the multilingual DEV splits: English, French, and German. Third, we evaluate the final official TEST submission; this lets us report effectiveness metrics for the final multilingual runs.
 
 The primary metric is MRR@5, following the task objective. We also report Recall@100 to measure whether the correct paper remains in the candidate set, and MAP and nDCG@10 to describe the quality of the ranking beyond the first reciprocal-rank hit. Since each query has a single gold publication in the available labeled files, per-query MRR@5 is zero unless the gold paper appears in the first five positions, and is $1/r$ when the first relevant paper appears at rank $r \leq 5$.
 
-\subsection{Run Comparison on the Labeled English Split}
+\subsection{Run Comparison on the TRAIN English Split}
 \label{sub:run-comparison}
 
 In this section, we further analyze the effects of varying the parameters and pool depth of the main pipeline components.
@@ -51,7 +51,7 @@ The hybrid runs differ in the linear weights assigned to dense, sparse, and ColB
 \begin{table*}[htbp]
     \centering
     \footnotesize
-    \caption{Run comparison on the labeled English split with 14,977 queries. Values are computed from ranked outputs and the corresponding gold labels.}
+    \caption{Run comparison on the TRAIN English split with 14,977 queries. Values are computed from ranked outputs and the corresponding gold labels.}
     \label{tab:run-comparison}
     \resizebox{\textwidth}{!}{%
     \begin{tabular}{p{1.6cm} p{2.4cm} p{5.8cm} r r r r r}
@@ -77,10 +77,11 @@ The largest improvement is introduced by neural reranking. Moving from \texttt{H
 
 Paired Wilcoxon signed-rank tests with Holm correction on per-query MRR@5 corroborate these observations. Specifically: \texttt{H315} vs \texttt{H513} is not significant (Holm-adjusted $p=1.0$). By contrast, \texttt{H513} outperforms \texttt{H424} with a highly significant difference (Holm-adjusted $p\approx 8.58\times10^{-116}$). The improvement from \texttt{H513} to the Nemotron top-1000 reranker is both large and highly significant (mean $\Delta=0.1451$; Holm-adjusted $p=0.0$). The difference between \texttt{N500} and \texttt{N1000} is statistically detectable after Holm correction (Holm-adjusted $p\approx 0.04974$) but its practical magnitude on MRR@5 is negligible ($\Delta\approx 0.0008$), which supports the "diminishing returns" interpretation. For Recall@100 the H513 vs N1000 gain is also significant (Holm-adjusted $p\approx 3.46\times10^{-195}$).
 
-\subsection{Multilingual Development Validation}
+\subsection{Multilingual DEV split Validation}
 \label{sub:multilingual-dev}
 
-Table~\ref{tab:multilingual-dev} reports the final fine-tuned Nemotron LoRA reranker on the multilingual development splits. These data are closer to the official multilingual TEST setting than the English-only run-analysis split, because they include translated French and German queries. The confidence intervals are normal-approximation 95\% intervals over per-query MRR@5 values; they are descriptive rather than official task intervals.
+Table~\ref{tab:multilingual-dev} reports the final fine-tuned Nemotron LoRA reranker on the multilingual development splits. These data are closer to the official multilingual TEST setting than the English-only run-analysis split, because they include translated French and German queries. The confidence intervals are normal-approximation 95\% intervals over per-query MRR@5 values; they are descriptive rather than official task intervals.\\
+To be noted that we we have not performed runs with fine-tuned Nemotron LoRA on the English run-analysis split, so the DEV results cannot be directly compared with the TRAIN runs in Table~\ref{tab:run-comparison}. The DEV results are meant to validate the final pipeline on a multilingual setting, not to compare with the English-only runs. The DEV splits are also smaller than the TRAIN split, which leads to wider confidence intervals and less stable estimates.
 
 \begin{table*}[htbp]
     \centering
@@ -102,38 +103,15 @@ Table~\ref{tab:multilingual-dev} reports the final fine-tuned Nemotron LoRA rera
 
 The development results suggest that the final pipeline generalizes reasonably across languages after translation, but not uniformly. French is the strongest development split, with MRR@5 of 0.7599 and Recall@100 of 0.9288. German is the weakest, with MRR@5 of 0.6736 and the widest confidence interval because it has only 386 labeled queries. This lower German score is a warning for the official TEST set: the German portion is smaller than English but still accounts for 876 of the 8172 test queries, and translation or morphology errors can have a visible effect on aggregate performance.
 
-\subsection{Official Test-Set Submission}
+\subsection{Official TEST set Submission}
 \label{sub:test-results}
 
-The official TEST input used for submission consists of 8172 queries: 6076 in English, 1220 in French, and 876 in German. The corresponding local gated gold release includes the gold \texttt{pubkey} for each query, so the final submission can be evaluated directly. The submitted systems use the same four-stage pipeline described in Section~\ref{sec:methodology}: translate non-English queries into English, expand the query, retrieve candidates with BGE-M3 hybrid retrieval, and rerank with the fine-tuned Nemotron LoRA cross-encoder. Each submitted row contains the final top-5 predicted publication identifiers.
-
-Table~\ref{tab:test-submission-diagnostics} reports submission-shape diagnostics; these diagnostics remain useful even with gold labels in hand, because they verify that every test query was processed and that the final top-5 lists have the required shape.
+The official TEST input used for submission consists of 8172 queries: 6076 in English, 1220 in French, and 876 in German. The submitted systems use the same four-stage pipeline described in Section~\ref{sec:methodology}: translate non-English queries into English, expand the query, retrieve candidates with BGE-M3 hybrid retrieval, and rerank with the fine-tuned Nemotron LoRA cross-encoder.\\
 
 \begin{table}[htbp]
     \centering
     \footnotesize
-    \caption{Official TEST submission diagnostics. A complete top-5 row is a query with exactly five unique submitted \texttt{pubkey} predictions.}
-    \label{tab:test-submission-diagnostics}
-    \begin{tabular}{l r r r r r}
-        \toprule
-        Language & Queries & TSV rows & Complete top-5 rows & Mean preds/query & Duplicate rows \\
-        \midrule
-        EN & 6076 & 6076 & 6076 & 5.0 & 0 \\
-        FR & 1220 & 1220 & 1220 & 5.0 & 0 \\
-        DE & 876  & 876  & 876  & 5.0 & 0 \\
-        \midrule
-        Total & 8172 & 8172 & 8172 & 5.0 & 0 \\
-        \bottomrule
-    \end{tabular}
-\end{table}
-
-
-Operationally, the submission is complete: all 8172 official test queries have one submitted row, every row has exactly five predictions, and no row contains duplicate predictions. The stored reranked TEST outputs contain 100 candidates per query for each language before TSV truncation, so MRR@5 can be computed from the submitted top-5 lists and Recall@100, MAP, and nDCG@10 can be computed from the retained top-100 rankings. The resulting official TEST effectiveness metrics are reported in Table~\ref{tab:test-effectiveness}.
-
-\begin{table}[htbp]
-    \centering
-    \footnotesize
-    \caption{Official TEST effectiveness metrics computed from the gated local TEST release with gold \texttt{pubkey}s.}
+    \caption{Official TEST set results metrics. The aggregate row is a micro-average over all queries.}
     \label{tab:test-effectiveness}
     \begin{tabular}{l c c c c}
         \toprule
@@ -147,8 +125,8 @@ Operationally, the submission is complete: all 8172 official test queries have o
     \end{tabular}
 \end{table}
 
-The official TEST metrics confirm that the final system is effective rather than merely well-formed; French is the strongest TEST split, followed by English, while German remains the weakest. This mirrors the development pattern in Table~\ref{tab:multilingual-dev}; at the same time, Recall@100 stays above 0.91 for every language, which suggests that most remaining errors are reranking errors inside the candidate pool rather than complete retrieval failures.
-
+The results obtained from the official TEST set confirm that the final system is effective rather than merely well-formed; French is the strongest TEST split, followed by English, while German remains the weakest. This mirrors the development pattern in Table~\ref{tab:multilingual-dev};\\
+On the TEST set, the reranking in computed from the top-2000 candidates retrieved by the BGE-M3 hybrid retriever, which is a deeper pool than the top-1000 used for the TRAIN runs. This is because the DEV results suggested that deeper reranking can still improve Recall@100, and we wanted to maximize recall for the final submission. The improvement from top-1000 to top-2000 candidates on the DEV set was modest but positive, so we opted for the deeper pool in the TEST submission to give the reranker more chances to find relevant documents. The final TEST results are consistent with the DEV results, which suggests that the pipeline generalizes reasonably well to unseen queries and that the translation step does not introduce excessive noise.
 \subsection{Statistical Analysis}
 \label{sub:statistical-analysis}
 
