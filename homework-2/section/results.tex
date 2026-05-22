@@ -114,8 +114,8 @@ Table~\ref{tab:multilingual-dev} reports the final fine-tuned Nemotron LoRA rera
         Split & Queries & MRR@5 & 95\% CI & Recall@100 & MAP & nDCG@10 & Rank 1 / Missing \\
         \midrule
         EN DEV & 3905 & 0.7160 & [0.7030, 0.7290] & 0.9129 & 0.7243 & 0.7483 & 2574 / 241 \\
-        FR DEV & 702  & 0.7599 & [0.7310, 0.7888] & 0.9288 & 0.7672 & 0.7894 & 496 / 50 \\
-        DE DEV & 386  & 0.6736 & [0.6305, 0.7168] & 0.8860 & 0.6820 & 0.7080 & 237 / 44 \\
+        FR DEV & 702  & 0.7599 & [0.7310, 0.7888] & 0.9288 & 0.7672 & 0.7894 & 496 / 40 \\
+        DE DEV & 386  & 0.6736 & [0.6305, 0.7168] & 0.8860 & 0.6820 & 0.7080 & 237 / 29 \\
         \bottomrule
     \end{tabular}%
     }
@@ -293,7 +293,7 @@ Among the 929 missing queries in N1000, systematic patterns emerge. Analysis of 
 \begin{enumerate}
     \item \textbf{Title-abstract mismatch (approximately 40\% of missing cases):} Claims mention specific research findings, medical outcomes, or statistical results that appear in the paper's full text or methodology but are not mentioned in the abstract. Example: a tweet claiming ``Study shows 60\% reduction in hospital admissions'' where the abstract only states the study was about ``healthcare intervention outcomes'' without the specific quantitative finding.
 
-    \item \textbf{Semantic drift from translation (approximately 30\% of non-English cases):} French or German queries that mention domain-specific terminology or colloquialisms lose meaning during translation to English. Example: French ``‚tude'' (study) maps to English ``study'', but the context-specific nuance is lost, leading the retriever to conflate unrelated papers about different types of studies.
+    \item \textbf{Semantic drift from translation (approximately 30\% of non-English cases):} French or German queries that mention domain-specific terminology or colloquialisms lose meaning during translation to English. Example: French ``ï¿½tude'' (study) maps to English ``study'', but the context-specific nuance is lost, leading the retriever to conflate unrelated papers about different types of studies.
 
     \item \textbf{Implicit reference without lexical overlap (approximately 30\% of missing cases):} Claims refer to a paper indirectly through its broader context (e.g., ``recent research from Stanford on AI safety'') without mentioning concrete findings, author names, or venue. The social-media wording emphasizes context rather than content.
 \end{enumerate}
