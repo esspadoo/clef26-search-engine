@@ -181,26 +181,67 @@ The distributional plot in Figure~\ref{fig:mrr-boxplot-train} makes the change i
 
 \subsubsection{Rank-bucket and error analysis}
 
-Table~\ref{tab:rank-bucket-analysis} compares where the gold document appears for \texttt{H513} and \texttt{N1000}. This table separates three error types. If the gold paper is missing, the candidate generator failed to retrieve it. If it appears after rank 100, the deep reranking run has found it but not within the Recall@100 cutoff. If it appears between ranks 6 and 100, the system has enough candidate evidence but fails the top-5 objective.
+Table~\ref{tab:rank-bucket-analysis} reports the rank position of the gold document for the retained hybrid and reranked runs. The analysis separates three qualitatively different error types. A gold paper is counted as \textit{missing} only when its gold \texttt{pubkey} is absent from every document available in the ranked file for that query. Thus, for runs with retained deep candidate lists, missing cases indicate that the reranker cannot recover the document from its input pool. For runs available only as submitted top-100 lists, missing means absent from the available top-100 file, not necessarily absent from the original upstream retrieval pool. A gold paper appearing after rank 100 has been retrieved by the retained reranking pool but lies outside the Recall@100 cutoff. A gold paper appearing between ranks 6 and 100 is present in the candidate evidence but is ranked too low to satisfy the top-5 objective.
 
 \begin{table*}[htbp]
     \centering
     \footnotesize
-    \caption{Rank buckets for the retained hybrid run and the best reranked run on the labeled English split. Percentages are computed over 14,977 queries.}\label{tab:rank-bucket-analysis}
+    \caption{Rank buckets for the retained hybrid and reranked English runs. Percentages are computed within each split: 14,977 labeled English queries, 3,905 English DEV queries, and 6,076 English TEST queries.}
+    \label{tab:rank-bucket-analysis}
     \resizebox{\textwidth}{!}{%
-    \begin{tabular}{l r r r r r r}
+    \begin{tabular}{l l r r r r r r r}
         \toprule
-        Run & Rank 1 & Ranks 2--5 & Ranks 6--10 & Ranks 11--100 & Rank $>100$ & Missing \\
+        Split & Family & Queries & Rank 1 & Ranks 2--5 & Ranks 6--10 & Ranks 11--100 & Rank $>100$ & Missing \\
         \midrule
-        H513  & 7459 (49.8\%) & 2280 (15.2\%) & 715 (4.8\%) & 2114 (14.1\%) & 0 (0.0\%) & 2409 (16.1\%) \\
-        N1000 & 9697 (64.7\%) & 2057 (13.7\%) & 598 (4.0\%) & 1291 (8.6\%) & 405 (2.7\%) & 929 (6.2\%) \\
+        EN TRAIN & Hybrid BGE-M3
+        & 14977
+        & 7459 (49.8\%)
+        & 2280 (15.2\%)
+        & 715 (4.8\%)
+        & 2114 (14.1\%)
+        & 0 (0.0\%)
+        & 2409 (16.1\%) \\
+        EN TRAIN & Nemotron Baseline
+        & 14977
+        & 9697 (64.7\%)
+        & 2057 (13.7\%)
+        & 598 (4.0\%)
+        & 1291 (8.6\%)
+        & 405 (2.7\%)
+        & 929 (6.2\%) \\
+        EN DEV & Nemotron LoRA fine-tuned
+        & 3905
+        & 2574 (65.9\%)
+        & 538 (13.8\%)
+        & 144 (3.7\%)
+        & 309 (7.9\%)
+        & 99 (2.5\%)
+        & 241 (6.2\%) \\
+        EN TEST & Nemotron LoRA fine-tuned
+        & 6076
+        & 3950 (65.0\%)
+        & 926 (15.2\%)
+        & 229 (3.8\%)
+        & 506 (8.3\%)
+        & 0 (0.0\%)
+        & 465 (7.7\%) \\
         \bottomrule
     \end{tabular}%
     }
 \end{table*}
 
-The main strength of reranking is the increase in rank-1 hits: \texttt{N1000} places the gold paper first for 9697 queries, compared with 7459 for \texttt{H513}. It also reduces completely missing cases from 2409 to 929. The remaining errors are informative. The 1291 queries in ranks 11--100 are not retrieval failures; they are ranking failures where the correct paper is present but too low for MRR@5. The 929 missing queries remain the most serious class of failure, because the reranker cannot recover a publication that is absent from the candidate list. These cases are likely associated with severe vocabulary mismatch, translation drift, or claims whose wording emphasizes entities and context not present in the title and abstract.
+The labeled English comparison shows that the main effect of reranking is to move correct papers to the very top of the list. The best reranked run on the TRAIN split places the gold paper at rank 1 for 9697 queries, compared with 7459 for the retained hybrid single-stage run. It also reduces missing cases from 2409 to 929. The remaining errors are informative: for \texttt{Nemotron Baseline}, 1291 queries have the gold paper in ranks 11--100, indicating ranking failures rather than retrieval failures, whereas 929 queries remain missing from the available reranking pool and therefore cannot be recovered by the reranker.
 
+The final English DEV and TEST runs follow the same pattern.\ \texttt{Nemotron LoRA fine-tuned} places the gold paper at rank 1 for 2574 of 3905 queries, and does so also for the TEST set with 3950 of 6076 queries. Their top-5 coverage is similar, with 3112 DEV queries and 4876 TEST queries resolved within the first five ranks. The DEV file contains 1000 ranked documents for each query, so the 99 cases in \texttt{Rank $>100$} correspond to gold papers found by the retained reranking pool but not placed within the first 100 positions. The TEST file used to compute the metrics contains only the submitted top-100 documents per query; consequently, \texttt{Rank $>100$} is zero by construction, and the 465 missing TEST cases should be interpreted as missing from the available submitted run rather than as evidence that the original upstream retrieval pool never retrieved the gold paper.
+
+Overall, the bucket analysis indicates that reranking substantially improves early precision while leaving two residual failure modes. The first consists of ranking failures, where the gold paper is present but remains below the top-5 cutoff. The second consists of missing cases, which are more severe because they cannot be repaired by reranking alone. These missing cases are likely associated with severe vocabulary mismatch, translation drift, or claims whose wording emphasizes entities and contextual cues that are weakly represented in titles and abstracts.
+
+In Figure~\ref{fig:rank-buckets}, a visual representation of the distribution is shown.
+\begin{figure}
+    \centering
+    \includegraphics[width=0.88\textwidth]{../figure/rank_bucket_distribution_inverted_runs.png}
+    \caption{Visual representation of the rank bucket distribution for the retained hybrid and Nemotron runs on the EN TRAIN, DEV and TEST splits.}\label{fig:rank-buckets}
+\end{figure}
 \subsubsection{Error patterns and failure analysis}
 
 Among the 929 missing queries in N1000, systematic patterns emerge. Analysis of a sample of 50 manually inspected failures reveals three main categories:
