@@ -76,30 +76,6 @@ The largest improvement is introduced by neural reranking. Moving from \texttt{H
 
 Paired Wilcoxon signed-rank tests with Holm correction on per-query MRR@5 corroborate these observations. Specifically: \texttt{H315} vs \texttt{H513} is not significant (Holm-adjusted $p=1.0$). By contrast, \texttt{H513} outperforms \texttt{H424} with a highly significant difference (Holm-adjusted $p\approx 8.58\times10^{-116}$). The improvement from \texttt{H513} to the Nemotron top-1000 reranker is both large and highly significant (mean $\Delta=0.1451$; Holm-adjusted $p=0.0$). The difference between \texttt{N500} and \texttt{N1000} is statistically detectable after Holm correction (Holm-adjusted $p\approx 0.04974$) but its practical magnitude on MRR@5 is negligible ($\Delta\approx 0.0008$), which supports the "diminishing returns" interpretation. For Recall@100 the H513 vs N1000 gain is also significant (Holm-adjusted $p\approx 3.46\times10^{-195}$).
 
-Additional aggregate experiments were available for reranker variants whose full ranked outputs are not all available. We include the most informative rows in Table~\ref{tab:aggregate-rerankers}, but we do not use them in the paired statistical tests because per-query scores cannot be reconstructed for those runs.
-
-\begin{table*}[htbp]
-    \centering
-    \footnotesize
-    \caption{Additional aggregate reranker rows. These values are reported for completeness but are excluded from paired tests unless their ranked outputs are restored.}
-    \label{tab:aggregate-rerankers}
-    \resizebox{\textwidth}{!}{%
-    \begin{tabular}{p{3.0cm} p{6.8cm} r r r r}
-        \toprule
-        Run family & Configuration & MRR@5 & Recall@100 & MAP & nDCG@10 \\
-        \midrule
-        Cascaded reranking & Nemotron top-400 followed by fine-tuned ModernBERT top-100 & \textbf{0.7662} & 0.8929 & \textbf{0.7720} & \textbf{0.7905} \\
-        Cascaded reranking & Nemotron top-400 followed by fine-tuned BGE-reranker-v2-m3 top-100 & 0.7414 & 0.8929 & 0.7481 & 0.7695 \\
-        Single reranker & Nemotron top-1000 on H513 candidates & 0.7018 & \textbf{0.9109} & 0.7111 & 0.7357 \\
-        Alternative reranker & Qwen3-reranker-4B on H513 candidates & 0.6624 & 0.8392 & 0.6696 & 0.6953 \\
-        Alternative reranker & GTE/ModernBERT reranking on Nemotron top-400 candidates & 0.6529 & 0.8888 & 0.6636 & 0.6878 \\
-        \bottomrule
-    \end{tabular}%
-    }
-\end{table*}
-
-This second table changes the interpretation of the best aggregate configuration. Among the runs for which complete ranked outputs are available, \texttt{N1000} is the strongest. Among the aggregate-only experiments, however, the cascaded ModernBERT reranker reaches MRR@5 of 0.7662, improving over \texttt{N1000} by 0.0644. Its Recall@100 is lower than \texttt{N1000}, because it operates on a shallower retained candidate set, but it is much better at promoting the correct paper into the first positions. This suggests that a second reranking stage can improve early precision, at the cost of additional computation and possible loss of deep-candidate coverage. The Qwen3 and GTE/ModernBERT alternatives improve over hybrid retrieval but remain below the Nemotron and cascaded reranking variants in MRR@5.
-
 \subsection{Multilingual Development Validation}
 \label{sub:multilingual-dev}
 
