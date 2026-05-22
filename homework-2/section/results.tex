@@ -244,17 +244,14 @@ In Figure~\ref{fig:rank-buckets}, a visual representation of the distribution is
 \end{figure}
 \subsubsection{Error patterns and failure analysis}
 
-Among the 929 missing queries in N1000, systematic patterns emerge. Analysis of a sample of 50 manually inspected failures reveals three main categories:
-
+We have manually inspected and analyzed a sample of 50 queries taken from the TRAIN split's missing cases of the \texttt{Nemotron Baseline} run. This sample is not statistically representative but have helped us understand some failures patterns:
 \begin{enumerate}
-    \item \textbf{Title-abstract mismatch (approximately 40\% of missing cases):} Claims mention specific research findings, medical outcomes, or statistical results that appear in the paper's full text or methodology but are not mentioned in the abstract. Example: a tweet claiming ``Study shows 60\% reduction in hospital admissions'' where the abstract only states the study was about ``healthcare intervention outcomes'' without the specific quantitative finding.
+    \item \textbf{Claim-to-abstract specificity mismatch (approximately 40\% of the inspected missing cases):} Claims often mention specific findings, medical outcomes, or statistical results that are not present in the indexed title and abstract metadata. This makes the gold paper hard to retrieve when the query emphasizes details that are unavailable to the first-stage retriever.
 
     \item \textbf{Semantic drift from translation (approximately 30\% of non-English cases):} French or German queries that mention domain-specific terminology or colloquialisms lose meaning during translation to English. Example: French ``étude'' (study) maps to English ``study'', but the context-specific nuance is lost, leading the retriever to conflate unrelated papers about different types of studies.
 
     \item \textbf{Implicit reference without lexical overlap (approximately 30\% of missing cases):} Claims refer to a paper indirectly through its broader context (e.g., ``recent research from Stanford on AI safety'') without mentioning concrete findings, author names, or venue. The social-media wording emphasizes context rather than content.
 \end{enumerate}
-
-The 1291 queries ranked 11--100 represent ranking failures, not retrieval failures. These cases suggest that while the correct paper is retrieved, the reranker assigns it a lower relevance score relative to competing candidates. This could be addressed by: (1) fine-tuning on harder negatives; (2) incorporating author and venue information into the reranking input; or (3) ensemble approaches that combine multiple rerankers.
 
 \subsubsection{Performance by query characteristics}
 
