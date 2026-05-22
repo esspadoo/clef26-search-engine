@@ -36,7 +36,7 @@ For the runs performed on the \texttt{dev\_set}, we provide a separate multiling
 \subsection{Evaluation Evidence and Metrics}
 \label{sub:results-evidence}
 
-We report three complementary forms of evidence. First, we use the labeled English run-analysis split to compare retrieval and reranking configurations over 14,977 queries. This is the largest labeled split available to us and is therefore the most reliable source for per-query statistical analysis. Second, we validate the final fine-tuned reranker on the labeled multilingual development splits: English, French, and German. Third, we evaluate the final official TEST submission on the gated TEST release available in our local workspace, whose JSON files include the gold \texttt{pubkey} field; this lets us report both submission-shape diagnostics and effectiveness metrics for the final multilingual runs.
+We report three complementary forms of evidence. First, we use the labeled English run-analysis split to compare retrieval and reranking configurations over 14,977 queries. This is the largest labeled split available to us and is therefore the most reliable source for per-query statistical analysis. Second, we validate the final fine-tuned reranker on the labeled multilingual development splits: English, French, and German. Third, we report diagnostics for the official TEST submission. The official TEST data contain query identifiers and texts, but no gold \texttt{pubkey}; consequently, effectiveness metrics on the official TEST split are left as explicit TODO values until the official qrels or gold labels are available.
 
 The primary metric is MRR@5, following the task objective. We also report Recall@100 to measure whether the correct paper remains in the candidate set, and MAP and nDCG@10 to describe the quality of the ranking beyond the first reciprocal-rank hit. Since each query has a single gold publication in the available labeled files, per-query MRR@5 is zero unless the gold paper appears in the first five positions, and is $1/r$ when the first relevant paper appears at rank $r \leq 5$.
 
@@ -126,9 +126,9 @@ The development results suggest that the final pipeline generalizes reasonably a
 \subsection{Official Test-Set Submission}
 \label{sub:test-results}
 
-The official TEST input used for submission consists of 8172 queries: 6076 in English, 1220 in French, and 876 in German. The corresponding local gated gold release includes the gold \texttt{pubkey} for each query, so the final submission can be evaluated directly. The submitted systems use the same four-stage pipeline described in Section~\ref{sec:methodology}: translate non-English queries into English, expand the query, retrieve candidates with BGE-M3 hybrid retrieval, and rerank with the fine-tuned Nemotron LoRA cross-encoder. Each submitted row contains the final top-5 predicted publication identifiers.
+The official TEST data consist of 8172 unlabeled queries: 6076 in English, 1220 in French, and 876 in German. The submitted systems use the same four-stage pipeline described in Section~\ref{sec:methodology}: translate non-English queries into English, expand the query, retrieve candidates with BGE-M3 hybrid retrieval, and rerank with the fine-tuned Nemotron LoRA cross-encoder. Each submitted row contains the final top-5 predicted publication identifiers.
 
-Table~\ref{tab:test-submission-diagnostics} reports submission-shape diagnostics; these diagnostics remain useful even with gold labels in hand, because they verify that every test query was processed and that the final top-5 lists have the required shape.
+Because the official TEST data available to us do not include gold \texttt{pubkey}s, Table~\ref{tab:test-submission-diagnostics} reports submission diagnostics rather than effectiveness. These diagnostics are still useful: they verify that every test query was processed and that the final top-5 lists have the required shape.
 
 \begin{table}[htbp]
     \centering
@@ -149,26 +149,24 @@ Table~\ref{tab:test-submission-diagnostics} reports submission-shape diagnostics
 \end{table}
 
 
-Operationally, the submission is complete: all 8172 official test queries have one submitted row, every row has exactly five predictions, and no row contains duplicate predictions. The stored reranked TEST outputs contain 100 candidates per query for each language before TSV truncation, so MRR@5 can be computed from the submitted top-5 lists and Recall@100, MAP, and nDCG@10 can be computed from the retained top-100 rankings. The resulting official TEST effectiveness metrics are reported in Table~\ref{tab:test-effectiveness}.
+Operationally, the submission is complete: all 8172 official test queries have one submitted row, every row has exactly five predictions, and no row contains duplicate predictions. The stored reranked TEST outputs contain 100 candidates per query for each language before TSV truncation. The main unresolved question is therefore ranking correctness, not file completeness. Based on the development results in Table~\ref{tab:multilingual-dev}, the most plausible risk is a performance drop on translated German and French queries, especially when the translation changes technical expressions or when expansion terms drift toward a semantically related but incorrect paper.
 
 \begin{table}[htbp]
     \centering
     \footnotesize
-    \caption{Official TEST effectiveness metrics computed from the gated local TEST release with gold \texttt{pubkey}s.}
-    \label{tab:test-effectiveness}
+    \caption{Official TEST effectiveness metrics. These values are intentionally left as TODO placeholders because gold labels for the official TEST split are not available.}
+    \label{tab:test-effectiveness-todo}
     \begin{tabular}{l c c c c}
         \toprule
         Language & MRR@5 & Recall@100 & MAP & nDCG@10 \\
         \midrule
-        EN & 0.7117 & 0.9235 & 0.7202 & 0.7469 \\
-        FR & 0.7400 & 0.9328 & 0.7479 & 0.7689 \\
-        DE & 0.6806 & 0.9155 & 0.6907 & 0.7213 \\
-        Aggregate & 0.7126 & 0.9240 & 0.7212 & 0.7474 \\
+        EN & TODO & TODO & TODO & TODO \\
+        FR & TODO & TODO & TODO & TODO \\
+        DE & TODO & TODO & TODO & TODO \\
+        Aggregate & TODO & TODO & TODO & TODO \\
         \bottomrule
     \end{tabular}
 \end{table}
-
-The official TEST metrics confirm that the final system is effective rather than merely well-formed; French is the strongest TEST split, followed by English, while German remains the weakest. This mirrors the development pattern in Table~\ref{tab:multilingual-dev}; at the same time, Recall@100 stays above 0.91 for every language, which suggests that most remaining errors are reranking errors inside the candidate pool rather than complete retrieval failures.
 
 \subsection{Statistical Analysis}
 \label{sub:statistical-analysis}
@@ -376,11 +374,11 @@ is not significant, and the contrast between the top-500 and top-1000 Nemotron r
     \label{fig:mrr-significance-train}
 \end{figure*}
 
-ANOVA and Tukey HSD should only be used after checking their assumptions; for discrete per-query MRR@5 scores, paired non-parametric tests and bootstrap confidence intervals are usually the safer choice. For the official TEST split, descriptive effectiveness metrics can now be computed because the local gated release includes gold labels. We do not add a separate paired significance table here, because the paper's hypothesis-testing section is still anchored to the TRAIN and DEV experiment grids; extending the same Wilcoxon/bootstrap procedure to TEST is straightforward once the comparison set of submitted TEST runs is fixed.
+ANOVA and Tukey HSD should only be used after checking their assumptions; for discrete per-query MRR@5 scores, paired non-parametric tests and bootstrap confidence intervals are usually the safer choice. For the current official TEST split, however, ANOVA, Tukey HSD, Wilcoxon signed-rank tests, or bootstrap confidence intervals over effectiveness metrics cannot be computed until gold labels are available. Once official qrels are released, the appropriate analysis is a paired per-query test between submitted systems on MRR@5, supplemented by bootstrap confidence intervals and a rank-bucket error table like Table~\ref{tab:rank-bucket-analysis}.
 
 \subsection{Reproducibility and Remaining TODOs}
 \label{sub:results-reproducibility}
 
-All aggregate metrics, per-query summaries, confidence intervals, rank buckets, and figures in this section were generated from the ranked outputs and gold labels available for the labeled splits, including the gated official TEST files used for Table~\ref{tab:test-effectiveness}. The same deterministic procedure was used for all systems included in the paired statistical analysis, and the implementation is released together with the system code referenced in Section~\ref{sec:setup}.
+All aggregate metrics, per-query summaries, confidence intervals, rank buckets, and figures in this section were generated from the ranked outputs and gold labels available for the labeled splits. The same deterministic procedure was used for all systems included in the paired statistical analysis, and the implementation is released together with the system code referenced in Section~\ref{sec:setup}.
 
-The main remaining TODO is not the official TEST effectiveness table anymore, but extending the paired statistical analysis to the finalized set of official TEST comparison runs and to the aggregate-only systems in Table~\ref{tab:aggregate-rerankers} once their per-query ranked outputs are restored. The required ingredients are the same as elsewhere in this section: query identifier, gold \texttt{pubkey}, and the ordered predicted \texttt{pubkey} list for each run.
+The remaining TODO is the official TEST effectiveness table, Table~\ref{tab:test-effectiveness-todo}. To fill it, the official TEST queries must be augmented with gold \texttt{pubkey}s or accompanied by qrels. The required fields are query identifier, gold \texttt{pubkey}, and the ordered predicted \texttt{pubkey} list for each submitted run. After that, MRR@5, Recall@100, MAP, nDCG@10, confidence intervals, and paired significance tests can be computed with the same per-query procedure used in this section.

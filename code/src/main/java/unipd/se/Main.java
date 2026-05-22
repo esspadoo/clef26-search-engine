@@ -44,7 +44,7 @@ public class Main {
         String papersPath  = args.length > 0 && !args[0].equals("_") ? args[0] : "code/data/collection_data.json";
 
         // Default development-set configuration for English queries.
-        String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/Dev_set/expanded_queries_bge_large_deDEV_en.json";
+        String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/Dev_set/expanded_queries_bge_large_enDEV.json";
         // String queriesPath = args.length > 1 && !args[1].equals("_") ? args[1] : "code/data/Dev_set/expanded_queries_bge_large_frDEV_en.json";
 
         // Optional path to the file containing re-ranked results to evaluate.
