@@ -72,7 +72,7 @@ The largest improvement is introduced by neural reranking. Moving from \texttt{H
 
 Paired Wilcoxon signed-rank tests with Holm correction on per-query MRR@5 corroborate these observations. Specifically: \texttt{H315} vs \texttt{H513} is not significant (Holm-adjusted $p=1.0$). By contrast, \texttt{H513} outperforms \texttt{H424} with a highly significant difference (Holm-adjusted $p\approx 8.58\times10^{-116}$). The improvement from \texttt{H513} to the Nemotron top-1000 reranker is both large and highly significant (mean $\Delta=0.1451$; Holm-adjusted $p=0.0$). The difference between \texttt{N500} and \texttt{N1000} is statistically detectable after Holm correction (Holm-adjusted $p\approx 0.04974$) but its practical magnitude on MRR@5 is negligible ($\Delta\approx 0.0008$), which supports the "diminishing returns" interpretation. For Recall@100 the H513 vs N1000 gain is also significant (Holm-adjusted $p\approx 3.46\times10^{-195}$).
 
-\subsection{Multilingual DEV split Validation}\label{sub:multilingual-dev}
+\subsection{Multilingual DEV Split Validation}\label{sub:multilingual-dev}
 
 Table~\ref{tab:multilingual-dev} reports the final fine-tuned Nemotron LoRA reranker on the multilingual development splits. These data are closer to the official multilingual TEST setting than the English-only run-analysis split, because they include translated French and German queries. The confidence intervals are normal-approximation 95\% intervals over per-query MRR@5 values; they are descriptive rather than official task intervals.\\
 To be noted that we we have not performed runs with fine-tuned Nemotron LoRA on the English run-analysis split, so the DEV results cannot be directly compared with the TRAIN runs in Table~\ref{tab:run-comparison}. The DEV results are meant to validate the final pipeline on a multilingual setting, not to compare with the English-only runs. The DEV splits are also smaller than the TRAIN split, which leads to wider confidence intervals and less stable estimates.
@@ -96,7 +96,7 @@ To be noted that we we have not performed runs with fine-tuned Nemotron LoRA on 
 
 The development results suggest that the final pipeline generalizes reasonably across languages after translation, but not uniformly. French is the strongest development split, with MRR@5 of 0.7599 and Recall@100 of 0.9288. German is the weakest, with MRR@5 of 0.6736 and the widest confidence interval because it has only 386 labeled queries. This lower German score is a warning for the official TEST set: the German portion is smaller than English but still accounts for 876 of the 8172 test queries, and translation or morphology errors can have a visible effect on aggregate performance.
 
-\subsection{Official TEST set Submission}\label{sub:test-results}
+\subsection{Official TEST Set Submission}\label{sub:test-results}
 
 The official TEST input used for submission consists of 8172 queries: 6076 in English, 1220 in French, and 876 in German. The submitted systems use the same four-stage pipeline described in Section~\ref{sec:methodology}: translate non-English queries into English, expand the query, retrieve candidates with BGE-M3 hybrid retrieval, and rerank with the fine-tuned Nemotron LoRA cross-encoder.
 
@@ -122,7 +122,6 @@ On the TEST set, the reranking in computed from the top-2000 candidates retrieve
 
 We separate descriptive evidence from hypothesis testing. The descriptive part characterizes the distribution of per-query MRR@5 scores, while the paired tests compare systems on the same queries. This is important because aggregate metrics alone hide whether an improvement is broad across many queries or concentrated in a smaller number of large corrections.
 
-\textbf{CHECK IF IMAGE NECESSARY}
 \subsubsection{Descriptive statistics}
 
 Table~\ref{tab:mrr-descriptive-stats} reports per-query MRR@5 statistics for the retained hybrid run and the Nemotron
@@ -148,9 +147,9 @@ of queries receive a non-zero MRR@5 score after reranking, whereas the hybrid-on
     }
 \end{table*}
 
-\textbf{Figure~\ref{fig:mrr-mean-ci} provides a direct visual comparison across the English statistical-analysis runs; on the training split the confidence
+Figure~\ref{fig:mrr-mean-ci} provides a direct visual comparison across the English statistical-analysis runs; on the training split the confidence
 intervals of \texttt{H315} and \texttt{H513} nearly coincide, confirming that the two retained hybrid settings are essentially
-tied on MRR@5 even though they differ slightly in Recall@100.} The same figure also shows that the gain from reranking is
+tied on MRR@5 even though they differ slightly in Recall@100. The same figure also shows that the gain from reranking is
 not marginal: the Nemotron family shifts the mean from roughly 0.56 to roughly 0.69--0.70. On the development split,
 the fine-tuned Nemotron LoRA model reaches 0.716 MRR@5 with a 95\% interval of [0.703, 0.729], clearly above the GTE/ModernBERT
 baseline and modestly above the untuned Nemotron runs.
@@ -159,25 +158,19 @@ baseline and modestly above the untuned Nemotron runs.
     \centering
     \begin{subfigure}[t]{0.49\textwidth}
         \centering
-        \includegraphics[width=\linewidth]{../results/statistics/en_train_all_systems/plots/mrr5/mrr5_mean_ci.png}
+        \includegraphics[width=\linewidth]{../figure/MRR5_TRAIN.png}
         \caption{English TRAIN.}
     \end{subfigure}
     \hfill
     \begin{subfigure}[t]{0.49\textwidth}
         \centering
-        \includegraphics[width=\linewidth]{../results/statistics/en_dev_all_systems/plots/mrr5/mrr5_mean_ci.png}
+        \includegraphics[width=\linewidth]{../figure/MRR5_DEV.png}
         \caption{English DEV.}
     \end{subfigure}
     \caption{Mean MRR@5 with normal-approximation 95\% confidence intervals for the English TRAIN and DEV statistical-analysis runs.}\label{fig:mrr-mean-ci}
 \end{figure*}
 
-The distributional plot in Figure~\ref{fig:mrr-boxplot-train} makes the change in query-level behavior easier to interpret. The hybrid runs all retain a first quartile at zero and a median near 0.5, which means that many queries still miss the correct paper in the top ranks. By contrast, the deeper Nemotron rerankers move the median to 1.0 and the first quartile to 0.25, so the improvement is not limited to a few outliers: a broad portion of the query set benefits from reranking.
 
-\begin{figure*}[htbp]
-    \centering
-    \includegraphics[width=0.88\textwidth]{../results/statistics/en_train_all_systems/plots/mrr5/mrr5_boxplot.png}
-    \caption{Per-query MRR@5 distribution on the English TRAIN split. The reranked systems shift both the median and the lower quartile upward relative to the hybrid-only runs.}\label{fig:mrr-boxplot-train}
-\end{figure*}
 
 \subsubsection{Rank-bucket and error analysis}
 
@@ -265,9 +258,3 @@ The named-entity cue analysis is more consistent with the retrieval intuition. U
     \includegraphics[width=0.95\textwidth]{../figure/query_characteristics_mrr.png}
     \caption{Mean per-query MRR@5 for the \texttt{Nemotron Baseline} English TRAIN run grouped by query length and by a lightweight named-entity cue score. Error bars show normal-approximation 95\% confidence intervals over queries.}\label{fig:query-characteristics-mrr}
 \end{figure*}
-
-\subsection{Reproducibility and Remaining TODOs}\label{sub:results-reproducibility}
-
-All aggregate metrics, per-query summaries, confidence intervals, rank buckets, and figures in this section were generated from the ranked outputs and gold labels available for the labeled splits, including the gated official TEST files used for Table~\ref{tab:test-effectiveness}. The same deterministic procedure was used for all systems included in the paired statistical analysis, and the implementation is released together with the system code referenced in Section~\ref{sec:setup}.
-
-The main remaining TODO is not the official TEST effectiveness table anymore, but extending the paired statistical analysis to the finalized set of official TEST comparison runs and to the aggregate-only systems in Table~\ref{tab:aggregate-rerankers} once their per-query ranked outputs are restored. The required ingredients are the same as elsewhere in this section: query identifier, gold \texttt{pubkey}, and the ordered predicted \texttt{pubkey} list for each run.
