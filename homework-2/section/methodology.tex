@@ -2,12 +2,11 @@
 \label{sec:methodology}
 
 We started from a lexical baseline based on Apache Lucene BM25 and progressively moved to a multi-stage neural pipeline.
-Early experiments focused on analyzer choices, stopword lists, and BM25 variants.
 \newline
-We adopted a four-stage pipeline (Figure~\ref{fig:pipeline}) for the proposed information retrieval system, consisting of:
+The final pipeline (Figure~\ref{fig:pipeline}) for the proposed information retrieval system, consists of four stages:
 \begin{itemize}
     \item \textbf{Query translation}: queries in French or German are first translated into English.
-    \item \textbf{Query expansion}: queries are expanded with additional context to bridge the gap between informal and domain specific language.
+    \item \textbf{Query expansion}: queries are expanded with additional context.
     \item \textbf{Retrieval}: relevant documents are retrieved from the corpus using the expanded query.
     \item \textbf{Reranking}: the retrieved documents are reranked based on their relevance to the original query.
 \end{itemize}
@@ -48,12 +47,12 @@ Following the translation stage, each query is processed by a deterministic quer
 \begin{itemize}
     \item The translated English query is first analyzed with spaCy’s \texttt{en\_core\_web\_sm} pipeline, which provides token-level linguistic annotations, including stop-word indicators and coarse-grained part-of-speech labels from the Universal POS tag set. Candidate lexical anchors are then identified by retaining tokens tagged as NOUN or PROPN while excluding stop words and tokens shorter than three characters. The resulting set is deduplicated to produce a compact lexical signature that captures the principal nominal content of the query.
 
-    \item The semantic expansion stage operates over a corpus in which each document is represented as the concatenation of its title and abstract. These title–abstract pairs are embedded with \texttt{BAAI/bge-large-en-v1.5}. In accordance with the documented BGE retrieval interface, query embeddings are produced by prepending the instruction \texttt{\{Represent this sentence for searching relevant passages:\}} to the translated query, whereas the corpus documents are encoded as retrieval targets. Similarity is then computed on normalized embeddings using the dot product. For unit-length vectors, dot-product scoring is equivalent to cosine similarity while being computationally more efficient.
+    \item The semantic expansion stage operates over a corpus in which each document is represented as the concatenation of its title and abstract. These title–abstract pairs are embedded with \texttt{BAAI/bge-large-en-v1.5}. In accordance with the documented BGE retrieval interface \cite{bge-large-en-v1.5}, query embeddings are produced by prepending the instruction \texttt{\{Represent this sentence for searching relevant passages:\}} to the translated query, whereas the corpus documents are encoded as retrieval targets. Similarity is then computed on normalized embeddings using the dot product. For unit-length vectors, dot-product scoring is equivalent to cosine similarity while being computationally more efficient.
     $$s(q,d)=e_q^\top e_d=\sum_i e_{q,i}e_{d,i}$$
     Because embeddings \(e = \frac{v}{\lVert v\rVert_2}\) are L2-normalized \(e_q^\top e_d = \cos(q,d)\) \cite{bge_large_model_card}.\\
     The five highest-scoring documents are retained as the local semantic neighborhood used for expansion.
 
-    In the described implementation, candidate expansion terms are extracted from the retrieved documents after lowercasing, ASCII normalization, mention's and hashtag's symbols removal, stop-word filtering, and exclusion of short tokens. The candidate pool is aggregated across the retrieved neighborhood and assigned weights derived from the semantic similarity of the source documents so that terms originating from more similar neighbors contribute more strongly. Terms already present in the query are removed and the fifteen highest-ranking candidates are retained as explicit expansion terms.
+    In the described implementation, candidate expansion terms are extracted from the retrieved documents after lowercasing, ASCII normalization, mention's and hashtag's symbols removal, stop-word filtering and exclusion of short tokens (tokens <= 2 characters long are discarded). The candidate pool is aggregated across the retrieved neighborhood and assigned weights derived from the semantic similarity of the source documents so that terms originating from more similar neighbors contribute more strongly. Terms already present in the query are removed and the fifteen highest-ranking candidates are retained as explicit expansion terms.
     \[
         K=\operatorname{unique}\{\ell(t): POS(t)\in\{\mathrm{NOUN},\mathrm{PROPN}\},\neg stop(t), |t|>2\}
     \]
@@ -115,13 +114,11 @@ The ColBERT-style late-interaction score is computed as \cite{khattab2020colbert
 
 The final configuration was selected through a series of development runs. We first tuned the lexical baseline by varying the Lucene analyzer, stop-word lists, stemming strategy and BM25 searcher variants. These experiments improved the classical baseline but also highlighted its limitations for this task: even with query expansion and reranking, BM25-based candidate generation remained more dependent on surface-level lexical overlap than desired.
 
-We then evaluated dense retrieval with several bi-encoder models. Among these, \textbf{BAAI/bge-m3} achieved the strongest performance and improved the semantic coverage of the candidate set, particularly for paraphrased and multilingual claims. We also tested BGE-M3 in a hybrid retrieval setting, using a setup that differed slightly from the final configuration. In those experiments, sparse, dense and ColBERT-style retrieval were performed using dedicated query expansions tailored to each retrieval mode. More specifically, each query was represented through three complementary views: an embedding view for semantic matching, a sparse view for lexical and term-based evidence, and a ColBERT view for fine-grained token-level interaction.
+We also tested BGE-M3 in a hybrid retrieval setting, using a setup that differed slightly from the final configuration. In those experiments, sparse, dense and ColBERT-style retrieval were performed using dedicated query expansions tailored to each retrieval mode. More specifically, each query was represented through three complementary views: an embedding view for semantic matching, a sparse view for lexical and term-based evidence, and a ColBERT view for fine-grained token-level interaction.
 
 However, the best results in our analysis were obtained with a simpler configuration in which BGE-M3 hybrid retrieval used the same expanded query, described in the previous section, for all three retrieval modes. We then tested several weighting configurations. Among them, the run labelled \texttt{bge\_m3\_hybrid\_513} was retained because it provided the strongest recall-oriented trade-off among the retrievers evaluated without reranking. This configuration used weights of $0.5$, $0.15$ and $0.35$ for dense, sparse, and ColBERT scoring, respectively, with a multiplier of $3$ and a maximum hybrid input length of $384$.
 
 A closely related configuration with a larger ColBERT weight achieved a nearly identical MRR@5 but a lower Recall@100. We therefore preferred the configuration that better matched the role of retrieval as a candidate generator. This choice was further confirmed by downstream experiments: reranking candidates from \texttt{bge\_m3\_hybrid\_513} consistently outperformed the corresponding BM25-based reranked runs. In addition, increasing the reranked candidate depth from a few hundred documents to between $1000$ and $2500$ documents increased the final recall by giving the neural reranker a larger candidate pool.
-
-We also experimented with a learned fusion strategy for the hybrid signals. In particular, the experimental setup included a LightGBM LambdaMART option that builds features from the dense, sparse, and ColBERT scores, together with normalized score variants and dense-rank features, and then learns how to combine them. However, the retained retrieval configuration uses simpler linear fusion, which is easier to reproduce and aligns well with the recall-oriented role of this stage.
 
 The final hybrid retrieval score is therefore computed as:
 \[
@@ -146,9 +143,9 @@ The model computes a scalar logit $z \in \mathbb{R}$ through a linear classifica
     s(q, d) = \sigma(z) = \frac{1}{1 + e^{-z}}
 \]
 Documents are then sorted in descending order of $s(q, d)$.
-In practice, reranking deeper candidate pools (500-2500 documents) consistently produced better final results than shallower pools, confirming the importance of high recall at the retrieval stage to compensate for miss-labeling from weaker previous retrieval-stages. At this stage, queries are evaluated against the corpus of the documents taking into account their title, abstract and author.
+In practice, reranking deeper candidate pools (500-2500 documents) consistently produced better final results than shallower pools, confirming the importance of high recall at the retrieval stage to compensate for miss-labeling from weaker previous retrieval-stages. At this stage, queries are evaluated against the corpus of the documents taking into account the title, abstract and author of the documents.
 
-We also evaluated alternative rerankers, including Qwen3 and GTE-ModernBERT variants.
+We also evaluated alternative rerankers, including \texttt{Qwen/Qwen3-Reranker-4B} \cite{qwen3embedding} and \newline \texttt{Alibaba-NLP/gte-reranker-modernbert-base} \cite{zhang2024mgte, li2023towards} variants.
 
 \subsection{Fine-tuning the Reranker} \label{sub:finetuning}
 To improve the Nemotron reranker on the domain-specific characteristics of the CheckThat! task, we fine-tuned \texttt{nvidia/llama-nemotron-rerank-1b-v2} using Parameter-Efficient Fine-Tuning (PEFT) with Low-Rank Adaptation (LoRA) on data from both the 2025 and 2026 editions of the task.
