@@ -183,9 +183,5 @@ The model is trained with AdamW, a learning rate of $2 \times 10^{-5}$, a linear
 At inference time, the LoRA adapter weights are merged into the base model via \texttt{merge\_and\_unload()} before scoring, so no PEFT overhead is incurred during evaluation. The scoring procedure and prompt format are identical to those of the base reranker (Section~\ref{sub:reranking}) and the fine-tuned model is used as a drop-in replacement in the reranking stage.
 
 \subsection{Evaluation}
-We evaluate systems on the CheckThat! Task 1 query sets by matching retrieved \texttt{pubkey}s against the gold \texttt{pubkey} for each query. The official the evaluation metric for the task is MRR@5. We also tracked Recall@100 to monitor candidate-generation quality and to verify that reranking gains do not come from overly aggressive filtering.
-
-For internal analysis, our evaluator also computes additional ranking metrics (e.g., Recall@1/5/10/100, Precision@1/5/10,
-MAP, and nDCG@k). This broader view is useful to interpret trade-offs between recall-oriented retrieval settings and
-precision-oriented reranking settings while keeping MRR@5 as the main criterion for reporting and model selection.
+We evaluate systems on the CheckThat! Task 1 query sets by matching retrieved \texttt{pubkey}s against the gold \texttt{pubkey} for each query. The official evaluation metric for the task is MRR@5. We also tracked Recall@100 to monitor candidate-generation quality and to verify that reranking gains do not come from overly aggressive filtering.
 \clearpage
