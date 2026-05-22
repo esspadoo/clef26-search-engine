@@ -244,95 +244,29 @@ In Figure~\ref{fig:rank-buckets}, a visual representation of the distribution is
 \end{figure}
 \subsubsection{Error patterns and failure analysis}
 
-We have manually inspected and analyzed a sample of 50 queries taken from the TRAIN split's missing cases of the \texttt{Nemotron Baseline} run. This sample is not statistically representative but have helped us understand some failures patterns:
+We manually inspected missing cases as a qualitative diagnostic. The following patterns are not mutually exclusive and should be interpreted as plausible failure modes rather than a measured taxonomy:
+
 \begin{enumerate}
-    \item \textbf{Claim-to-abstract specificity mismatch (approximately 40\% of the inspected missing cases):} Claims often mention specific findings, medical outcomes, or statistical results that are not present in the indexed title and abstract metadata. This makes the gold paper hard to retrieve when the query emphasizes details that are unavailable to the first-stage retriever.
+    \item \textbf{Claim-to-metadata specificity mismatch:} Some claims mention specific findings, medical outcomes, or statistical results that are not present in the indexed title and abstract metadata. These cases are difficult for the first-stage retriever because the query emphasizes details unavailable in the indexed document representation.
 
-    \item \textbf{Semantic drift from translation (approximately 30\% of non-English cases):} French or German queries that mention domain-specific terminology or colloquialisms lose meaning during translation to English. Example: French ``étude'' (study) maps to English ``study'', but the context-specific nuance is lost, leading the retriever to conflate unrelated papers about different types of studies.
+    \item \textbf{Translation artifacts in non-English queries:} In French and German runs, some translated queries contain domain-term shifts, awkward literal translations, or untranslated technical expressions. These artifacts can reduce lexical and semantic alignment with the English title--abstract corpus.
 
-    \item \textbf{Implicit reference without lexical overlap (approximately 30\% of missing cases):} Claims refer to a paper indirectly through its broader context (e.g., ``recent research from Stanford on AI safety'') without mentioning concrete findings, author names, or venue. The social-media wording emphasizes context rather than content.
+    \item \textbf{Implicit references with little lexical overlap:} Some claims refer to a paper indirectly, using phrases such as ``this study'' or ``these papers'' without naming concrete findings, authors, institutions, or venues. In these cases, the social-media wording provides too little evidence for reliable candidate retrieval.
 \end{enumerate}
 
 \subsubsection{Performance by query characteristics}
 
-Preliminary analysis suggests that query length correlates with retrieval success: longer queries (median 35+ tokens) achieve MRR@5 of 0.71, while shorter queries (median $\leq 20$ tokens) achieve only 0.65 MRR@5 on N1000. This is consistent with the intuition that longer claims provide more semantic and lexical clues for retrieval. Queries mentioning named entities (authors, institutions, conferences) achieve MRR@5 of 0.73, while entity-sparse queries achieve only 0.68. These observations are exploratory and should be interpreted as heuristic patterns rather than formal statistical findings. This underscores the value of hybrid retrieval that combines lexical and semantic signals.
+Figure~\ref{fig:query-characteristics-mrr} reports a query-level characterization of the \texttt{Nemotron Baseline} run on the English TRAIN split. Contrary to our initial intuition, token length alone is not positively associated with higher MRR@5 in this run: short queries with at most 20 tokens reach 0.760 MRR@5, medium-length queries reach 0.713, and long queries with at least 35 tokens reach 0.672. This suggests that longer tweet-like claims often add conversational or contextual material that does not necessarily help identify the target paper.
 
-\subsubsection{Paired comparisons}
-
-Table~\ref{tab:paired-tests} reports paired sign tests on per-query MRR@5 differences. The sign test is less assumption-heavy than a paired t-test because it uses only the direction of per-query changes. We also report the mean difference and a normal-approximation confidence interval for the magnitude of the improvement. Since the same queries are evaluated for each pair of systems, the comparisons are paired.
-
-\begin{table*}[htbp]
-    \centering
-    \footnotesize
-    \caption{Paired comparisons on per-query MRR@5. Positive/negative/tied counts indicate how often the second run improves, worsens, or matches the first run on the same query.}
-    \label{tab:paired-tests}
-    \resizebox{\textwidth}{!}{%
-    \begin{tabular}{l r r r r r}
-        \toprule
-        Comparison & Mean $\Delta$ & Relative $\Delta$ & 95\% CI & Pos./Neg./Tie & Sign-test $p$ \\
-        \midrule
-        H513 $\rightarrow$ N1000 & +0.1451 & +26.1\% & [0.1396, 0.1505] & 3952 / 667 / 10358 & $<0.001$ \\
-        N100 $\rightarrow$ N500 & +0.0164 & +2.4\% & [0.0139, 0.0188] & 682 / 499 / 13796 & $<0.001$ \\
-        N500 $\rightarrow$ N1000 & +0.0008 & +0.1\% & [-0.0003, 0.0018] & 203 / 263 / 14511 & 0.005 \\
-        H315 $\rightarrow$ H513 & -0.0005 & -0.1\% & [-0.0017, 0.0008] & 464 / 473 / 14040 & 0.769 \\
-        \bottomrule
-    \end{tabular}%
-    }
-\end{table*}
-
-The comparison between \texttt{H513} and \texttt{N1000} is both statistically and practically meaningful: the confidence
-interval is far from zero, and many more queries improve than worsen. The comparison between \texttt{N100} and \texttt{N500}
-is smaller but still meaningful, confirming that exposing more candidates to the reranker helps. By contrast, \texttt{N500}
-versus \texttt{N1000} is not practically stable for MRR@5. The mean difference is slightly positive, but the confidence
-interval crosses zero and more individual queries worsen than improve. The value of \texttt{N1000} is therefore mainly
-its higher Recall@100, not a clear early-rank advantage. Finally, \texttt{H315} and \texttt{H513} are statistically
-indistinguishable in MRR@5, so the choice of \texttt{H513} is justified by its slightly stronger candidate-generation
-recall rather than by early precision.
-
-The plot-based paired comparisons tell the same story. Figure~\ref{fig:mrr-baseline-delta} reports the mean MRR@5 gain
-over a reference baseline for each split. On the training split, all Nemotron rerankers improve substantially over the
-baseline retriever, with gains between roughly +0.128 and +0.145 MRR@5; the largest shift is again the top-1000 reranker.
-On the development split, every Nemotron-based system improves over the GTE/ModernBERT baseline, but the fine-tuned LoRA
-model produces the largest mean gain, approximately +0.082 MRR@5. This confirms that fine-tuning helps beyond simply
-reranking more candidates with the untuned model.
+The named-entity cue analysis is more consistent with the retrieval intuition. Using a lightweight heuristic based on author-like capitalization patterns, acronyms, and institution or venue keywords, entity-rich queries reach 0.733 MRR@5, while entity-sparse queries reach 0.664. These observations remain exploratory and should be interpreted as heuristic patterns rather than formal statistical findings, but they support the value of hybrid retrieval that combines lexical anchors with semantic matching.
 
 \begin{figure*}[htbp]
     \centering
-    \begin{subfigure}[t]{0.4\textwidth}
-        \centering
-        \includegraphics[width=\linewidth]{../results/statistics/en_train_all_systems/plots/mrr5/mrr5_baseline_delta.png}
-        \caption{English TRAIN, relative to \texttt{bge\_m3\_hybrid\_315}.}
-    \end{subfigure}
-    \hfill
-    \begin{subfigure}[t]{0.59\textwidth}
-        \centering
-        \includegraphics[width=\linewidth]{../results/statistics/en_dev_all_systems/plots/mrr5/mrr5_baseline_delta.png}
-        \caption{English DEV, relative to the GTE/ModernBERT baseline.}
-    \end{subfigure}
-    \caption{Mean MRR@5 difference versus the reference baseline on the English TRAIN and DEV splits. Error bars show the
-                95\% confidence interval of the paired mean difference.}
-    \label{fig:mrr-baseline-delta}
+    \includegraphics[width=0.95\textwidth]{../figure/query_characteristics_mrr.png}
+    \caption{Mean per-query MRR@5 for the \texttt{Nemotron Baseline} English TRAIN run grouped by query length and by a lightweight named-entity cue score. Error bars show normal-approximation 95\% confidence intervals over queries.}\label{fig:query-characteristics-mrr}
 \end{figure*}
 
-Figure~\ref{fig:mrr-significance-train} summarizes the Holm-corrected pairwise Wilcoxon results for MRR@5 on the English
-training split. Most cells are significant after correction, which means that the major differences visible in the
-aggregate tables are also supported at query level. The most informative exceptions are exactly the close cases discussed
-above: \texttt{H315} versus \texttt{H513} is not significant, \texttt{nemotron\_topk400} versus \texttt{rer\_bge\_m3\_hybrid\_513\_nemotron}
-is not significant, and the contrast between the top-500 and top-1000 Nemotron rerankers is only marginal after Holm correction ($p=0.050$).
-
-\begin{figure*}[htbp]
-    \centering
-    \includegraphics[width=0.78\textwidth]{../results/statistics/en_train_all_systems/plots/mrr5/mrr5_holm_pvalues.png}
-    \caption{Holm-adjusted pairwise Wilcoxon $p$-values for MRR@5 on the English TRAIN split. Red cells indicate statistically
-                reliable differences after multiple-comparison correction; green cells indicate that the two systems cannot
-                be separated reliably on per-query MRR@5.}
-    \label{fig:mrr-significance-train}
-\end{figure*}
-
-ANOVA and Tukey HSD should only be used after checking their assumptions; for discrete per-query MRR@5 scores, paired non-parametric tests and bootstrap confidence intervals are usually the safer choice. For the official TEST split, descriptive effectiveness metrics can now be computed because the local gated release includes gold labels. We do not add a separate paired significance table here, because the paper's hypothesis-testing section is still anchored to the TRAIN and DEV experiment grids; extending the same Wilcoxon/bootstrap procedure to TEST is straightforward once the comparison set of submitted TEST runs is fixed.
-
-\subsection{Reproducibility and Remaining TODOs}
-\label{sub:results-reproducibility}
+\subsection{Reproducibility and Remaining TODOs}\label{sub:results-reproducibility}
 
 All aggregate metrics, per-query summaries, confidence intervals, rank buckets, and figures in this section were generated from the ranked outputs and gold labels available for the labeled splits, including the gated official TEST files used for Table~\ref{tab:test-effectiveness}. The same deterministic procedure was used for all systems included in the paired statistical analysis, and the implementation is released together with the system code referenced in Section~\ref{sec:setup}.
 
