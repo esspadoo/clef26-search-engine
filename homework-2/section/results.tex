@@ -120,36 +120,9 @@ The results obtained from the official TEST set confirm that the final system is
 On the TEST set, the reranking in computed from the top-2000 candidates retrieved by the BGE-M3 hybrid retriever, which is a deeper pool than the top-1000 used for the TRAIN runs. This is because the DEV results suggested that deeper reranking can still improve Recall@100, and we wanted to maximize recall for the final submission. The improvement from top-1000 to top-2000 candidates on the DEV set was modest but positive, so we opted for the deeper pool in the TEST submission to give the reranker more chances to find relevant documents. The final TEST results are consistent with the DEV results, which suggests that the pipeline generalizes reasonably well to unseen queries and that the translation step does not introduce excessive noise.
 \subsection{Statistical Analysis}\label{sub:statistical-analysis}
 
-We separate descriptive evidence from hypothesis testing. The descriptive part characterizes the distribution of per-query MRR@5 scores, while the paired tests compare systems on the same queries. This is important because aggregate metrics alone hide whether an improvement is broad across many queries or concentrated in a smaller number of large corrections. The tests below are restricted to runs for which ranked outputs are available; the aggregate-only rows in Table~\ref{tab:aggregate-rerankers} should be tested in the same way once their per-query outputs are restored.
+We separate descriptive evidence from hypothesis testing. The descriptive part characterizes the distribution of per-query MRR@5 scores, while the paired tests compare systems on the same queries. This is important because aggregate metrics alone hide whether an improvement is broad across many queries or concentrated in a smaller number of large corrections.
 
-The full plot sets generated for the English \texttt{train\_set} and \texttt{dev\_set} make the same progression visible
-at a glance. Figure~\ref{fig:stat-overview} summarizes the mean scores for all reported metrics. On the English training split,
-the hybrid retrievers form a tight cluster around MRR@5 $\approx 0.51$--$0.56$ and Recall@100 $\approx 0.83$--$0.84$, whereas
-every reranked variant moves the full metric profile upward. The strongest overall training run remains the top-1000 Nemotron reranker,
-which combines the highest MRR@5, MAP, and nDCG values with Recall@100 above 0.91. On the English development split,
-the same pattern holds on a smaller comparison set: the fine-tuned Nemotron LoRA run is the strongest system on every
-reported metric, while the untuned Nemotron baselines and the alternative LoRA run remain clearly above the GTE/ModernBERT
-baseline but below the retained fine-tuned model.
-
-\begin{figure*}[t]
-    \centering
-    \begin{subfigure}[t]{\textwidth}
-        \centering
-        \includegraphics[width=\linewidth]{../results/statistics/en_train_all_systems/plots/mean_metric_overview.png}
-        \caption{English TRAIN.}
-    \end{subfigure}
-
-    \vspace{0.8em}
-
-    \begin{subfigure}[t]{.75\textwidth}
-        \centering
-        \includegraphics[width=\linewidth]{../results/statistics/en_dev_all_systems/plots/mean_metric_overview.png}
-        \caption{English DEV.}
-    \end{subfigure}
-    \caption{Overview heatmaps of the mean metric values produced by the statistical-analysis runs.
-                Each cell reports the average per-query score for one system and metric.}\label{fig:stat-overview}
-\end{figure*}
-
+\textbf{CHECK IF IMAGE NECESSARY}
 \subsubsection{Descriptive statistics}
 
 Table~\ref{tab:mrr-descriptive-stats} reports per-query MRR@5 statistics for the retained hybrid run and the Nemotron
@@ -160,7 +133,7 @@ of queries receive a non-zero MRR@5 score after reranking, whereas the hybrid-on
 \begin{table*}[htbp]
     \centering
     \footnotesize
-    \caption{Descriptive statistics of per-query MRR@5 on the labeled English split. Confidence intervals use the normal approximation over queries.}\label{tab:mrr-descriptive-stats}
+    \caption{Descriptive statistics of per-query MRR@5 on the TRAIN English split. Confidence intervals use the normal approximation over queries.}\label{tab:mrr-descriptive-stats}
     \resizebox{\textwidth}{!}{%
     \begin{tabular}{l r r r r r r r r}
         \toprule
@@ -175,9 +148,9 @@ of queries receive a non-zero MRR@5 score after reranking, whereas the hybrid-on
     }
 \end{table*}
 
-Figure~\ref{fig:mrr-mean-ci} provides a direct visual comparison across the English statistical-analysis runs; on the training split the confidence
+\textbf{Figure~\ref{fig:mrr-mean-ci} provides a direct visual comparison across the English statistical-analysis runs; on the training split the confidence
 intervals of \texttt{H315} and \texttt{H513} nearly coincide, confirming that the two retained hybrid settings are essentially
-tied on MRR@5 even though they differ slightly in Recall@100. The same figure also shows that the gain from reranking is
+tied on MRR@5 even though they differ slightly in Recall@100.} The same figure also shows that the gain from reranking is
 not marginal: the Nemotron family shifts the mean from roughly 0.56 to roughly 0.69--0.70. On the development split,
 the fine-tuned Nemotron LoRA model reaches 0.716 MRR@5 with a 95\% interval of [0.703, 0.729], clearly above the GTE/ModernBERT
 baseline and modestly above the untuned Nemotron runs.
