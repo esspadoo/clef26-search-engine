@@ -178,13 +178,13 @@ The Friedman omnibus test rejects the null hypothesis that all English TRAIN sys
 \begin{table*}[htbp]
     \centering
     \footnotesize
-    \caption{Formal statistical tests on per-query MRR@5 for the English TRAIN split. The Friedman row is the omnibus test over all 12 systems and 14,977 queries; pairwise rows use two-sided Wilcoxon signed-rank tests with Holm correction over all pairwise comparisons. Pairwise mean differences are computed as the second system minus the first.}\label{tab:formal-statistical-tests}
+    \caption{Formal statistical tests on per-query MRR@5 for the English TRAIN split. The Friedman row is the omnibus test over all tested systems and 14,977 queries; pairwise rows use two-sided Wilcoxon signed-rank tests with Holm correction over all pairwise comparisons. Pairwise mean differences are computed as the second system minus the first.}\label{tab:formal-statistical-tests}
     \resizebox{\textwidth}{!}{%
     \begin{tabular}{l p{4.1cm} r r l}
         \toprule
         Test & Systems / comparison & Mean difference & $p$-value & Interpretation \\
         \midrule
-        Friedman omnibus & All 12 English TRAIN systems & -- & $<0.001$ & At least one system differs \\
+        Friedman omnibus & All tested English TRAIN systems & -- & $<0.001$ & At least one system differs \\
         Wilcoxon--Holm & \texttt{H315} vs \texttt{H513} & -0.0005 & $1.0000$ & No significant difference \\
         Wilcoxon--Holm & \texttt{H424} vs \texttt{H513} & +0.0500 & $8.58\times10^{-116}$ & \texttt{H513} significantly better \\
         Wilcoxon--Holm & \texttt{H513} vs \texttt{N1000} & +0.1451 & $<0.001$ & \texttt{N1000} significantly better \\
