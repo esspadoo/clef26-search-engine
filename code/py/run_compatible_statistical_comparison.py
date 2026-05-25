@@ -3,9 +3,9 @@
 Discover compatible ranking files, generate StatisticalEvaluator JSON files,
 and produce comparison plots for all selected systems.
 
-By default this targets English TRAIN, because the broadest available active
-system set in this repository uses `code/data/Train_set/en_train.json` and
-contains the BGE hybrid runs plus the Nemotron reranked variants.
+(by default this targets English TRAIN, because the broadest available active
+system set in the repo uses `code/data/Train_set/en_train.json` and
+contains the BGE hybrid runs plus the Nemotron reranked variants)
 
 Example:
     python3 code/py/run_compatible_statistical_comparison.py \
@@ -26,6 +26,7 @@ from pathlib import Path
 import re
 import subprocess
 import sys
+import shlex
 
 
 DEFAULT_QUERY_FILE = "code/data/Train_set/en_train.json"
@@ -352,16 +353,20 @@ def generate_stats(query_file: Path, rows: list[dict], stats_dir: Path) -> list[
     for row in rows:
         output_json = stats_output_path(stats_dir, row["system"])
         output_paths.append(output_json)
+        args = [
+            str(query_file),
+            str(row["path"]),
+            str(output_json),
+            row["system"],
+        ]
+        quoted_args = " ".join(shlex.quote(arg) for arg in args)
         run_command(
             [
                 "mvn",
                 "-q",
                 "exec:java",
                 "-Dexec.mainClass=unipd.se.StatisticalEvaluator",
-                (
-                    f"-Dexec.args={query_file} {row['path']} "
-                    f"{output_json} {row['system']}"
-                ),
+                f"-Dexec.args={quoted_args}",
             ]
         )
     return output_paths

@@ -38,6 +38,10 @@
 *.synctex.gz
 *.bbl
 *.blg
+*.abs
+*.fdb_latexmk
+*.fls
+*.xmpdata
 
 # Matlab
 *.m~
@@ -82,3 +86,10 @@ myenv/
 !/data/expanded_queries.json
 
 index/
+
+# Python
+__pycache__/
+
+# Matplotlib / plotting caches
+results/statistics/**/.tmp-plot-home/
+results/statistics/**/.config/matplotlib/

@@ -46,7 +46,7 @@ Because the pipeline is staged, we align metrics with stage objectives:
 Recall@100 is the primary diagnostic for the retrieval (candidate-generation) stage, while MRR@5 is the primary objective for the reranking stage.
 We additionally report MAP and nDCG@10 to describe ranking quality beyond the early positions.
 
-Per-query MRR@5 is zero unless the gold paper appears within the first five ranks and equals $1/r$ when the first relevant document appears at rank $r \le 5$. Confidence intervals reported in descriptive tables use the normal approximation over per-query scores and are explicitly labeled as descriptive summaries rather than inferential tests.
+Per-query MRR@5 is zero unless the gold paper appears within the first five ranks and equals $1/r$ when the first relevant document appears at rank $r \le 5$. Confidence intervals reported in descriptive tables use the normal approximation over per-query scores and are explicitly labeled as descriptive summaries rather than inferential tests; they do not adjust for multiple comparisons.
 
 \subsection{Run comparison on the TRAIN English split}\label{sub:run-comparison}
 
@@ -132,7 +132,7 @@ Table~\ref{tab:test-effectiveness} reports micro-averaged metrics per language. 
 
 \subsection{Statistical analysis}\label{sub:statistical-analysis}
 
-We separate descriptive summaries from formal hypothesis tests. Descriptive confidence intervals (Figure~\ref{fig:mrr-mean-ci}) summarize uncertainty around mean per-query scores but do not by themselves imply statistical significance. For inference we follow a stage-aligned strategy: test retrieval-stage decisions on Recall@100 (coverage), and test reranking-stage decisions on MRR@5 (early precision). For each metric we perform a Friedman omnibus test over repeated measures; when the omnibus rejects, we report pairwise Wilcoxon signed-rank tests with Holm correction to control family-wise error across all tested pairs~\cite{Friedman1937,Wilcoxon1945}.
+We separate descriptive summaries from formal hypothesis tests. Descriptive confidence intervals (Figure~\ref{fig:mrr-mean-ci}) summarize uncertainty around mean per-query scores but do not by themselves imply statistical significance and do not correct for multiple comparisons. For inference we follow a stage-aligned strategy: test retrieval-stage decisions on Recall@100 (coverage), and test reranking-stage decisions on MRR@5 (early precision). Because per-query metrics are bounded and strongly non-normal, we use the non-parametric Friedman repeated-measures test as the omnibus alternative to a repeated-measures ANOVA. For each metric we perform a Friedman omnibus test over repeated measures; when the omnibus rejects, we report pairwise Wilcoxon signed-rank tests with Holm correction to control family-wise error across all tested pairs~\cite{Friedman1937,Wilcoxon1945}.
 
 \subsubsection{Descriptive statistics}
 
@@ -169,7 +169,7 @@ Table~\ref{tab:mrr-descriptive-stats} summarizes per-query MRR@5 for H513 and Ne
         \includegraphics[width=\linewidth]{../figure/MRR5_DEV.png}
         \caption{English DEV.}
     \end{subfigure}
-    \caption{Mean MRR@5 with normal-approximation 95\% confidence intervals for the English TRAIN and DEV statistical-analysis runs.}\label{fig:mrr-mean-ci}
+    \caption{Mean MRR@5 with normal-approximation 95\% confidence intervals for the English TRAIN and DEV statistical-analysis runs. These bands are descriptive only and do not account for multiple comparisons.}\label{fig:mrr-mean-ci}
 \end{figure*}
 
 Figure~\ref{fig:mrr-mean-ci} visualizes the mean per-query MRR@5 and the associated normal-approximation 95\% confidence intervals for both the large TRAIN split and the smaller DEV split. The plot makes two descriptive points clear:
@@ -182,7 +182,7 @@ These CIs are descriptive uncertainty bands (normal-approximation); formal hypot
 
 \subsubsection{Formal significance testing}
 
-The Friedman omnibus test rejects the null hypothesis that all English TRAIN systems share the same per-query MRR@5 distribution; consequently we present Holm-corrected pairwise Wilcoxon tests to identify which differences are statistically supported. Table~\ref{tab:formal-statistical-tests} shows the comparisons most relevant to pipeline decisions. Because of our staged pipeline, MRR@5 is the primary inferential target for reranking-stage comparisons, while Recall@100 is used for retrieval-stage comparisons.
+The Friedman omnibus test rejects the null hypothesis that all English TRAIN systems share the same per-query MRR@5 distribution ($\chi^2=21368.46$, $p<0.001$). We then report two-sided Wilcoxon signed-rank tests with Holm correction to control the family-wise error rate across all pairwise system comparisons for each metric. Table~\ref{tab:formal-statistical-tests} shows the comparisons most relevant to pipeline decisions. Because of our staged pipeline, MRR@5 is the primary inferential target for reranking-stage comparisons, while Recall@100 is used for retrieval-stage comparisons.
 
 \begin{table*}[htbp]
     \centering
@@ -191,13 +191,13 @@ The Friedman omnibus test rejects the null hypothesis that all English TRAIN sys
     \resizebox{\textwidth}{!}{%
     \begin{tabular}{l p{4.1cm} r r l}
         \toprule
-        Test & Systems / comparison & Mean difference & $p$-value & Interpretation \\
+        Test & Systems / comparison & Mean difference & $p_{\mathrm{holm}}$ & Interpretation \\
         \midrule
         Friedman omnibus & All tested English TRAIN systems & -- & $<0.001$ & At least one system differs \\
-        Wilcoxon--Holm & \texttt{H315} vs \texttt{H513} & -0.0005 & $1.0000$ & No significant difference \\
+        Wilcoxon--Holm & \texttt{H315} vs \texttt{H513} & -0.0005 & 1.0000 & No significant difference \\
         Wilcoxon--Holm & \texttt{H424} vs \texttt{H513} & +0.0500 & $8.58\times10^{-116}$ & \texttt{H513} significantly better \\
         Wilcoxon--Holm & \texttt{H513} vs \texttt{N1000} & +0.1451 & $<0.001$ & \texttt{N1000} significantly better \\
-        Wilcoxon--Holm & \texttt{N500} vs \texttt{N1000} & +0.0008 & $0.0497$ & Significant but negligible in size \\
+        Wilcoxon--Holm & \texttt{N1000} vs \texttt{N500} & -0.0008 & 0.0497 & Significant but negligible in size \\
         \bottomrule
     \end{tabular}%
     }
