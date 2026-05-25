@@ -127,6 +127,11 @@ def parse_args() -> argparse.Namespace:
         default=0.05,
         help="Significance level for Tukey HSD.",
     )
+    parser.add_argument(
+        "--skip-plot",
+        action="store_true",
+        help="Skip generating the boxplot PNG to speed up statistical runs.",
+    )
     return parser.parse_args()
 
 
@@ -487,6 +492,7 @@ def run_metric_analysis(
     outdir: Path,
     title: str,
     alpha: float,
+    skip_plot: bool,
 ) -> None:
     outdir.mkdir(parents=True, exist_ok=True)
 
@@ -510,7 +516,8 @@ def run_metric_analysis(
 
     write_long_csv(rows, long_csv)
     write_summary_csv(rows, summary_csv)
-    build_boxplot(rows, boxplot_png, title, metric_label)
+    if not skip_plot:
+        build_boxplot(rows, boxplot_png, title, metric_label)
     anova_summary = run_anova(rows, anova_csv)
     tukey_rows = run_tukey(rows, alpha, tukey_csv, anova_summary)
     write_report(report_txt, metric_label, title, anova_summary, tukey_rows)
@@ -530,10 +537,11 @@ def main() -> None:
         "pandas",
         INSTALL_HINT,
     )
-    require_dependency(
-        "matplotlib",
-        INSTALL_HINT,
-    )
+    if not args.skip_plot:
+        require_dependency(
+            "matplotlib",
+            INSTALL_HINT,
+        )
     require_dependency(
         "statsmodels",
         INSTALL_HINT,
@@ -555,7 +563,7 @@ def main() -> None:
     for metric_name in metrics:
         outdir = base_outdir / metric_name if multiple_metrics else base_outdir
         title = metric_title(metric_name, args.title, multiple_metrics)
-        run_metric_analysis(input_paths, metric_name, outdir, title, args.alpha)
+        run_metric_analysis(input_paths, metric_name, outdir, title, args.alpha, args.skip_plot)
 
 
 if __name__ == "__main__":
