@@ -1,9 +1,16 @@
 % !TEX root = ../homework-2.tex
 \section{Results and Discussion}\label{sec:results}
 
-\subsection{Main Results}
-The main takeaway from the labeled English experiments is that performance improves in a clear progression: lexical tuning gives a usable baseline, hybrid retrieval improves candidate quality, and neural reranking produces the largest gains. Table~\ref{tab:main-results} highlights representative configurations from that progression rather than listing every run we executed. The comparison uses the English run-analysis sheet with 14,977 evaluated queries from the \texttt{train\_set}, and all metric values are rounded to three decimals.\\
-In the analyzer rows, \texttt{MyEnglishAnalyzer\_V2} denotes the Lucene analyzer using the RankSNL large stopword list, ASCII folding, lowercasing, English possessive removal, and KStem. \texttt{Searcher} V2 denotes the BM25 searcher variant that adds Boolean \texttt{OR} clauses.
+\subsection{Overview}
+This section summarizes the empirical evidence that supports our pipeline choices and diagnoses remaining failure modes. 
+We organize the presentation by
+\begin{itemize}
+    \item descriptive summaries of effectiveness on the labeled TRAIN and DEV splits,
+    \item formal per-query inference that tests the key design decisions, and
+    \item error and rank-bucket analyses that explain residual failures.
+\end{itemize}
+The TRAIN English split (14,977 labeled queries) is our primary source for per-query statistical analysis because of its size; DEV splits are used for multilingual validation and TEST for submission diagnostics.
+Table~\ref{tab:main-results} reports representative runs spanning lexical tuning, hybrid retrieval, and neural reranking. Values are computed on the TRAIN split and rounded to three decimals. The pipeline pattern is consistent: hybrid candidates improve recall relative to tuned lexical baselines, and neural reranking substantially improves early-precision metrics such as MRR@5.
 
 \begin{table*}[htbp]
     \centering
@@ -18,7 +25,7 @@ In the analyzer rows, \texttt{MyEnglishAnalyzer\_V2} denotes the Lucene analyzer
         Analyzer tuning & Analyzer V1.12 & BM25 retrieval with KStem and an EBSCOhost/MEDLINE/CINAHL stoplist variant & 0.450 & 0.783 \\
         Retrieval only & Hybrid A & BGE-M3 hybrid retrieval with dense, sparse, and ColBERT weights of $0.35$, $0.15$, and $0.50$ & 0.557 & 0.837 \\
         Retrieval only & Hybrid B & BGE-M3 hybrid retrieval with dense, sparse, and ColBERT weights of $0.50$, $0.15$, and $0.35$ & 0.557 & 0.839 \\
-        Best model reranking & Nemotron top-100 & \texttt{bge\_m3\_hybrid\_513} candidates reranked with \nolinkurl{nvidia/llama-nemotron-rerank-1b-v2} & 0.691 & 0.839 \\
+        Best model reranking & Nemotron top-100 & \texttt{bge\_m3\_hybrid\_513} candidates reranked with \nolinkurl{nvidia/llama-nemotron-rerank-1b-v2} & 0.685 & 0.839 \\
         Best model reranking & Nemotron top-1000 & \texttt{bge\_m3\_hybrid\_513} candidates reranked with \nolinkurl{nvidia/llama-nemotron-rerank-1b-v2} & 0.702 & 0.911 \\
         Alternative rerankers & Qwen3-4B top-100 & \texttt{bge\_m3\_hybrid\_513} candidates reranked with Qwen3-reranker-4B & 0.662 & 0.839 \\
         Alternative rerankers & GTE-ModernBERT top-100 & \texttt{bge\_m3\_hybrid\_513} candidates reranked with \nolinkurl{Alibaba-NLP/gte-reranker-modernbert-base} & 0.652 & 0.852 \\
@@ -27,22 +34,23 @@ In the analyzer rows, \texttt{MyEnglishAnalyzer\_V2} denotes the Lucene analyzer
     }
 \end{table*}
 
-The results show a consistent progression from lexical retrieval toward neural ranking. The best retrieval-only configuration reaches an MRR@5 of 0.557, while the strongest reranked run reported in Table~\ref{tab:main-results} reaches 0.702. The largest observed step comes from adding
-\\\texttt{nvidia/llama-nemotron-rerank-1b-v2}: the top-1000 Nemotron run reaches an MRR@5 of 0.702 and Recall@100 of 0.911, compared with 0.557 and 0.839 for the retained hybrid retriever. The formal per-query significance tests for the main English comparisons are reported in Section~\ref{sub:statistical-analysis}. Due to limited computing resources and time constraints, we were not able to run the same setting on the full English training dataset; it would have required more than 40 hours of computation on our RTX 3090 for the top-k = 1000 reranking.
+\subsection{Evaluation evidence and metrics}\label{sub:results-evidence}
 
-For the runs performed on the \texttt{dev\_set}, we provide a separate multilingual check rather than a single aggregate score. On the English development split, the non-fine-tuned Nemotron baseline reaches 0.675 MRR@5 and 0.835 Recall@100 when reranking the top 100 candidates; it reaches 0.692 MRR@5 and 0.909 Recall@100 when reranking the top 1000 candidates. The fine-tuned Nemotron LoRA run on the same English development split reaches 0.716 MRR@5 and 0.913 Recall@100. The corresponding fine-tuned development runs reach 0.76 MRR@5 and 0.929 Recall@100 for French and 0.67 MRR@5 and 0.889 Recall@100 for German with the top-2000 candidate setting.
+We combine three complementary sources of evidence:
+\begin{itemize}
+    \item the large TRAIN English run-analysis split (14,977 labeled queries) for robust per-query inference;
+    \item multilingual DEV splits for validation across languages;
+    \item the official TEST set for diagnostic checks on the submitted runs.
+\end{itemize}
+Because the pipeline is staged, we align metrics with stage objectives:
+Recall@100 is the primary diagnostic for the retrieval (candidate-generation) stage, while MRR@5 is the primary objective for the reranking stage.
+We additionally report MAP and nDCG@10 to describe ranking quality beyond the early positions.
 
-\subsection{Evaluation Evidence and Metrics}\label{sub:results-evidence}
+Per-query MRR@5 is zero unless the gold paper appears within the first five ranks and equals $1/r$ when the first relevant document appears at rank $r \le 5$. Confidence intervals reported in descriptive tables use the normal approximation over per-query scores and are explicitly labeled as descriptive summaries rather than inferential tests.
 
-We report three complementary forms of evidence. First, we use the TRAIN English run-analysis split to compare retrieval and reranking configurations over 14,977 queries. This is the largest labeled split available to us and is therefore the most reliable source for per-query statistical analysis. Second, we validate the final fine-tuned reranker on the multilingual DEV splits: English, French, and German. Third, we evaluate the final official TEST submission; this lets us report effectiveness metrics for the final multilingual runs.
+\subsection{Run comparison on the TRAIN English split}\label{sub:run-comparison}
 
-The primary metric is MRR@5, following the task objective. We also report Recall@100 to measure whether the correct paper remains in the candidate set, and MAP and nDCG@10 to describe the quality of the ranking beyond the first reciprocal-rank hit. Since each query has a single gold publication in the available labeled files, per-query MRR@5 is zero unless the gold paper appears in the first five positions, and is $1/r$ when the first relevant paper appears at rank $r \leq 5$.
-
-\subsection{Run Comparison on the TRAIN English Split}\label{sub:run-comparison}
-
-In this section, we further analyze the effects of varying the parameters and pool depth of the main pipeline components.
-All modified parameters are reported in Table~\ref{tab:run-comparison}.
-The hybrid runs differ in the linear weights assigned to dense, sparse, and ColBERT-style BGE-M3 signals. The reranking runs use the retained hybrid candidate generator \texttt{H513} and rerank increasingly deep candidate pools with \texttt{nvidia/llama-nemotron-rerank-1b-v2}. The $\Delta$ column is computed against \texttt{H513}, because this is the hybrid configuration used by the submitted reranking pipeline.
+Table~\ref{tab:run-comparison} summarizes the main runs used in the TRAIN analysis. The hybrid variants differ only in the linear combination of dense, sparse, and ColBERT-style BGE-M3 signals; H513 is the retained hybrid used as the candidate generator for reranking. Reranking experiments apply the Nemotron family to H513 candidates with increasing pool depth (top-100, top-500, top-1000). The $\Delta$ column in the table reports differences against H513 to make the pipeline effect explicit.
 
 \begin{table*}[htbp]
     \centering
@@ -66,16 +74,15 @@ The hybrid runs differ in the linear weights assigned to dense, sparse, and ColB
     }
 \end{table*}
 
-The weakest configuration among the reported runs is \texttt{H424}, with MRR@5 of 0.5067. Increasing the dense component while keeping a moderate sparse contribution is beneficial: \texttt{H513} improves MRR@5 by 0.0500 over \texttt{H424} and also reaches the best Recall@100 among the hybrid-only runs. \texttt{H315} has a marginally higher MRR@5 than \texttt{H513}, but its Recall@100 is lower. For this reason, \texttt{H513} is the more appropriate candidate generator for the full pipeline, where the goal of retrieval is to expose as many plausible documents as possible to the reranker.
+H424 is the weakest reported hybrid configuration, while H513 and H315 perform substantially better on early-precision metrics. H513 has an advantage in Recall@100 relative to H315, which motivates its selection as the candidate generator for the full pipeline: retrieval should prioritize coverage that the reranker can refine. Neural reranking (Nemotron) yields the largest improvements: moving from H513 to N1000 increases MRR@5 by roughly 0.145 and increases Recall@100 notably, showing that deeper reranking improves both precision and coverage. However, gains in MRR@5 beyond top-500 are marginal, suggesting diminishing returns for very deep pools.
 
-The largest improvement is introduced by neural reranking. Moving from \texttt{H513} to \texttt{N1000} increases MRR@5 from 0.5567 to 0.7018, an absolute gain of 0.1451 and a relative improvement of 26.1\%. The gain is not only an early-rank effect: Recall@100 also rises from 0.8392 to 0.9109 when reranking a deeper candidate pool. The difference between \texttt{N500} and \texttt{N1000} is much smaller in MRR@5, only 0.0008, but \texttt{N1000} keeps a higher Recall@100. This indicates diminishing returns in early precision after roughly 500 reranked candidates, while deeper reranking still helps recover relevant documents in the tail.
+As shown later in Section~\ref{sub:statistical-analysis}, formal non-parametric inference supports these conclusions: the Friedman omnibus rejects equality across systems and Holm-corrected pairwise Wilcoxon tests identify the same stage-aligned differences summarized in Table~\ref{tab:stage-specific-tests}.
 
-The formal testing reported in Section~\ref{sub:statistical-analysis} corroborates these observations: the reranked systems are significantly better than the retained hybrid baseline, while the two strongest hybrid settings are not distinguishable on MRR@5 after correcting for multiple comparisons.
+\subsection{Multilingual DEV split validation}\label{sub:multilingual-dev}
 
-\subsection{Multilingual DEV Split Validation}\label{sub:multilingual-dev}
-
-Table~\ref{tab:multilingual-dev} reports the final fine-tuned Nemotron LoRA reranker on the multilingual development splits. These data are closer to the official multilingual TEST setting than the English-only run-analysis split, because they include translated French and German queries. The confidence intervals are normal-approximation 95\% intervals over per-query MRR@5 values; they are descriptive rather than official task intervals.\\
-To be noted that we have not performed runs with fine-tuned Nemotron LoRA on the English run-analysis split, so the DEV results cannot be directly compared with the TRAIN runs in Table~\ref{tab:run-comparison}. The DEV results are meant to validate the final pipeline on a multilingual setting, not to compare with the English-only runs. The DEV splits are also smaller than the TRAIN split, which leads to wider confidence intervals and less stable estimates.
+Table~\ref{tab:multilingual-dev} reports the fine-tuned Nemotron LoRA validation on multilingual DEV splits.
+DEV results validate the pipeline across translated queries: French consistently shows the strongest DEV performance, English is close behind, and German shows wider intervals due to fewer labeled queries.
+DEV runs were not used to re-tune the TRAIN analysis pipelines; they are presented as external validation with appropriately wider uncertainty bands.
 
 \begin{table*}[htbp]
     \centering
@@ -94,11 +101,16 @@ To be noted that we have not performed runs with fine-tuned Nemotron LoRA on the
     }
 \end{table*}
 
-The development results suggest that the final pipeline generalizes reasonably across languages after translation, but not uniformly. French is the strongest development split, with MRR@5 of 0.7599 and Recall@100 of 0.9288. German is the weakest, with MRR@5 of 0.6736 and the widest confidence interval because it has only 386 labeled queries. This lower German score is a warning for the official TEST set: the German portion is smaller than English but still accounts for 876 of the 8172 test queries, and translation or morphology errors can have a visible effect on aggregate performance.
+The development results suggest that the final pipeline generalizes reasonably across languages after translation, but not uniformly. French is the strongest development split, with MRR@5 of 0.7599 and Recall@100 of 0.9288. German is the weakest, with MRR@5 of 0.6736 and the widest confidence interval.
+Rank-bucket counts corroborate these summaries: French has the largest fraction of rank-1 successes and the fewest missing cases (496/40), while German shows fewer rank-1 hits and a higher unresolved fraction relative to its query count (237/29).
+In practice this pattern suggests that the reranker generalizes well to translated queries in French, English remains competitive, and that German's lower point estimates and wider intervals are plausibly driven by both smaller sample size and translation/terminology drift. These DEV findings validate the pipeline qualitatively and motivated the decision to use a deeper top-2000 pool in the final TEST submission to favor recall.
 
-\subsection{Official TEST Set Submission}\label{sub:test-results}
 
-The official TEST input used for submission consists of 8172 queries: 6076 in English, 1220 in French, and 876 in German. The submitted systems use the same four-stage pipeline described in Section~\ref{sec:methodology}: translate non-English queries into English, expand the query, retrieve candidates with BGE-M3 hybrid retrieval, and rerank with the fine-tuned Nemotron LoRA cross-encoder.
+\subsection{Official TEST set submission}\label{sub:test-results}
+
+
+The official TEST input used for submission consists of 8172 queries: 6076 in English, 1220 in French, and 876 in German.
+The submitted systems use the same four-stage pipeline described in Section~\ref{sec:methodology}: translate non-English queries into English, expand the query, retrieve candidates with BGE-M3 hybrid retrieval, and rerank with the fine-tuned Nemotron LoRA cross-encoder.
 
 \begin{table}[htbp]
     \centering
@@ -116,18 +128,15 @@ The official TEST input used for submission consists of 8172 queries: 6076 in En
     \end{tabular}
 \end{table}
 
-The results obtained from the official TEST set confirm that the final system is effective rather than merely well-formed; French is the strongest TEST split, followed by English, while German remains the weakest. This mirrors the development pattern in Table~\ref{tab:multilingual-dev};\\
-On the TEST set, the reranking is computed from the top-2000 candidates retrieved by the BGE-M3 hybrid retriever, which is a deeper pool than the top-1000 used for the TRAIN runs. This is because the DEV results suggested that deeper reranking can still improve Recall@100, and we wanted to maximize recall for the final submission. The improvement from top-1000 to top-2000 candidates on the DEV set was modest but positive, so we opted for the deeper pool in the TEST submission to give the reranker more chances to find relevant documents. The final TEST results are consistent with the DEV results, which suggests that the pipeline generalizes reasonably well to unseen queries and that the translation step does not introduce excessive noise.
-\subsection{Statistical Analysis}\label{sub:statistical-analysis}
+Table~\ref{tab:test-effectiveness} reports micro-averaged metrics per language. TEST metrics confirm the DEV pattern: French shows the highest aggregate MRR@5, English is competitive, and German shows lower scores and larger uncertainty. For the TEST submission we used a deeper reranking pool (top-2000) to favor recall for the final delivered runs; DEV experiments indicated modest but consistent recall gains when increasing the pool depth, so we opted for a deeper pool in TEST to maximize coverage of the gold document.
 
-We separate descriptive evidence from hypothesis testing. The descriptive part characterizes the distribution of per-query MRR@5 scores, while the formal tests compare systems on the same queries. This distinction is important because confidence intervals in Figure~\ref{fig:mrr-mean-ci} are descriptive summaries of uncertainty around mean scores; they are not, by themselves, statistical significance tests. For inference, we use the Friedman test as a non-parametric omnibus test over repeated measurements on the same queries, followed by paired Wilcoxon signed-rank tests with Holm correction for multiple pairwise comparisons~\cite{Friedman1937,Wilcoxon1945}.
+\subsection{Statistical analysis}\label{sub:statistical-analysis}
+
+We separate descriptive summaries from formal hypothesis tests. Descriptive confidence intervals (Figure~\ref{fig:mrr-mean-ci}) summarize uncertainty around mean per-query scores but do not by themselves imply statistical significance. For inference we follow a stage-aligned strategy: test retrieval-stage decisions on Recall@100 (coverage), and test reranking-stage decisions on MRR@5 (early precision). For each metric we perform a Friedman omnibus test over repeated measures; when the omnibus rejects, we report pairwise Wilcoxon signed-rank tests with Holm correction to control family-wise error across all tested pairs~\cite{Friedman1937,Wilcoxon1945}.
 
 \subsubsection{Descriptive statistics}
 
-Table~\ref{tab:mrr-descriptive-stats} reports per-query MRR@5 statistics for the retained hybrid run and the Nemotron
-reranking depths. The reranker changes the distribution, not only the mean: the median rises from 0.5 for \texttt{H513}
-to 1.0 for all Nemotron runs, and the first quartile rises from 0.0 to 0.25 after reranking. This means that at least 75\%
-of queries receive a non-zero MRR@5 score after reranking, whereas the hybrid-only system still has a first quartile of zero.
+Table~\ref{tab:mrr-descriptive-stats} summarizes per-query MRR@5 for H513 and Nemotron reranking depths on the TRAIN split. Reranking shifts the entire distribution: the median increases from 0.5 (H513) to 1.0 for Nemotron runs and the first quartile rises from 0.0 to 0.25, indicating that a substantially larger fraction of queries receive a non-zero early-precision score after reranking.
 
 \begin{table*}[htbp]
     \centering
@@ -136,23 +145,16 @@ of queries receive a non-zero MRR@5 score after reranking, whereas the hybrid-on
     \resizebox{\textwidth}{!}{%
     \begin{tabular}{l r r r r r r r r}
         \toprule
-        Run & Mean & Median & Std. dev. & Variance & Min & Q1 & Q3 & 95\% CI \\
+        Run & Mean & Median & Std. dev. & Variance & Q1 & Q3 & 95\% CI \\
         \midrule
-        H513  & 0.5567 & 0.5 & 0.4614 & 0.2129 & 0.0 & 0.00 & 1.00 & [0.5493, 0.5641] \\
-        N100  & 0.6847 & 1.0 & 0.4303 & 0.1852 & 0.0 & 0.25 & 1.00 & [0.6778, 0.6916] \\
-        N500  & 0.7010 & 1.0 & 0.4229 & 0.1788 & 0.0 & 0.25 & 1.00 & [0.6943, 0.7078] \\
-        N1000 & 0.7018 & 1.0 & 0.4223 & 0.1784 & 0.0 & 0.25 & 1.00 & [0.6950, 0.7086] \\
+        H513  & 0.5567 & 0.5 & 0.4614 & 0.2129 & 0.00 & 1.00 & [0.5493, 0.5641] \\
+        N100  & 0.6847 & 1.0 & 0.4303 & 0.1852 & 0.25 & 1.00 & [0.6778, 0.6916] \\
+        N500  & 0.7010 & 1.0 & 0.4229 & 0.1788 & 0.25 & 1.00 & [0.6943, 0.7078] \\
+        N1000 & 0.7018 & 1.0 & 0.4223 & 0.1784 & 0.25 & 1.00 & [0.6950, 0.7086] \\
         \bottomrule
     \end{tabular}%
     }
 \end{table*}
-
-Figure~\ref{fig:mrr-mean-ci} provides a direct visual comparison across the English statistical-analysis runs; on the training split the confidence
-intervals of \texttt{H315} and \texttt{H513} nearly coincide, confirming that the two retained hybrid settings are essentially
-tied on MRR@5 even though they differ slightly in Recall@100. The same figure also shows that the gain from reranking is
-not marginal: the Nemotron family shifts the mean from roughly 0.56 to roughly 0.69--0.70. On the development split,
-the fine-tuned Nemotron LoRA model reaches 0.716 MRR@5 with a 95\% interval of [0.703, 0.729], clearly above the GTE/ModernBERT
-baseline and modestly above the untuned Nemotron runs.
 
 \begin{figure*}[htbp]
     \centering
@@ -170,10 +172,17 @@ baseline and modestly above the untuned Nemotron runs.
     \caption{Mean MRR@5 with normal-approximation 95\% confidence intervals for the English TRAIN and DEV statistical-analysis runs.}\label{fig:mrr-mean-ci}
 \end{figure*}
 
+Figure~\ref{fig:mrr-mean-ci} visualizes the mean per-query MRR@5 and the associated normal-approximation 95\% confidence intervals for both the large TRAIN split and the smaller DEV split. The plot makes two descriptive points clear:
+\begin{itemize}
+    \item Nemotron reranked systems lie well above the retained hybrid baselines on mean MRR@5, and
+    \item the TRAIN CIs are much narrower than DEV's (owing to its larger sample), which increases confidence in the descriptive means reported in Table~\ref{tab:mrr-descriptive-stats}.
+\end{itemize}
+
+These CIs are descriptive uncertainty bands (normal-approximation); formal hypothesis tests are reported in the following sections.
 
 \subsubsection{Formal significance testing}
 
-The Friedman omnibus test rejects the null hypothesis that all English TRAIN systems have the same per-query MRR@5 distribution. We therefore inspect selected paired Wilcoxon signed-rank tests, using Holm-adjusted $p$-values computed over all pairwise MRR@5 comparisons. Table~\ref{tab:formal-statistical-tests} reports the comparisons most relevant to the retained pipeline decisions.
+The Friedman omnibus test rejects the null hypothesis that all English TRAIN systems share the same per-query MRR@5 distribution; consequently we present Holm-corrected pairwise Wilcoxon tests to identify which differences are statistically supported. Table~\ref{tab:formal-statistical-tests} shows the comparisons most relevant to pipeline decisions. Because of our staged pipeline, MRR@5 is the primary inferential target for reranking-stage comparisons, while Recall@100 is used for retrieval-stage comparisons.
 
 \begin{table*}[htbp]
     \centering
@@ -194,8 +203,35 @@ The Friedman omnibus test rejects the null hypothesis that all English TRAIN sys
     }
 \end{table*}
 
-These tests support two conclusions. First, the choice between \texttt{H513} and \texttt{H315} should be made on pipeline considerations such as Recall@100 and candidate quality, since their MRR@5 difference is not statistically significant. Second, the move from the retained hybrid retriever to Nemotron reranking is statistically significant and practically large. The small but significant difference between \texttt{N500} and \texttt{N1000} should instead be interpreted cautiously: its adjusted $p$-value is below 0.05, but the absolute MRR@5 gain is only about 0.0008.
+The inference supports two practical conclusions. First, H513 and H315 are indistinguishable on MRR@5; choose between them using retrieval-stage diagnostics (Recall@100) and operational constraints. Second, the Nemotron reranker produces a large and statistically supported gain over the retained hybrid baseline. The small difference between N500 and N1000 is statistically detectable after Holm correction but practically negligible in MRR@5, suggesting practitioners may prefer N500 when latency or cost is a concern.
 
+\subsubsection{Stage-specific tests}
+
+To align inference with pipeline objectives we repeat Holm-corrected pairwise tests on Recall@100 for retrieval-stage comparisons and on MRR@5 for reranking-stage comparisons. Table~\ref{tab:stage-specific-tests} summarizes the comparisons that most directly motivated our pipeline choices.
+
+\begin{table*}[htbp]
+    \centering
+    \footnotesize
+    \caption{Holm-corrected pairwise tests aligned with the pipeline objective. For retrieval-stage comparisons, $\Delta$ is the preferred hybrid minus the comparator on Recall@100. For reranking-stage comparisons, $\Delta$ is \texttt{N1000} minus the comparator on MRR@5.}
+    \label{tab:stage-specific-tests}
+    \resizebox{\textwidth}{!}{%
+    \begin{tabular}{l p{4.0cm} r r l}
+        \toprule
+        Stage & Comparison & $\Delta$ & $p_{\mathrm{holm}}$ & Conclusion \\
+        \midrule
+        Retrieval & \texttt{H513} vs \texttt{H315} & +0.0026 & 0.0007 & \texttt{H513} better on Recall@100 \\
+        Retrieval & \texttt{H513} vs \texttt{H414} & +0.0065 & 0.0027 & \texttt{H513} better on Recall@100 \\
+        Retrieval & \texttt{H513} vs \texttt{H424} & +0.0115 & $7.81\times10^{-9}$ & \texttt{H513} better on Recall@100 \\
+        Retrieval & \texttt{H513} vs \texttt{H514} & +0.0065 & 0.0027 & \texttt{H513} better on Recall@100 \\
+        \midrule
+        Reranking & \texttt{N1000} vs \texttt{H513} & +0.1451 & $<0.001$ & \texttt{N1000} better on MRR@5 \\
+        Reranking & \texttt{N1000} vs \texttt{N500} & +0.0008 & 0.0497 & detectable but negligible \\
+        \bottomrule
+    \end{tabular}%
+    }
+\end{table*}
+
+Together these tests support our pipeline choices. H513 is the best-supported hybrid candidate generator on Recall@100, and N1000 yields the largest early-precision gains on MRR@5. The incremental MRR@5 gain from N500 to N1000 is statistically detectable but practically tiny, which implies an operational trade-off between latency and marginal accuracy.
 
 \subsubsection{Rank-bucket and error analysis}
 
@@ -262,16 +298,17 @@ In Figure~\ref{fig:rank-buckets}, a visual representation of the distribution is
     \includegraphics[width=0.88\textwidth]{../figure/rank_bucket_distribution_inverted_runs.png}
     \caption{Visual representation of the rank bucket distribution for the retained hybrid and Nemotron runs on the EN TRAIN, DEV and TEST splits.}\label{fig:rank-buckets}
 \end{figure}
+
 \subsubsection{Error patterns and failure analysis}
 
-We manually inspected missing cases as a qualitative diagnostic. The following patterns are not mutually exclusive and should be interpreted as plausible failure modes rather than a measured taxonomy:
+Manual inspection of missing and low-ranked cases suggests several recurring failure modes (non‑exhaustive and overlapping):
 
 \begin{enumerate}
-    \item \textbf{Claim-to-metadata specificity mismatch:} Some claims mention specific findings, medical outcomes, or statistical results that are not present in the indexed title and abstract metadata. These cases are difficult for the first-stage retriever because the query emphasizes details unavailable in the indexed document representation.
+    \item \textbf{Claim-to-metadata specificity mismatch:} Claims that emphasize fine-grained experimental results, numeric outcomes, or methods not reflected in titles/abstracts are hard for the retriever to match.
 
-    \item \textbf{Translation artifacts in non-English queries:} In French and German runs, some translated queries contain domain-term shifts, awkward literal translations, or untranslated technical expressions. These artifacts can reduce lexical and semantic alignment with the English title--abstract corpus.
+    \item \textbf{Translation artifacts in non-English queries:} Literal or imperfect translations introduce term shifts that reduce lexical overlap and semantic alignment with the English corpus.
 
-    \item \textbf{Implicit references with little lexical overlap:} Some claims refer to a paper indirectly, using phrases such as ``this study'' or ``these papers'' without naming concrete findings, authors, institutions, or venues. In these cases, the social-media wording provides too little evidence for reliable candidate retrieval.
+    \item \textbf{Implicit references with little lexical overlap:} Queries phrased as vague or conversational references (``this study'') lack the lexical anchors that support retrieval, requiring stronger semantic modeling or additional context.
 \end{enumerate}
 
 \subsubsection{Performance by query characteristics}
@@ -285,3 +322,9 @@ The named-entity cue analysis is more consistent with the retrieval intuition. U
     \includegraphics[width=0.95\textwidth]{../figure/query_characteristics_mrr.png}
     \caption{Mean per-query MRR@5 for the \texttt{Nemotron Baseline} English TRAIN run grouped by query length and by a lightweight named-entity cue score. Error bars show normal-approximation 95\% confidence intervals over queries.}\label{fig:query-characteristics-mrr}
 \end{figure*}
+
+\subsection{Reproducibility and summary}
+
+The analysis scripts used for descriptive summaries and inference are in \texttt{code/py/}, and the per-metric CSV artifacts are under \texttt{results/statistics/}.\\
+
+In summary: combining descriptive summaries, stage-aligned formal inference, and rank-bucket diagnostics yields a coherent picture: H513 is the most defensible hybrid candidate generator on Recall@100, and Nemotron reranking (especially N1000) provides large, statistically supported gains in early precision (MRR@5). Remaining errors split between retrievable but low-ranked cases and true retrieval misses; addressing the latter requires improved candidate coverage or query reformulation.
