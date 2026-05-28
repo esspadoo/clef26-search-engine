@@ -87,7 +87,7 @@
 %% The abstract is a short summary of the work to be presented in the
 %% article.
   \begin{abstract}
-    We present the results of the RETRIX group for the CheckThat! Lab at CLEF 2026 Task 1 , whose goal is to identify the scientific paper implicitly referenced in a social media post. The input consists of short, noisy and usually informal posts that mention scientific findings without providing explicit links or citations. Our pipeline first translates non-English posts into English, then expands them using an embedding model and terms extracted from the top five documents ranked by similarity. After that it is applied a hybrid retrieval system that combines dense FAISS search with sparse lexical matching and ColBERT multi-vector scoring ($s = 0.5\,s_\text{dense} + 0.15\,s_\text{sparse} + 0.35\,s_\text{colbert}$). Finally, we perform neural reranking with a fine-tuned cross-encoder model.
+    We present the results of the RETRIX group for the CheckThat! Lab at CLEF 2026 Task 1, whose goal is to identify the scientific paper implicitly referenced in a social media post. The input consists of short, noisy and usually informal posts that mention scientific findings without providing explicit links or citations. Our pipeline first translates non-English posts into English, then expands them using an embedding model and terms extracted from the top five documents ranked by similarity. After that it is applied a hybrid retrieval system that combines dense FAISS search with sparse lexical matching and ColBERT multi-vector scoring. Finally, we perform neural reranking with a fine-tuned cross-encoder model.
   \end{abstract}
 
 %%
