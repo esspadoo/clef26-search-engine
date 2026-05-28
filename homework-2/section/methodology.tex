@@ -135,8 +135,13 @@ The largest weight is assigned to the dense score because it provides the main s
 
 \subsection{Reranking} \label{sub:reranking}
 \subsubsection{Cross-encoder scoring}
-Some rerankers have been tested: Qwen/Qwen3-Reranker-4B \cite{qwen3embedding}, Alibaba-NLP/gte-reranker-modernbert-base \cite{zhang2024mgte, li2023towards} and nvidia/llama-nemotron-rerank-1b-v2\cite{llama-nemotron-rerank-1b-v2}.
-
+Some rerankers have been tested:
+\begin{itemize}
+    \item Qwen/Qwen3-Reranker-4B \cite{qwen3embedding};
+    \item Alibaba-NLP/gte-reranker-modernbert-base \cite{zhang2024mgte, li2023towards};
+    \item nvidia/llama-nemotron-rerank-1b-v2\cite{llama-nemotron-rerank-1b-v2}.
+\end{itemize}
+ 
 From our findings, the strongest reranker is nvidia/llama-nemotron-rerank-1b-v2, a 1B-parameter LLaMA-based model fine-tuned as a sequence classifier. For each query-document pair, we build an input sequence using the official NVIDIA prompt template:
 \begin{promptbox}
     \small\ttfamily
