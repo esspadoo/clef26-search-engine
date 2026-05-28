@@ -11,11 +11,11 @@ An additional challenge is multilinguality: the official query sets include Engl
 
 Team RETRIX approaches this problem with a four-stage sequential pipeline.
 \begin{enumerate}
-    \item In a preliminary stage we translate to English all the queries written in French and German using the model \texttt{utter-project/EuroLLM-9B-Instruct-2512} \cite{utter_project_eurollm_9b_instruct_2512}, specifically funded by the EU for understanding and generating text in all European languages. This allows us to handle all queries the same way, independently of the original language and consequently of the semantic and structural differences.
+    \item In a preliminary stage we translate to English all the queries written in French and German using the model utter-project/EuroLLM-9B-Instruct-2512 \cite{utter_project_eurollm_9b_instruct_2512}. This allows us to handle all queries in the same way, independently of the original language and consequently of the semantic and structural differences.
 
-    \item Raw tweet-style queries are cleaned of emojis and symbols like "\#" and "@" and then enriched via pseudo-relevance feedback: \texttt{BAAI/bge-large-en-v1.5} \cite{bge-large-en-v1.5} encodes both queries and corpus documents into a shared embedding space, retrieves the top-5 semantically similar papers per query and extracts the most frequent terms from those papers as expansion tokens.
+    \item Raw tweet-style queries are cleaned of emojis and symbols like "\#" and "@" and then enriched via pseudo-relevance feedback: BAAI/bge-large-en-v1.5 \cite{bge-large-en-v1.5} encodes both queries and corpus documents into a shared embedding space, retrieves the top-5 semantically similar papers per query and extracts the most frequent terms from those papers as expansion tokens.
 
-    \item The expanded queries are fed into \texttt{BAAI/bge-m3} \cite{bge-m3} operating in hybrid mode, which combines dense inner-product search via FAISS \cite{faiss_documentation} with sparse lexical matching and ColBERT multi-vector scoring to produce an initial ranked list of candidates.
+    \item The expanded queries are fed into BAAI/bge-m3 \cite{bge-m3} operating in hybrid mode, which combines dense inner-product search via FAISS \cite{faiss_documentation} with sparse lexical matching and ColBERT multi-vector scoring to produce an initial ranked list of candidates.
 
     \item Finally, the top candidates are re-ranked by a neural cross-encoder, in our case nvidia/llama-nemotron-rerank-1b-v2 \cite{llama-nemotron-rerank-1b-v2}, fine-tuned on the English training dataset of the CLEF CheckThat! Task 1 2026 and all the queries' datasets of the 2025 CLEF CheckThat! SubTask 4b.
 \end{enumerate}
