@@ -213,7 +213,7 @@ The Friedman omnibus test rejects the null hypothesis that all English TRAIN sys
     }
 \end{table*}
 
-The inference supports two practical conclusions. First, H513 and H315 are indistinguishable on MRR@5; choose between them using retrieval-stage diagnostics (Recall@100) and operational constraints. Second, the Nemotron reranker produces a large and statistically supported gain over the retained hybrid baseline. The small difference between N500 and N1000 is statistically detectable after Holm correction but practically negligible in MRR@5, suggesting practitioners may prefer N500 when latency or cost is a concern.
+The inference supports two practical conclusions. First, H513 and H315 are indistinguishable on MRR@5: choose between them using retrieval-stage diagnostics (Recall@100) and operational constraints. Second, the Nemotron reranker produces a large and statistically supported gain over the retained hybrid baseline. The small difference between N500 and N1000 is statistically detectable after Holm correction but practically negligible in MRR@5, suggesting practitioners may prefer N500 when latency or cost is a concern.
 
 \subsubsection{Stage-specific tests}
 
@@ -245,7 +245,7 @@ Together these tests support our pipeline choices. H513 is the best-supported hy
 
 \subsubsection{Rank-bucket and error analysis}
 
-Table~\ref{tab:rank-bucket-analysis} reports the rank position of the gold document for the retained hybrid and reranked runs. The analysis separates three qualitatively different error types. A gold paper is counted as \textit{missing} only when its gold \texttt{pubkey} is absent from every document available in the ranked file for that query. Thus, for runs with retained deep candidate lists, missing cases indicate that the reranker cannot recover the document from its input pool. For runs available only as submitted top-100 lists, missing means absent from the available top-100 file, not necessarily absent from the original upstream retrieval pool. A gold paper appearing after rank 100 has been retrieved by the retained reranking pool but lies outside the Recall@100 cutoff. A gold paper appearing between ranks 6 and 100 is present in the candidate evidence but is ranked too low to satisfy the top-5 objective.
+Table~\ref{tab:rank-bucket-analysis} reports the rank position of the gold document for the retained hybrid and reranked runs. The analysis separates three qualitatively different error types. A gold paper is counted as \textit{missing} only when its gold \texttt{pubkey} is absent from every document available in the ranked file for that query. Thus, for runs with retained deep candidate lists, missing cases indicate that the reranker cannot recover the document from its input pool. For runs available only as submitted top-100 lists, missing means absent from the available top-100 file and not necessarily absent from the original upstream retrieval pool.
 
 \begin{table*}[htbp]
     \centering
@@ -255,9 +255,9 @@ Table~\ref{tab:rank-bucket-analysis} reports the rank position of the gold docum
     \resizebox{\textwidth}{!}{%
     \begin{tabular}{l l r r r r r r r}
         \toprule
-        Split & Family & Queries & Rank 1 & Ranks 2--5 & Ranks 6--10 & Ranks 11--100 & Rank $>100$ & Missing \\
+        Split & Run & Queries & Rank 1 & Ranks 2--5 & Ranks 6--10 & Ranks 11--100 & Rank $>100$ & Missing \\
         \midrule
-        EN TRAIN & Hybrid BGE-M3
+        EN TRAIN & H513 (topk100)
         & 14977
         & 7459 (49.8\%)
         & 2280 (15.2\%)
@@ -265,7 +265,7 @@ Table~\ref{tab:rank-bucket-analysis} reports the rank position of the gold docum
         & 2114 (14.1\%)
         & 0 (0.0\%)
         & 2409 (16.1\%) \\
-        EN TRAIN & Nemotron Baseline
+        EN TRAIN & N1000
         & 14977
         & 9697 (64.7\%)
         & 2057 (13.7\%)
@@ -273,7 +273,7 @@ Table~\ref{tab:rank-bucket-analysis} reports the rank position of the gold docum
         & 1291 (8.6\%)
         & 405 (2.7\%)
         & 929 (6.2\%) \\
-        EN DEV & Nemotron LoRA fine-tuned
+        EN DEV & N1000 FT
         & 3905
         & 2574 (65.9\%)
         & 538 (13.8\%)
@@ -281,7 +281,15 @@ Table~\ref{tab:rank-bucket-analysis} reports the rank position of the gold docum
         & 309 (7.9\%)
         & 99 (2.5\%)
         & 241 (6.2\%) \\
-        EN TEST & Nemotron LoRA fine-tuned
+        EN TEST & N100 FT
+        & 6076
+        & 3863 (63.6\%)
+        & 821 (13.5\%)
+        & 157 (2.6\%)
+        & 245 (4.0\%)
+        & 0 (0.0\%)
+        & 990 (16.3\%)\\
+        EN TEST & N2000 FT
         & 6076
         & 3950 (65.0\%)
         & 926 (15.2\%)
@@ -296,34 +304,29 @@ Table~\ref{tab:rank-bucket-analysis} reports the rank position of the gold docum
 
 The labeled English comparison shows that the main effect of reranking is to move correct papers to the very top of the list. The best reranked run on the TRAIN split places the gold paper at rank 1 for 9697 queries, compared with 7459 for the retained hybrid single-stage run. It also reduces missing cases from 2409 to 929. The remaining errors are informative: for Nemotron Baseline, 1291 queries have the gold paper in ranks 11--100, indicating ranking failures rather than retrieval failures, whereas 929 queries remain missing from the available reranking pool and therefore cannot be recovered by the reranker.
 
-The final English DEV and TEST runs follow the same pattern. Nemotron LoRA fine-tuned places the gold paper at rank 1 for 2574 of 3905 queries, and does so also for the TEST set with 3950 of 6076 queries. Their top-5 coverage is similar, with 3112 DEV queries and 4876 TEST queries resolved within the first five ranks. The DEV file contains 1000 ranked documents for each query, so the 99 cases in Rank $>100$ correspond to gold papers found by the retained reranking pool but not placed within the first 100 positions. The TEST file used to compute the metrics contains only the submitted top-100 documents per query; consequently, Rank $>100$ is zero by construction, and the 465 missing TEST cases should be interpreted as missing from the available submitted run rather than as evidence that the original upstream retrieval pool never retrieved the gold paper.
+The final English DEV and TEST runs follow the same pattern. Nemotron LoRA fine-tuned places the gold paper at rank 1 for 2574 of 3905 queries, and does so also for the TEST set with 3950 of 6076 queries. Their top-5 coverage is similar, with 3112 DEV queries and 4876 TEST queries resolved within the first five ranks. The DEV file contains 1000 ranked documents for each query, so the 99 cases in Rank $>100$ correspond to gold papers found by the retained reranking pool but not placed within the first 100 positions. Due to a problem at our main computer the TEST file used to compute the metrics contains only the submitted top-100 documents per query even though the calculation was performed with depth=2000. Consequently, Rank $>100$ is zero by construction and the 465 missing TEST cases should be interpreted as missing from the available submitted run rather than as evidence that the original upstream retrieval pool never retrieved the gold paper. The run N100 FT should help the reader to understand the improvement that the additional depth bring.
+
 
 Overall, the bucket analysis indicates that reranking substantially improves early precision while leaving two residual failure modes. The first consists of ranking failures, where the gold paper is present but remains below the top-5 cutoff. The second consists of missing cases, which are more severe because they cannot be repaired by reranking alone. These missing cases are likely associated with severe vocabulary mismatch, translation drift, or claims whose wording emphasizes entities and contextual cues that are weakly represented in titles and abstracts.
 
-Taken together, the Results section should be read as a labeled-split evaluation plus submission diagnostics rather than a complete official TEST effectiveness report. Our strongest conclusions are those directly supported by per-query gold labels and formal inference (paired Wilcoxon tests with Holm correction) on the TRAIN and DEV splits; where post-submission TEST gold labels were later obtained, those labeled TEST analyses are also used to support claims in this report. Results based solely on pre-label submission tables should be interpreted as tentative diagnostic evidence rather than definitive effectiveness claims.
+Taken together, the Results section should be read as a labeled-split evaluation plus submission diagnostics rather than a complete official TEST effectiveness report. Our strongest conclusions are those directly supported by per-query gold labels and formal inference (paired Wilcoxon tests with Holm correction) on the TRAIN and DEV splits. 
 
-In Figure~\ref{fig:rank-buckets}, a visual representation of the distribution is shown.
-\begin{figure}
-    \centering
-    \includegraphics[width=0.88\textwidth]{../figure/rank_bucket_distribution_inverted_runs.png}
-    \caption{Visual representation of the rank bucket distribution for the retained hybrid and Nemotron runs on the EN TRAIN, DEV and TEST splits.}\label{fig:rank-buckets}
-\end{figure}
 
 \subsubsection{Error patterns and failure analysis}
 
 Manual inspection of missing and low-ranked cases suggests several recurring failure modes (non‑exhaustive and overlapping):
 
 \begin{enumerate}
-    \item \textbf{Claim-to-metadata specificity mismatch:} Claims that emphasize fine-grained experimental results, numeric outcomes, or methods not reflected in titles/abstracts are hard for the retriever to match.
+    \item \textbf{Claim-to-metadata specificity mismatch:} claims that emphasize fine-grained experimental results, numeric outcomes, or methods not reflected in titles/abstracts are hard for the retriever to match.
 
-    \item \textbf{Translation artifacts in non-English queries:} Literal or imperfect translations introduce term shifts that reduce lexical overlap and semantic alignment with the English corpus.
+    \item \textbf{Translation artifacts in non-English queries:} literal or imperfect translations introduce term shifts that reduce lexical overlap and semantic alignment with the English corpus.
 
-    \item \textbf{Implicit references with little lexical overlap:} Queries phrased as vague or conversational references (``this study'') lack the lexical anchors that support retrieval, requiring stronger semantic modeling or additional context.
+    \item \textbf{Implicit references with little lexical overlap:} queries phrased as vague or conversational references ("this study") lack the lexical anchors that support retrieval, requiring stronger semantic modeling or additional context.
 \end{enumerate}
 
 \subsubsection{Performance by query characteristics}
 
-Figure~\ref{fig:query-characteristics-mrr} reports a query-level characterization of the Nemotron Baseline run on the English TRAIN split. Contrary to our initial intuition, token length alone is not positively associated with higher MRR@5 in this run: short queries with at most 20 tokens reach 0.760 MRR@5, medium-length queries reach 0.713, and long queries with at least 35 tokens reach 0.672. This suggests that longer tweet-like claims often add conversational or contextual material that does not necessarily help identify the target paper.
+Figure~\ref{fig:query-characteristics-mrr} reports a query-level characterization of the N1000 run on the English TRAIN split. Contrary to our initial intuition, token length alone is not positively associated with higher MRR@5. In this run, short queries with at most 20 tokens reach 0.760 MRR@5, medium-length queries reach 0.713, and long queries with at least 35 tokens reach 0.672. This suggests that longer tweet-like claims often add conversational or contextual material that does not necessarily help identify the target paper.
 
 The named-entity cue analysis is more consistent with the retrieval intuition. Using a lightweight heuristic based on author-like capitalization patterns, acronyms, and institution or venue keywords, entity-rich queries reach 0.733 MRR@5, while entity-sparse queries reach 0.664. These observations remain exploratory and should be interpreted as heuristic patterns rather than formal statistical findings, but they support the value of hybrid retrieval that combines lexical anchors with semantic matching.
 
@@ -334,7 +337,6 @@ The named-entity cue analysis is more consistent with the retrieval intuition. U
 \end{figure*}
 
 \subsection{Reproducibility and summary}
+In the repository \textit{https://bitbucket.org/upd-dei-stud-prj/seupd2526-retrix/src/master/} are stored almost all the runs (something exceeded the 100MB limit of the platform), scripts and programs used in the project.
 
-The analysis scripts used for descriptive summaries and inference are in \texttt{code/py/}, and the per-metric CSV artifacts are under \texttt{results/statistics/}.\\
-
-In summary: combining descriptive summaries, stage-aligned formal inference, and rank-bucket diagnostics yields a coherent picture: H513 is the most defensible hybrid candidate generator on Recall@100, and Nemotron reranking (especially N1000) provides large, statistically supported gains in early precision (MRR@5). Remaining errors split between retrievable but low-ranked cases and true retrieval misses; addressing the latter requires improved candidate coverage or query reformulation.
+In summary: combining descriptive summaries, stage-aligned formal inference, and rank-bucket diagnostics yields a coherent picture: H513 is the most defensible hybrid candidate generator on Recall@100, and Nemotron reranking (especially N1000) provides large, statistically supported gains in early precision (MRR@5). Remaining errors split between retrievable but low-ranked cases and true retrieval misses. Addressing the latter requires improved candidate coverage or query reformulation.
