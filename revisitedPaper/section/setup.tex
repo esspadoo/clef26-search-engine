@@ -5,7 +5,7 @@ All experiments were conducted on our own machines: four laptops (no dedicated G
 \subsection{Dataset}
 \label{sec:dataset}
 
-The dataset consisted of 10,000 scientific publications that had to be paired with tweet-like posts written in three languages: German, French and English. There are no explicit references such as URLs in any query. Instead, each tweet contains an implicit reference to a scientific paper, for example through mentions of authors or keywords related to the paper. The dataset files are all in JSON format. The scientific papers dataset contains the columns pubkey (unique identifier), title, abstract, venue/location and authors. The query datasets contain the columns index, pubkey (ID of the positive scientific paper that has to be matched with the query) and text.
+The dataset consisted of 10,000 scientific publications that had to be paired with tweet-like posts written in three languages: German, French and English. The queries contain no explicit references such as URLs. Instead, each tweet contains an implicit reference to a scientific paper, for example through mentions of authors or keywords related to the paper. The dataset files are all in JSON format. The scientific papers dataset contains the fields pubkey (unique identifier), title, abstract, venue/location and authors. The query datasets contain the columns index, pubkey (ID of the positive scientific paper that has to be matched with the query) and text.
 
 
 \begin{table}[htbp]
@@ -46,7 +46,7 @@ The dataset consisted of 10,000 scientific publications that had to be paired wi
 		\midrule
 
 		\multicolumn{3}{l}{\textbf{Overall Total}}
-		& \textbf{32409} & & \textbf{2} & \textbf{33} & \textbf{60} & \textbf{31.7} \\
+		& \textbf{32409} & & \textbf{2} & \textbf{33} & \textbf{60} & \textbf{31.6} \\
 
 		\bottomrule
 	\end{tabular}
@@ -54,7 +54,7 @@ The dataset consisted of 10,000 scientific publications that had to be paired wi
 	\vspace{2mm}
 \end{table}
 
-Figure \ref{fig:query_token_length_distribution} compares lengths distribution of tokens across train, dev and test datasets. All three datasets share similar distributions, with the same median value and similar length value peaks.
+Figure \ref{fig:query_token_length_distribution} compares the distribution of token lengths across train, dev and test datasets. All three datasets share similar distributions, with the same median value and similar length value peaks.
 \\
 \\
 \\

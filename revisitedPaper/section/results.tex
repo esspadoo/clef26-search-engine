@@ -8,6 +8,13 @@ summaries rather than inferential tests. They do not adjust for multiple compari
 
 Table~\ref{tab:main-results} reports representative runs spanning lexical tuning, hybrid retrieval and neural reranking. Values are rounded to three decimals. 
 
+
+\subsection{Runs comparison on the TRAIN English split}\label{sub:run-comparison}
+
+Hybrid variants differ only in the linear combination of dense, sparse and ColBERT-style BGE-M3 signals. Here we provide a more detailed quantitative comparison. We abbreviated bge\_m3\_hybrid\_315's system to H315 (same convention for other hybrid-retrieval systems), similar convention for Nemotron's systems (N), Qwen3-4B (Q) and gte-reranker-modernbert-base (GTE). 
+
+H424 is the weakest reported hybrid configuration, while H513 and H315 perform substantially better on early-precision metrics. H513 has an advantage in Recall@100 relative to H315, which motivates its selection as the candidate generator for the full pipeline: retrieval should prioritize coverage that the reranker can refine. Neural reranking (Nemotron) yields the largest improvements: moving from H513 to N1000 increases MRR@5 by roughly 0.145 and increases Recall@100 notably, showing that deeper reranking improves both precision and coverage. However, gains in MRR@5 beyond top-500 are marginal, suggesting diminishing returns for very deep pools.
+
 \begin{table*}[htbp]
     \centering
     \footnotesize
@@ -21,23 +28,18 @@ Table~\ref{tab:main-results} reports representative runs spanning lexical tuning
         stopword removal (stoplist\_ebscohost\_medline\_cinahl.txt), trim filter, removal of the \# symbol, no removal of @, accent normalization (ASCIIFoldingFilter), LowerCaseFilter, EnglishPossessiveFilter, KstemFilter, no use of WordDelimitedGraphFilter, searcher with OR boolean queries and BAAI/bge-large-en-v1.5 query expansion, no rerank.
         & 0.450 & 0.783 
         \\
-        Analyzer V2 & Differ from the Analyzer V1.12 simply for choosing a broader and more comprehensive stoplist (stoplist\_en\_ranksnl\_large.txt). & 0.503 & 0.796
+        Analyzer V2 & Differs from the Analyzer V1.12 simply for choosing a broader and more comprehensive stoplist (stoplist\_en\_ranksnl\_large.txt). & 0.503 & 0.796
         \\
         bge\_m3\_hybrid\_315 & BGE-M3 hybrid retrieval with dense, sparse, and ColBERT weights of $0.35$, $0.15$, and $0.50$. & 0.557 & 0.837 \\
         bge\_m3\_hybrid\_513 & BGE-M3 hybrid retrieval with dense, sparse, and ColBERT weights of $0.50$, $0.15$, and $0.35$. & 0.557 & 0.839 \\
         Nemotron top-100 & bge\_m3\_hybrid\_513 candidates reranked with nvidia/llama-nemotron-rerank-1b-v2 with depth k=100. & 0.685 & 0.839 \\
-        Nemotron top-1000 & bge\_m3\_hybrid\_513 candidates reranked with nvidia/llama-nemotron-rerank-1b-v2 with depth k=1000. & 0.702 & 0.911 \\
-        Qwen3-4B top-100 & bge\_m3\_hybrid\_513 candidates reranked with Qwen/Qwen3-reranker-4B with depth k=100. & 0.662 & 0.839 \\
-        GTE-ModernBERT top-100 & bge\_m3\_hybrid\_513 candidates reranked with Alibaba-NLP/gte-reranker-modernbert-base with depth k=100. & 0.652 & 0.852 \\
+        \textbf{Nemotron top-1000} & \textbf{bge\_m3\_hybrid\_513 candidates reranked with nvidia/llama-nemotron-rerank-1b-v2 with depth k=1000.} & \textbf{0.702} & \textbf{0.911} \\
+        Qwen3-4B top-100 & bge\_m3\_hybrid\_513 candidates reranked with Qwen/Qwen3-Reranker-4B with depth k=100. & 0.662 & 0.839 \\
+        GTE-ModernBERT top-100 & bge\_m3\_hybrid\_513 candidates reranked with Alibaba-NLP/gte-reranker-modernbert-base with depth k=100. & 0.652 & 0.839 \\
         \bottomrule
     \end{tabular}%
     }
 \end{table*}
-
-
-\subsection{Runs comparison on the TRAIN English split}\label{sub:run-comparison}
-
-Hybrid variants differ only in the linear combination of dense, sparse and ColBERT-style BGE-M3 signals. Here we provide a fuller representation more metrics-driven. We have abbreviated bge\_m3\_hybrid\_315's system to H315 (same convention for other hybrid-retrieval system), similar convention for Nemotron's systems (N), Qwen3-4B (Q) and gte-reranker-modernbert-base (GTE). 
 
 \begin{table*}[htbp]
     \centering
@@ -63,12 +65,14 @@ Hybrid variants differ only in the linear combination of dense, sparse and ColBE
     }
 \end{table*}
 
-H424 is the weakest reported hybrid configuration while H513 and H315 perform substantially better on early-precision metrics. H513 has an advantage in Recall@100 relative to H315, which motivates its selection as the candidate generator for the full pipeline: retrieval should prioritize coverage that the reranker can refine. Neural reranking (Nemotron) yields the largest improvements: moving from H513 to N1000 increases MRR@5 by roughly 0.145 and increases Recall@100 notably, showing that deeper reranking improves both precision and coverage. However, gains in MRR@5 beyond top-500 are marginal, suggesting diminishing returns for very deep pools.
-
 
 \subsection{Multilingual DEV split validation}\label{sub:multilingual-dev}
 
 DEV runs were not used to re-tune the TRAIN analysis pipelines. They are presented as external validation with appropriately wider uncertainty bands.
+
+The development results suggest that the final pipeline generalizes reasonably well across languages after translation, but not uniformly. French achieved the highest scores with MRR@5 of 0.7599 and Recall@100 of 0.9288. German is the weakest with MRR@5 of 0.6736 and the widest confidence interval.
+Rank-bucket counts corroborate these summaries: French has the largest fraction of rank-1 successes and the fewest missing cases (496/40), while German shows fewer rank-1 hits and a higher unresolved fraction relative to its query count (237/29).
+In practice, this pattern suggests that the reranker generalizes well to translated queries in French, that English remains competitive and that German's lower point estimates and wider intervals are plausibly driven by both smaller sample size and translation/terminology drift. These DEV findings validate the pipeline qualitatively and motivate the decision to use a deeper top-2000 pool in the final TEST submission to favor recall.
 
 \begin{table*}[htbp]
     \centering
@@ -87,17 +91,15 @@ DEV runs were not used to re-tune the TRAIN analysis pipelines. They are present
     }
 \end{table*}
 
-The development results suggest that the final pipeline generalizes reasonably well across languages after translation but not uniformly. French is the strongest development split with MRR@5 of 0.7599 and Recall@100 of 0.9288. German is the weakest with MRR@5 of 0.6736 and the widest confidence interval.
-Rank-bucket counts corroborate these summaries: French has the largest fraction of rank-1 successes and the fewest missing cases (496/40), while German shows fewer rank-1 hits and a higher unresolved fraction relative to its query count (237/29).
-In practice this pattern suggests that the reranker generalizes well to translated queries in French, English remains competitive and that German's lower point estimates and wider intervals are plausibly driven by both smaller sample size and translation/terminology drift. These DEV findings validate the pipeline qualitatively and motivated the decision to use a deeper top-2000 pool in the final TEST submission to favour recall.
 
-\subsection{Experimental Results on the TEST Set}
-As can be seen in Table \ref{tab:TEST-run-comparison}, all the previous ideas and assumptions have been confirmed in the TEST set. Increasing the depth of the reranking, managing metadata such as authors, fine-tuning, and selecting the reranker led to results that allowed us to finish fifth in the rankings, despite having limited hardware. Qwen/Qwen3-Reranker-4B seems to have difficulties to correctly interpret additional information such as authors and this may be due to its nature as an LLM-based reranker, whereas other cross-encoders perform better.
+\subsection{Experimental results on the TEST set}
+Table \ref{tab:TEST-run-comparison} shows that all the previous ideas and assumptions have been confirmed in the TEST set. Increasing the depth of the reranking, managing metadata such as authors, fine-tuning, and selecting the reranker led to results that allowed us to finish fifth in the rankings, despite limited computational resources. 
+Qwen/Qwen3-Reranker-4B appears to have difficulty interpreting additional information such as authors correctly. This may be due to its nature as an LLM-based reranker, whereas other cross-encoders perform better.
 
 \begin{table*}[htbp]
     \centering
     \footnotesize
-    \caption{Runs comparison on the final\_en\_test.json set. They are all based on  bi513\_encoder\_results\_bge\_large\_topk1000 to be more explicative, FT stands for fine-tuned.}\label{tab:TEST-run-comparison}
+    \caption{Runs comparison on the final\_en\_test.json set, FT stands for fine-tuned. All the topk100 runs are based on  bi513\_encoder\_results\_bge\_large\_topk1000, while the topk2000 is based on bi513\_encoder\_results\_bge\_large\_topk2000.}\label{tab:TEST-run-comparison}
     \resizebox{\textwidth}{!}{%
     \begin{tabular}{l r r r r r r}
         \toprule
@@ -120,7 +122,7 @@ As can be seen in Table \ref{tab:TEST-run-comparison}, all the previous ideas an
 
 \subsubsection{Official TEST set submission}\label{sub:test-results}
 
-The submitted systems use the same four-stage pipeline described in Section~\ref{sec:methodology}: translate non-English queries into English, expand the query, retrieve candidates with BGE-M3 hybrid retrieval and rerank with the fine-tuned Nemotron LoRA cross-encoder.
+Table~\ref{tab:test-effectiveness} reports micro-averaged metrics per language. TEST metrics confirm the DEV pattern: French shows the highest aggregate MRR@5, English is competitive, and German shows lower scores and larger uncertainty. For the TEST submission we used a deeper reranking pool (top-2000) to favor recall for the final delivered runs. DEV experiments indicated modest but consistent recall gains when increasing the pool depth, so we opted for a deeper pool in TEST to maximize coverage of the gold document.
 
 \begin{table}[htbp]
     \centering
@@ -138,46 +140,14 @@ The submitted systems use the same four-stage pipeline described in Section~\ref
     \end{tabular}
 \end{table}
 
-Table~\ref{tab:test-effectiveness} reports micro-averaged metrics per language. TEST metrics confirm the DEV pattern: French shows the highest aggregate MRR@5, English is competitive, and German shows lower scores and larger uncertainty. For the TEST submission we used a deeper reranking pool (top-2000) to favor recall for the final delivered runs. DEV experiments indicated modest but consistent recall gains when increasing the pool depth, so we opted for a deeper pool in TEST to maximize coverage of the gold document.
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 \subsection{Statistical analysis}\label{sub:statistical-analysis}
 
-Descriptive confidence intervals (Figure~\ref{fig:mrr-mean-ci}) summarize uncertainty around mean per-query scores but do not by themselves imply statistical significance and do not correct for multiple comparisons. For inference we follow a stage-aligned strategy: test retrieval-stage decisions on Recall@100 (coverage), and test reranking-stage decisions on MRR@5 (early precision). Because per-query metrics are bounded and strongly non-normal, we use the non-parametric Friedman repeated-measures test as the omnibus alternative to a repeated-measures ANOVA, followed by pairwise Wilcoxon signed-rank tests with Holm correction~\cite{Friedman1937,Wilcoxon1945}.
+Descriptive confidence intervals (Figure~\ref{fig:mrr-mean-ci}) summarize uncertainty around mean per-query scores but do not by themselves imply statistical significance and do not correct for multiple comparisons. For inference, we follow a stage-aligned strategy: test retrieval-stage decisions on Recall@100 (coverage), and test reranking-stage decisions on MRR@5 (early precision). Because per-query metrics are bounded and strongly non-normal, we use the non-parametric Friedman repeated-measures test as the omnibus alternative to a repeated-measures ANOVA, followed by pairwise Wilcoxon signed-rank tests with Holm correction~\cite{Friedman1937,Wilcoxon1945}.
 
 \subsubsection{Descriptive statistics}
 
-As shown below, reranking shifts the entire distribution: the median increases from 0.5 (H513) to 1.0 for Nemotron runs and the first quartile rises from 0.0 to 0.25, indicating that a substantially larger fraction of queries receive a non-zero early-precision score after reranking.
+As shown below, reranking shifts the entire distribution: the median increases from 0.5 (H513) to 1.0 for Nemotron runs, and the first quartile rises from 0.0 to 0.25, indicating that a substantially larger fraction of queries receive a non-zero early-precision score after reranking.
 
 \begin{table*}[htbp]
     \centering
@@ -292,12 +262,12 @@ Table~\ref{tab:rank-bucket-analysis} reports the rank position of the gold docum
     }
 \end{table*}
 
-Overall, reranking substantially improves early precision while leaving two residual failure modes: ranking failures, where the gold paper is present but below the top-5 cutoff and missing cases, which cannot be repaired by reranking alone and are likely associated with severe vocabulary mismatch, translation drift or claims whose wording emphasizes entities weakly represented in titles and abstracts. 
+Overall, reranking substantially improves early precision while leaving two residual failure modes: ranking failures, where the gold paper is present but below the top-5 cutoff, and missing cases, which cannot be repaired by reranking alone and are likely associated with severe vocabulary mismatch, translation drift or claims whose wording emphasizes entities weakly represented in titles and abstracts. 
 
 
 \subsubsection{Performance by query characteristics}
 
-Analyzing the N1000 run on the English TRAIN split by query length and by a lightweight named-entity heuristic (capitalization patterns, acronyms, institution/venue keywords) had been found that contrary to intuition, longer queries do not perform better. Short queries ($\leq$20 tokens) reach 0.760 MRR@5, medium-length queries 0.713 and long queries ($\geq$35 tokens) 0.672, likely because longer tweet-like claims add conversational material that does not aid retrieval. Entity-rich queries reach 0.733 MRR@5 versus 0.664 for entity-sparse queries, consistent with the value of combining lexical anchors with semantic matching. These patterns are exploratory heuristics rather than formal statistical findings.
+Analyzing the N1000 run on the English TRAIN split by query length and by a lightweight named-entity heuristic (capitalization patterns, acronyms, institution/venue keywords), we found that, contrary to intuition, longer queries do not perform better. Short queries ($\leq$20 tokens) reach 0.760 MRR@5, medium-length queries 0.713 and long queries ($\geq$35 tokens) 0.672, likely because longer tweet-like claims add conversational material that does not aid retrieval. Entity-rich queries reach 0.733 MRR@5 versus 0.664 for entity-sparse queries, consistent with the value of combining lexical anchors with semantic matching. These patterns are exploratory heuristics rather than formal statistical findings.
 
 \subsection{Reproducibility}
-In the repository \textit{https://bitbucket.org/upd-dei-stud-prj/seupd2526-retrix/src/master/} are stored almost all the runs (something exceeded the 100MB limit of the platform), scripts and programs used in the project.
+In the repository \textit{https://bitbucket.org/upd-dei-stud-prj/seupd2526-retrix/src/master/} are stored almost all the runs, scripts, and programs used in the project (something exceeded the 100MB limit of the platform).

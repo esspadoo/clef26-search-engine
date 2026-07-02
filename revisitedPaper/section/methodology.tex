@@ -1,7 +1,7 @@
 \section{Methodology}
 \label{sec:methodology}
 
-We started from a lexical baseline based on Apache Lucene BM25 and progressively moved to a multi-stage neural pipeline.
+We started with a lexical baseline based on Apache Lucene BM25 and progressively moved to a multi-stage neural pipeline.
 \newline
 The final pipeline (Figure~\ref{fig:pipeline}) for the proposed information retrieval system consists of four stages:
 \begin{itemize}
@@ -19,7 +19,7 @@ The final pipeline (Figure~\ref{fig:pipeline}) for the proposed information retr
 \end{figure}
 
 \subsection{Query translation} \label{sub:querytransl}
-In the preliminary stage of our pipeline, non-English queries (French and German) are translated into English. This is done query by query using the model utter-project/EuroLLM-9B-Instruct-2512 with the following prompt:
+In the preliminary stage of our pipeline, non-English queries (French and German) are translated into English. This is performed on a query-by-query basis using the model utter-project/EuroLLM-9B-Instruct-2512 with the following prompt:
 
 \begin{promptbox}
     \small
@@ -39,20 +39,20 @@ In the preliminary stage of our pipeline, non-English queries (French and German
 
 The resulting English queries are then fed into the following step of our pipeline.
 
-\subsection{Query Expansion} \label{sub:query-expansion}
+\subsection{Query expansion} \label{sub:query-expansion}
 
-Following the translation stage, each query is processed by a deterministic query-expansion module designed to reduce query–document vocabulary mismatch between short user claims and the terminology used in the scientific corpus. The module does not rely on generative LLM-based paraphrasing. Instead, it combines lexical feature extraction with dense semantic retrieval and neighbourhood-based term induction. 
+Following the translation stage, each query is processed by a deterministic query-expansion module designed to reduce query–document vocabulary mismatch between short user claims and the terminology used in the scientific corpus. The module does not rely on generative LLM-based paraphrasing. Instead, it combines lexical feature extraction with dense semantic retrieval and neighborhood-based term induction. 
 
 \begin{itemize}
-    \item The translated English query is first analyzed with spaCy’s en\_core\_web\_sm pipeline, which provides token-level linguistic annotations, including stop-word indicators and coarse-grained part-of-speech labels from the Universal POS tag set. Candidate lexical anchors are then identified by retaining tokens tagged as NOUN or PROPN while excluding stop words and tokens shorter than three characters. The resulting set is deduplicated to produce a compact lexical signature that captures the principal nominal content of the query.
+    \item The translated English query is first analyzed with spaCy’s en\_core\_web\_sm pipeline, which provides token-level linguistic annotations, including stop-word indicators and coarse-grained part-of-speech labels from the Universal POS tag set. Candidate lexical anchors are then identified by retaining tokens tagged as NOUN or PROPN while excluding stop words and tokens shorter than three characters. The resulting set is de-duplicated to produce a compact lexical signature that captures the principal nominal content of the query.
 
     \item The semantic expansion stage operates over a corpus in which each document is represented as the concatenation of its title and abstract. These title–abstract pairs are embedded with BAAI/bge-large-en-v1.5. In accordance with the documented BGE retrieval interface \cite{bge-large-en-v1.5}, query embeddings are produced by prepending the instruction "\emph{Represent this sentence for searching relevant passages:}" to the translated query, whereas the corpus documents are encoded as retrieval targets. Similarity is then computed on normalized embeddings using the dot product.
-    The five highest-scoring documents are retained as the local semantic neighbourhood used for expansion.
+    The five highest-scoring documents are retained as the local semantic neighborhood used for expansion.
 
-    In the described implementation, candidate expansion terms are extracted from the retrieved documents after lowercasing, ASCII normalization, mention's and hashtag's symbols removal, stop-word filtering and exclusion of short tokens (tokens $\le$ 2 characters long are discarded). The candidate pool is aggregated across the retrieved neighborhood and assigned weights derived from the semantic similarity of the source documents so that terms originating from more similar neighbors contribute more strongly. Terms already present in the query are removed and the fifteen highest-ranking candidates are retained as explicit expansion terms.
+    In the described implementation, candidate expansion terms are extracted from the retrieved documents after lower-casing, ASCII normalization, removal of mention and hashtag symbols, stop-word filtering and exclusion of short tokens (tokens $\le$ 2 characters long are discarded). The candidate pool is aggregated across the retrieved neighborhood and assigned weights derived from the semantic similarity of the source documents so that terms originating from more similar neighbors contribute more strongly. Terms already present in the query are removed and the fifteen highest-ranking candidates are retained as explicit expansion terms.
 \end{itemize}
 
-The final expanded query is constructed by concatenating three components: the cleaned (already translated) query, the noun and proper-noun-based keyword set extracted directly from the query and the expansion terms induced from the retrieved document neighbourhood.
+The final expanded query is constructed by concatenating three components: the cleaned (already translated) query, the noun and proper-noun-based keyword set extracted directly from the query and the expansion terms induced from the retrieved document neighborhood.
 This output expanded query is then used by the downstream retrieval pipeline.
 
 \subsection{Retrieval} \label{sub:retrieval}
@@ -84,7 +84,7 @@ where $q_i$ and $d_j$ are the $i$-th and $j$-th ColBERT-style token-level vector
 
 The final configuration was selected through a series of development runs. We first tuned the lexical baseline by varying the Lucene analyzer, stop-word lists, stemming strategy, and BM25 searcher variants. These experiments improved the classical baseline but also highlighted its limitations for this task: even with query expansion and reranking, BM25-based candidate generation remained more dependent on surface-level lexical overlap than desired.
 
-The best results in our analysis were obtained with a simpler configuration in which BGE-M3 hybrid retrieval used the same expanded query, described in the previous section, for all three retrieval modes. We then tested several weighting configurations. Among them, the run labeled bge\_m3\_hybrid\_513 was retained because it provided the strongest recall-oriented trade-off among the retrievers evaluated without reranking. This configuration used weights of $0.5$, $0.15$, and $0.35$ for dense, sparse, and ColBERT scoring, respectively, with a multiplier of $3$ and a maximum hybrid input length of $384$ tokens.
+The best results in our analysis were obtained with a configuration in which BGE-M3 hybrid retrieval used the same expanded query, described in the previous section, for all three retrieval modes. We then tested several weighting configurations. Among them, the run labeled bge\_m3\_hybrid\_513 was retained because it provided the strongest recall-oriented trade-off among the retrievers evaluated without reranking. This configuration used weights of $0.5$, $0.15$, and $0.35$ for dense, sparse, and ColBERT scoring, respectively, with a multiplier of $3$ and a maximum hybrid input length of $384$ tokens.
 
 A closely related configuration with a larger ColBERT weight achieved a nearly identical MRR@5 but a lower Recall@100. We therefore preferred the configuration that better matched the role of retrieval as a candidate generator. In addition, increasing the reranked candidate depth from a few hundred documents to between $1000$ and $2500$ documents increased the final recall by giving the neural reranker a larger candidate pool.
 
@@ -102,32 +102,32 @@ The largest weight is assigned to the dense score because it provides the main s
 
 \subsection{Reranking} \label{sub:reranking}
 \subsubsection{Cross-encoder scoring}
-Some rerankers have been tested:
+We experimented with several rerankers:
 \begin{itemize}
     \item Qwen/Qwen3-Reranker-4B \cite{qwen3embedding};
     \item Alibaba-NLP/gte-reranker-modernbert-base \cite{zhang2024mgte, li2023towards};
-    \item nvidia/llama-nemotron-rerank-1b-v2\cite{llama-nemotron-rerank-1b-v2}.
+    \item nvidia/llama-nemotron-rerank-1b-v2 \cite{llama-nemotron-rerank-1b-v2}.
 \end{itemize}
  
-From our findings, the strongest reranker is nvidia/llama-nemotron-rerank-1b-v2, a 1B-parameter LLaMA-based model fine-tuned as a sequence classifier. For each query-document pair, we build an input sequence using the official NVIDIA prompt template:
+From our findings, the strongest reranker among those three is nvidia/llama-nemotron-rerank-1b-v2, a 1B-parameter LLaMA-based model fine-tuned as a sequence classifier. For each query-document pair, we build an input sequence using the official NVIDIA prompt template:
 \begin{promptbox}
     \small\ttfamily
     question:\{query\} \textbackslash n \textbackslash n passage:\{passage\}
 \end{promptbox}
 
-Reranking deeper candidate pools (500-2500 documents) consistently produced better final results than shallower pools, confirming the importance of high recall at the retrieval stage to compensate for miss-labeling from weaker previous retrieval-stages and the reranker's ability to distinguish noise from documents that are actually relevant. 
+Reranking deeper candidate pools (500-2500 documents) consistently produced better final results than shallower pools, confirming the importance of high recall at the retrieval stage to compensate for mislabeling from weaker previous retrieval-stages and the reranker's ability to distinguish noise from documents that are actually relevant. 
 
-At this stage, queries are evaluated against the corpus of the documents taking into account the title, abstract and author of the documents.
+At this stage, queries are evaluated against the document corpus, taking into account the title, abstract and author of the documents.
 
-\subsection{Fine-tuning the Reranker} \label{sub:finetuning}
+\subsection{Fine-tuning the reranker} \label{sub:finetuning}
 To improve the Nemotron reranker on the domain-specific characteristics of the CheckThat! task, we fine-tuned nvidia/llama-nemotron-rerank-1b-v2 using Parameter-Efficient Fine-Tuning (PEFT) with Low-Rank Adaptation (LoRA) on data from both the 2025 and 2026 editions of the task.
 
 \subsubsection{Training data and hard-negative mining}
-Training examples are query-document pairs with binary labels: a positive document is the gold source paper associated with the query while negative documents are hard negatives mined using sentence-transformers/static-retrieval-mrl-en-v1 \cite{static-retrieval-mrl-en-v1, reimers-2019-sentence-bert, kusupati2024matryoshka}. Hard negatives are selected from the range $[5, 50]$ nearest neighbors (by embedding similarity) that satisfy $\text{score} \leq 0.85$ and lie at least $0.05$ below the positive score in cosine similarity (absolute margin) preventing trivially easy or falsely relevant negatives from polluting training that would under-mine the effectiveness of the fine-tuning.
+Training examples are query-document pairs with binary labels: a positive document is the gold source paper associated with the query, while negative documents are hard negatives mined using sentence-transformers/static-retrieval-mrl-en-v1 \cite{static-retrieval-mrl-en-v1, reimers-2019-sentence-bert, kusupati2024matryoshka}. Hard negatives are selected from the range $[5, 50]$ nearest neighbors (by embedding similarity) that satisfy $\text{score} \leq 0.85$ and lie at least $0.05$ below the positive score in cosine similarity (absolute margin) preventing trivially easy or falsely relevant negatives from degrading the effectiveness of fine-tuning.
 
 Training data combines two years of the task:
 \begin{itemize}
-    \item en\_train.json of the CheckThat! Lab CLEF 2026: split 90\% training / 10\% development. The development set is drawn exclusively from 2026 data for consistency with the official CT26 Task~1 evaluation protocol. Due to time-constraints and resource-constraints we used just the en\_train.json dataset but we suppose that also German and French translated queries datasets could improve the quality of the fine-tuning;
+    \item en\_train.json of the CheckThat! Lab CLEF 2026: split 90\% training / 10\% development. The development set is drawn exclusively from 2026 data for consistency with the official CT26 Task~1 evaluation protocol. Due to time and resource constraints, we used just the en\_train.json dataset but we hypothesize that also German and French translated queries datasets could further improve the quality of fine-tuning;
     \item All the datasets of task4/subtask\_4b, CheckThat! Lab CLEF 2025: all available topics (dev, test\_gold and train splits) are used entirely for training.
     
 \end{itemize}
@@ -150,10 +150,10 @@ positive ($y=1$) and negative ($y=0$) pairs in each batch:
 where $B$ is the effective batch size and $\sigma$ is the sigmoid function. Gradient accumulation over 4 steps is used to simulate a larger effective batch size of 32 without additional memory overhead.
 
 \subsubsection{Optimization}
-The model is trained with AdamW, a learning rate of $2 \times 10^{-5}$, a linear warmup over 10\% of the total training steps and gradient clipping at norm 1.0. Training runs for 3 epochs with bfloat16 mixed precision and gradient checkpointing enabled to reduce VRAM usage. The checkpoint with the best MRR@5 on the 2026 development set is retained.
+The model had been trained with AdamW, a learning rate of $2 \times 10^{-5}$, a linear warm-up over 10\% of the total training steps and gradient clipping at norm 1.0. Training runs for 3 epochs with bfloat16 mixed precision and gradient checkpointing enabled to reduce VRAM usage. The checkpoint with the best MRR@5 on the 2026 development set is retained.
 
 \subsubsection{Inference}
-At inference time, the LoRA adapter weights are merged into the base model via merge\_and\_unload() before scoring, so no PEFT overhead is incurred during evaluation. The scoring procedure and prompt format are identical to those of the base reranker (Section~\ref{sub:reranking}) and the fine-tuned model is used as a drop-in replacement in the reranking stage.
+At inference time, the LoRA adapter weights are merged into the base model via merge\_and\_unload() before scoring, so no PEFT overhead is incurred during evaluation. The scoring procedure and prompt format are identical to those of the base reranker (Section~\ref{sub:reranking}), and the fine-tuned model is used as a drop-in replacement in the reranking stage.
 
 \subsection{Evaluation}
-We evaluate systems on the CheckThat! Task 1 query sets by matching retrieved pubkeys against the gold pubkey for each query. The official evaluation metric for the task is MRR@5. We also tracked Recall@100 to monitor candidate-generation quality and to verify that reranking gains do not come from overly aggressive filtering.
+We evaluated systems on the CheckThat! Task 1 query sets by matching retrieved pubkeys against the gold pubkey for each query. The official evaluation metric for the task is MRR@5. We also tracked Recall@100 to monitor candidate-generation quality and to verify that reranking gains do not come from overly aggressive filtering.
